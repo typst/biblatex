@@ -1,0 +1,489 @@
+use crate::parse::Value;
+extern crate inflector;
+use inflector::Inflector;
+
+#[derive(Debug)]
+pub struct Person {
+    pub given_name: String,
+    pub name: String,
+    pub prefix: String,
+    pub suffix: String,
+}
+
+impl Person {
+    fn new(source: Vec<Value>) -> Self {
+        let num_commas: usize = source
+            .iter()
+            .map(|val| {
+                if let Value::Normal(s) = val {
+                    s.matches(',').count()
+                } else {
+                    0
+                }
+            })
+            .sum();
+
+        match num_commas {
+            0 => Person::from_unified(source),
+            1 => {
+                let (v1, v2) = split_at_normal_char(source, ',', true);
+
+                Person::from_single_comma(v1, v2)
+            }
+            _ => {
+                let (v1, v2) = split_at_normal_char(source, ',', true);
+                let (v2, v3) = split_at_normal_char(v2, ',', true);
+
+                Person::from_two_commas(v1, v2, v3)
+            }
+        }
+    }
+
+    fn from_unified(source: Vec<Value>) -> Self {
+        // Find end of first sequence of capitalized words (denominated by first
+        // lowercase word), start of last capitalized seqence.
+        // If there is no subsequent capitalized word, take last one.
+        // Treat verbatim as capital letters
+
+        let iter = ValueCharIter::new(&source);
+        let mut word_start = true;
+        let mut capital = false;
+        let mut seen_lowercase = false;
+        let mut seen_uppercase = false;
+        let mut seen_uppercase2 = false;
+        let mut cap_new_start = 0;
+        let mut cap_word_end = 0;
+        let mut last_word_start = 0;
+        let mut last_lowercase_start = 0;
+        for (index, (c, v)) in iter.clone().enumerate() {
+            if c.is_whitespace() && !v {
+                word_start = true;
+                continue;
+            }
+
+            if word_start {
+                last_word_start = index;
+                capital = if v || c.is_uppercase() {
+                    seen_uppercase = true;
+                    if seen_lowercase && last_lowercase_start >= cap_new_start {
+                        seen_uppercase2 = true;
+                        cap_new_start = index;
+                    }
+                    true
+                } else {
+                    last_lowercase_start = index;
+                    seen_lowercase = true;
+                    false
+                };
+            }
+
+            if capital && !seen_lowercase {
+                cap_word_end = index;
+            }
+
+            word_start = false;
+        }
+
+        let mut name = String::new();
+        let mut given_name = String::new();
+        let mut prefix = String::new();
+
+        for (index, (c, _)) in iter.clone().enumerate() {
+            if (index <= cap_word_end && seen_lowercase && seen_uppercase && !(index == 0 && c.is_lowercase())) || (index < last_word_start && !seen_lowercase) {
+                given_name.push(c);
+            } else if (index < cap_new_start && cap_new_start > cap_word_end) || (index < last_word_start && (!seen_uppercase2 || (last_word_start == last_lowercase_start && index < cap_new_start))) {
+                prefix.push(c);
+            } else {
+                name.push(c);
+            }
+        }
+
+        Person {
+            name: name.trim_start().to_string(),
+            given_name: given_name.trim_end().to_string(),
+            prefix: prefix.trim().to_string(),
+            suffix: String::new(),
+        }
+    }
+
+    fn from_single_comma(s1: Vec<Value>, s2: Vec<Value>) -> Self {
+        if s2.is_empty() || (s2.len() == 1 && format_verbatim(&s2).is_empty()) {
+            let formatted = format_verbatim(&s1);
+            let last_space = formatted.rfind(" ").unwrap_or(0);
+            let (prefix, last) = formatted.split_at(last_space);
+            return Person {
+                given_name: String::new(),
+                name: last.trim_start().to_string(),
+                prefix: prefix.trim_end().to_string(),
+                suffix: String::new(),
+            };
+        }
+
+        let given_name = format_verbatim(&s2);
+
+        let mut word_start = true;
+        let mut last_lower_case_end: i32 = -1;
+        let mut is_lowercase = false;
+        let mut last_word_start = 0;
+        let mut has_seen_uppercase_words = false;
+        let iter = ValueCharIter::new(&s1);
+        for (index, (c, v)) in iter.clone().enumerate() {
+            if c.is_whitespace() && !v {
+                word_start = true;
+                continue;
+            }
+
+            if word_start {
+                last_word_start = index;
+
+                if c.is_lowercase() {
+                    is_lowercase = true;
+                } else {
+                    is_lowercase = false;
+                    has_seen_uppercase_words = true;
+                }
+            }
+
+            if is_lowercase {
+                last_lower_case_end = index as i32;
+            }
+
+            word_start = false;
+        }
+
+        let mut name = String::new();
+        let mut prefix = String::new();
+        for (index, (c, _)) in iter.enumerate() {
+            if (index as i32 <= last_lower_case_end && has_seen_uppercase_words) || (!has_seen_uppercase_words && index < last_word_start) {
+                prefix.push(c);
+            } else if has_seen_uppercase_words || (!has_seen_uppercase_words && index >= last_word_start) {
+                name.push(c);
+            }
+        }
+
+        Person {
+            name: name.trim_start().to_string(),
+            given_name: given_name.trim_start().to_string(),
+            prefix: prefix.trim_end().to_string(),
+            suffix: String::new(),
+        }
+    }
+
+    fn from_two_commas(s1: Vec<Value>, s2: Vec<Value>, s3: Vec<Value>) -> Self {
+        let mut p = Person::from_single_comma(s1, s3);
+        p.suffix = format_verbatim(&s2);
+        p
+    }
+}
+
+#[derive(Clone)]
+struct ValueCharIter<'s> {
+    vals: &'s [Value],
+    vec_index: usize,
+    val_index: usize,
+}
+
+impl<'s> ValueCharIter<'s> {
+    fn new(vals: &'s [Value]) -> Self {
+        ValueCharIter { vals, vec_index: 0, val_index: 0 }
+    }
+}
+
+impl<'s> Iterator for ValueCharIter<'s> {
+    type Item = (char, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.vec_index >= self.vals.len() {
+            return None;
+        }
+
+        let mut s;
+        let mut verb;
+        while {
+            let temp = if let Value::Normal(s) = &self.vals[self.vec_index] {
+                (s.chars().nth(self.val_index), false)
+            } else if let Value::Verbatim(s) = &self.vals[self.vec_index] {
+                (s.chars().nth(self.val_index), true)
+            } else {
+                (None, false)
+            };
+            s = temp.0;
+            verb = temp.1;
+            s.is_none()
+        } {
+            self.val_index = 0;
+            self.vec_index += 1;
+            if self.vec_index >= self.vals.len() {
+                return None;
+            }
+
+            if matches!(&self.vals[self.vec_index], Value::Normal(_) | Value::Verbatim(_))
+            {
+                continue;
+            }
+        }
+
+        self.val_index += 1;
+
+        Some((s.expect("Has to be some"), verb))
+    }
+}
+
+fn split_values(mut src: Vec<Value>, vi: usize, si: usize) -> (Vec<Value>, Vec<Value>) {
+    if vi >= src.len() {
+        return (vec![], src);
+    }
+
+    let mut new = vec![];
+    while src.len() > vi + 1 {
+        new.insert(0, src.pop().expect("Index checked above"));
+    }
+
+    let item = src.pop().expect("Index checked above");
+    let (content, verb) = match item {
+        Value::Normal(s) => (s, false),
+        Value::Verbatim(s) => (s, true),
+        Value::Resolve(s) => (s, true),
+        Value::CommandName(s, verb) => (s, verb),
+        Value::CommandArgs(s) => (s, true),
+    };
+
+    let (s1, s2) = content.split_at(si);
+    if verb {
+        src.push(Value::Verbatim(s1.trim_end().to_string()));
+        new.insert(0, Value::Verbatim(s2.trim_start().to_string()));
+    } else {
+        src.push(Value::Normal(s1.trim_end().to_string()));
+        new.insert(0, Value::Normal(s2.trim_start().to_string()));
+    }
+
+    (src, new)
+}
+
+fn split_at_normal_char(
+    src: Vec<Value>,
+    c: char,
+    omit: bool,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut found = false;
+    let mut len = src.len();
+    let mut si = 0;
+    for (index, val) in src.iter().enumerate() {
+        if let Value::Normal(s) = val {
+            if let Some(pos) = s.find(c) {
+                found = true;
+                si = pos;
+                len = index;
+            }
+        } else {
+            continue;
+        }
+    }
+
+    let (v1, mut v2) = split_values(src, len, si);
+
+    if omit && found {
+        let first = v2[0].clone();
+        if let Value::Normal(mut s) = first {
+            s.remove(0);
+            s = s.trim_start().to_string();
+            v2[0] = Value::Normal(s);
+        }
+    }
+
+    (v1, v2)
+}
+
+pub fn format_title(vals: &[Value]) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for val in vals {
+        if let Value::Normal(s) = val {
+            if first && !s.is_empty() {
+                first = false;
+                out += &s.to_title_case();
+            } else {
+                out += &s.to_lowercase();
+            }
+        } else if let Value::Verbatim(s) = val {
+            out += s;
+        }
+    }
+
+    out
+}
+
+pub fn format_verbatim(vals: &[Value]) -> String {
+    let mut out = String::new();
+    for val in vals {
+        if let Value::Normal(s) = val {
+            out += s;
+        } else if let Value::Verbatim(s) = val {
+            out += s;
+        }
+    }
+
+    out
+}
+
+pub fn split_token_lists(vals: Vec<Value>) -> Vec<Vec<Value>> {
+    let mut out = vec![];
+    let mut latest: Vec<Value> = vec![];
+    for val in vals {
+        if let Value::Normal(s) = val {
+            let mut target = s.as_str();
+
+            while let Some(pos) = target.find("and") {
+                let first = target[.. pos].trim_end();
+                latest.push(Value::Normal(first.to_string()));
+                out.push(latest);
+                latest = vec![];
+                target = target[pos + 3 ..].trim_start();
+            }
+
+            latest.push(Value::Normal(target.to_string()));
+        } else {
+            latest.push(val);
+        }
+    }
+
+    out.push(latest);
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{split_at_normal_char, split_values, ValueCharIter, Person};
+    use crate::parse::Value;
+
+    fn R(s: &str) -> Value {
+        Value::Resolve(s.to_string())
+    }
+
+    fn N(s: &str) -> Value {
+        Value::Normal(s.to_string())
+    }
+
+    fn V(s: &str) -> Value {
+        Value::Verbatim(s.to_string())
+    }
+
+    #[test]
+    fn test_value_iterator() {
+        let vls = vec![N("it "), R("crap"), V("te")];
+        let mut iter = ValueCharIter::new(&vls);
+        assert_eq!(iter.next(), Some(('i', false)));
+        assert_eq!(iter.next(), Some(('t', false)));
+        assert_eq!(iter.next(), Some((' ', false)));
+        assert_eq!(iter.next(), Some(('t', true)));
+        assert_eq!(iter.next(), Some(('e', true)));
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_value_split() {
+        let vls = vec![N("split "), V("exac^tly"), N("here")];
+        let ref1 = vec![N("split "), V("exac^")];
+        let ref2 = vec![V("tly"), N("here")];
+        let split = split_values(vls, 1, 5);
+        assert_eq!(split.0, ref1);
+        assert_eq!(split.1, ref2);
+    }
+
+    #[test]
+    fn test_person_comma() {
+        let p = Person::new(vec![N("jean de la fontaine,")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "jean de la");
+        assert_eq!(p.given_name, "");
+
+        let p = Person::new(vec![N("de la fontaine, Jean")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "de la");
+        assert_eq!(p.given_name, "Jean");
+
+        let p = Person::new(vec![N("De La Fontaine, Jean")]);
+        assert_eq!(p.name, "De La Fontaine");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.given_name, "Jean");
+
+        let p = Person::new(vec![N("De la Fontaine, Jean")]);
+        assert_eq!(p.name, "Fontaine");
+        assert_eq!(p.prefix, "De la");
+        assert_eq!(p.given_name, "Jean");
+
+        let p = Person::new(vec![N("de La Fontaine, Jean")]);
+        assert_eq!(p.name, "La Fontaine");
+        assert_eq!(p.prefix, "de");
+        assert_eq!(p.given_name, "Jean");
+    }
+
+    #[test]
+    fn test_person_no_comma() {
+        let p = Person::new(vec![N("jean de la fontaine")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "jean de la");
+        assert_eq!(p.given_name, "");
+
+        let p = Person::new(vec![N("Jean de la fontaine")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "de la");
+        assert_eq!(p.given_name, "Jean");
+
+        let p = Person::new(vec![N("Jean "), V("de"), N(" la fontaine")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "la");
+        assert_eq!(p.given_name, "Jean de");
+
+        let p = Person::new(vec![N("Jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        assert_eq!(p.name, "fontaine");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.given_name, "Jean de la");
+
+        let p = Person::new(vec![N("jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        assert_eq!(p.name, "de la fontaine");
+        assert_eq!(p.prefix, "jean");
+        assert_eq!(p.given_name, "");
+
+        let p = Person::new(vec![N("Jean De La Fontaine")]);
+        assert_eq!(p.name, "Fontaine");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.given_name, "Jean De La");
+
+        let p = Person::new(vec![N("jean De la Fontaine")]);
+        assert_eq!(p.name, "Fontaine");
+        assert_eq!(p.prefix, "jean De la");
+        assert_eq!(p.given_name, "");
+
+        let p = Person::new(vec![N("Jean de La Fontaine")]);
+        assert_eq!(p.name, "La Fontaine");
+        assert_eq!(p.prefix, "de");
+        assert_eq!(p.given_name, "Jean");
+
+        let p = Person::new(vec![N("")]);
+        assert_eq!(p.name, "");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.given_name, "");
+    }
+
+    #[test]
+    fn test_person_two_comma() {
+        let p = Person::new(vec![N("Mudd, Sr., Harcourt Fenton")]);
+        assert_eq!(p.name, "Mudd");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.suffix, "Sr.");
+        assert_eq!(p.given_name, "Harcourt Fenton");
+    }
+
+    #[test]
+    fn test_value_split_at_normal_char() {
+        let vls = vec![N("split "), V("not, "), N("but rather, here")];
+        let ref1 = vec![N("split "), V("not, "), N("but rather")];
+        let ref2 = vec![N("here")];
+        let split = split_at_normal_char(vls, ',', true);
+        assert_eq!(split.0, ref1);
+        assert_eq!(split.1, ref2);
+    }
+}

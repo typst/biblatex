@@ -1,0 +1,10 @@
+[package]
+name = "biblatex"
+version = "0.1.0"
+authors = ["Martin Haug <mhaug@live.de>"]
+edition = "2018"
+
+[dependencies]
+Inflector = "0.11.4"
+unicode-normalization = "0.1.13"
+unicode-xid = "0.2"

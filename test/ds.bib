@@ -1,0 +1,170 @@
+@article{bullshit2020,
+  title={At-scale impact of the {Net Wok}: A culinarically holistic investigation of distributed dumplings},
+  author={Astley, Rick and Morris, Linda},
+  journal={Armenian Journal of Proceedings},
+  volume={61},
+  pages={192--219},
+  year={2020},
+  publisher={Automattic Inc.}
+}
+
+@online{lwn_softirqs,
+  title="{Software interrupts and realtime}",
+  author="{Corbet, Johnathan}",
+  url="https://lwn.net/Articles/520076/",
+  note="(accessed 2020, August 12)",
+  year={2012},
+}
+
+@report{lwip_pbuf,
+  title={Design and Implementation of the {lwIP TCP/IP Stack}},
+  institution="Swedish Institute of Computer Science",
+  url="https://www.artila.com/download/RIO/RIO-2010PG/lwip.pdf",
+  note="(accessed 2020, August 12)",
+  year={2001-02-20},
+  author={Dunkels, Adam},
+}
+
+@online{freertos_tcp,
+  title="{FreeRTOS+TCP}",
+  author={{Amazon Web Services}},
+  url="https://www.freertos.org/FreeRTOS-Plus/FreeRTOS_Plus_TCP/index.html",
+  note="(accessed 2020, August 12)",
+  year={2020}
+}
+
+@online{the_lol_issue,
+  title="{Please open source this library}",
+  url="https://github.com/espressif/esp32-wifi-lib/issues/2",
+  note="(accessed 2020, August 12)",
+  author="{Juul}",
+  year={2016},
+}
+
+@inproceedings{hanninenPresentFutureRequirements2006,
+  title = {Present and Future Requirements in Developing Industrial Embedded Real-Time Systems - Interviews with Designers in the Vehicle Domain},
+  booktitle = {13th {{Annual IEEE International Symposium}} and {{Workshop}} on {{Engineering}} of {{Computer}}-{{Based Systems}} ({{ECBS}}'06)},
+  author = {Hanninen, K. and Maki-Turja, J. and Nolin, M.},
+  date = {2006-03},
+  pages = {9 pp.-150},
+  doi = {10.1109/ECBS.2006.56},
+  abstract = {In this paper, we aim at capturing the industrial viewpoint of today's and future requirements in development of embedded real-time systems. We do this by interviewing ten senior designers at four Swedish companies, developing embedded applications in the vehicle domain. This study shows that reliability and safety are the main properties in focus during development. It also shows that the amount of functionality has been increasing in the examined systems. Still the present requirements are fulfilled using considerably homogenous development methods. The study also shows that, in the future, there will be even stronger requirements on dependability and control performance at the same time as requirements on more softer and resource demanding functionality will continue to increase. Consequently, the complexity will increase, and with diverging requirements, more heterogeneous development methods are called for to fulfil all application specific requirements},
+  eventtitle = {13th {{Annual IEEE International Symposium}} and {{Workshop}} on {{Engineering}} of {{Computer}}-{{Based Systems}} ({{ECBS}}'06)},
+  keywords = {Application software,application specific requirements,automobile industry,Companies,Consumer electronics,Electrical equipment industry,Embedded software,Embedded system,embedded systems,formal specification,heterogeneous development methods,homogenous development methods,industrial embedded real-time system,Operating systems,Real time systems,safety-critical software,Signal processing,Swedish companies,vehicle industry,Vehicle safety,vehicles}
+}
+
+@article{sharpChallengesSolutionsEmbedded2010,
+  title = {Challenges and {{Solutions}} for {{Embedded}} and {{Networked Aerospace Software Systems}}},
+  author = {Sharp, David C. and Bell, Alex E. and Gold, Jeffrey J. and Gibbar, Ken W. and Gvillo, Dennis W. and Knight, Vann M. and Murphy, Kevin P. and Roll, Wendy C. and Sampigethaya, Radhakrishna G. and Santhanam, Viswa and Weismuller, Steven P.},
+  date = {2010-04},
+  journaltitle = {Proceedings of the IEEE},
+  volume = {98},
+  pages = {621--634},
+  issn = {1558-2256},
+  doi = {10.1109/JPROC.2009.2039631},
+  abstract = {Aerospace systems are increasingly dependent upon software for their functionality, with associated software spanning a wide range of application domains. These include aircraft and spacecraft flight controls, mission computing, weapons management, command and control, surveillance, sensor management and processing, telemetry, and more. Understanding of their unique challenges has driven technology development on many fronts associated both with the products - such as real-time component-based application frameworks, supporting middleware, and algorithms - and the processes and tools by which they are created - such as model-based development and integration, automated code generation, simulations, and desktop test environments. This paper describes a number of these domains and challenges, future directions associated with networking and systems of systems, and technologies facilitating their development within The Boeing Company.},
+  eventtitle = {Proceedings of the {{IEEE}}},
+  keywords = {aerospace computing,Aerospace control,Aerospace systems,Aircraft,aircraft electronics,Application software,automated code generation,Boeing Company,Command and control systems,desktop test environment,distributed computing,middleware support,model based development,model based integration,networked aerospace software system,object-oriented programming,real time component based application framework,real-time systems,Software systems,Space technology,Space vehicles,Surveillance,Telemetry,Weapons},
+  number = {4}
+}
+
+@report{goyette2007analysis,
+  title = {An Analysis and Description of the Inner Workings of the {FreeRTOS} Kernel},
+  author = {Goyette, Rich},
+  year = {0.1.04.2007},
+  pages = {46},
+  institution = {{Carleton University}},
+  location = {{Ottawa}},
+  url = {https://www.benhup.com/download/eduntech/stk500_stk501/FreeRTOSPaper.pdf}
+}
+
+@article{regehrPreventingInterruptOverload2005,
+  title = {Preventing Interrupt Overload},
+  author = {Regehr, John and Duongsaa, Usit},
+  date = {2005-06-15},
+  journaltitle = {ACM SIGPLAN Notices},
+  shortjournal = {SIGPLAN Not.},
+  volume = {40},
+  pages = {50--58},
+  issn = {0362-1340},
+  doi = {10.1145/1070891.1065918},
+  abstract = {Performance guarantees can be given to tasks in an embedded system by ensuring that access to each shared resource is mediated by an appropriate scheduler. However, almost all previous work on CPU scheduling has focused on thread-level scheduling, resulting in systems that are vulnerable to a lower-level form of overload that occurs when too many interrupts arrive. This paper describes three new techniques, two software-based and one hardware-based, for creating systems that delay or drop excessive interrupt requests before they can overload a processor. Our interrupt schedulers bound both the amount of work performed in interrupt context and its granularity, making it possible to provide strong progress guarantees to thread-level processing. We show that our solutions work and are efficient when implemented on embedded processors. We have also taken a description for a microprocessor in VHDL, modified it to include logic that prevents interrupt overload, synthesized the processor, and verified that it works using simulation. By allowing developers to avoid making assumptions about the worst-case interrupt rates of peripherals, our work fills an important gap in the chain of reasoning leading to a validated system. These techniques cannot replace careful system design, but they do provide a last-ditch safety guarantee in the presence of a serious malfunction.},
+  keywords = {embedded,interrupts,overload,scheduling},
+  number = {7}
+}
+
+@article{leyva-del-foyoIntegratedTaskInterrupt2012,
+  title = {Integrated {{Task}} and {{Interrupt Management}} for {{Real}}-{{Time Systems}}},
+  author = {Leyva-del-Foyo, Luis E. and Mejia-Alvarez, Pedro and de Niz, Dionisio},
+  date = {2012-07-01},
+  journaltitle = {ACM Transactions on Embedded Computing Systems},
+  shortjournal = {ACM Trans. Embed. Comput. Syst.},
+  volume = {11},
+  pages = {32:1--32:31},
+  issn = {1539-9087},
+  doi = {10.1145/2220336.2220344},
+  abstract = {Real-time scheduling algorithms like RMA or EDF and their corresponding schedulability test have proven to be powerful tools for developing predictable real-time systems. However, the traditional interrupt management model presents multiple inconsistencies that break the assumptions of many of the real-time scheduling tests, diminishing its utility. In this article, we analyze these inconsistencies and present a model that resolves them by integrating interrupts and tasks in a single scheduling model. We then use the RMA theory to calculate the cost of the model and analyze the circumstances under which it can provide the most value. This model was implemented in a kernel module. The portability of the design of our module is discussed in terms of its independence from both the hardware and the kernel. We also discuss the implementation issues of the model over conventional PC hardware, along with its cost and novel optimizations for reducing the overhead. Finally, we present our experimental evaluation to show evidence of its temporal determinism and overhead.},
+  keywords = {interrupt scheduling,Predictability,programmable interrupt controller},
+  number = {2},
+  options = {useprefix=true}
+}
+
+@inproceedings{schelerParallelHardwaresupportedInterrupt2009,
+  title = {Parallel, Hardware-Supported Interrupt Handling in an Event-Triggered Real-Time Operating System},
+  booktitle = {Proceedings of the 2009 International Conference on {{Compilers}}, Architecture, and Synthesis for Embedded Systems},
+  author = {Scheler, Fabian and Hofer, Wanja and Oechslein, Benjamin and Pfister, Rudi and Schröder-Preikschat, Wolfgang and Lohmann, Daniel},
+  date = {2009-10-11},
+  pages = {167--174},
+  publisher = {{Association for Computing Machinery}},
+  location = {{New York, NY, USA}},
+  doi = {10.1145/1629395.1629419},
+  abstract = {A common problem in event-triggered real-time systems is caused by low-priority tasks that are implemented as interrupt handlers interrupting and disturbing high-priority tasks that are implemented as threads. This problem is termed rate-monotonic priority inversion, and current software-based solutions are restricted in terms of more sophisticated scheduler features as demanded for instance by the AUTOSAR embedded-operating-system specification. We propose a hardware-based approach that makes use of a coprocessor to eliminate the potential priority inversion. By evaluating a prototypical implementation, we show that our approach both overcomes the restrictions of software approaches and introduces only a slight processing overhead in exchange for increased predictability.},
+  isbn = {978-1-60558-626-7},
+  keywords = {ciao,interrupt handling,priority-driven,rate-monotonic priority inversion,real-time systems,tricore},
+  series = {{{CASES}} '09}
+}
+
+@inproceedings{strnadelMonitoringdrivenHWSW2012,
+  title = {Monitoring-Driven {{HW}}/{{SW}} Interrupt Overload Prevention for Embedded Real-Time Systems},
+  booktitle = {2012 {{IEEE}} 15th {{International Symposium}} on {{Design}} and {{Diagnostics}} of {{Electronic Circuits Systems}} ({{DDECS}})},
+  author = {Strnadel, Josef},
+  date = {2012-04},
+  pages = {121--126},
+  doi = {10.1109/DDECS.2012.6219037},
+  abstract = {In the paper, a concept and an early analysis of an embedded hardware/software architecture designed to prevent the software from both timing disturbances and interrupt overloads is outlined. The architecture is composed of an FPGA (MCU) used to run the hardware (software) part of an embedded application. Comparing to previous approaches, novelty of the architecture can be seen in the fact it is able to adapt interrupt service rates to the actual software load being monitored with no intrusion to the software. According to the actual software load it is able to buffer all interrupts and related data while the software is highly loaded and redirect the interrupts to the MCU as soon as the software becomes underloaded.},
+  eventtitle = {2012 {{IEEE}} 15th {{International Symposium}} on {{Design}} and {{Diagnostics}} of {{Electronic Circuits Systems}} ({{DDECS}})},
+  keywords = {Context,embedded,embedded hardware-software architecture,embedded real-time system,embedded systems,field programmable gate arrays,Field programmable gate arrays,FPGA,hardware-software codesign,HW/SW interrupt overload prevention,interrupt,interrupt service rates,limiter,MCU,Memory management,monitoring,Monitoring,operating systems (computers),overload,prevention,Real time systems,real-time,Software,software architecture,Timing,timing disturbances}
+}
+
+@inproceedings{bucaioniTechnologyPreservingTransitionSingleCore2017,
+  title = {Technology-{{Preserving Transition}} from {{Single}}-{{Core}} to {{Multi}}-Core in {{Modelling Vehicular Systems}}},
+  booktitle = {Modelling {{Foundations}} and {{Applications}}},
+  author = {Bucaioni, Alessio and Mubeen, Saad and Ciccozzi, Federico and Cicchetti, Antonio and Sjödin, Mikael},
+  editor = {Anjorin, Anthony and Espinoza, Huáscar},
+  date = {2017},
+  pages = {285--299},
+  publisher = {{Springer International Publishing}},
+  location = {{Cham}},
+  doi = {10.1007/978-3-319-61482-3_17},
+  abstract = {The vehicular industry has exploited model-based engineering for design, analysis, and development of single-core vehicular systems. Next generation of autonomous vehicles will require higher computational power, which can only be provided by parallel computing platforms such as multi-core electronic control units. Current model-based software development solutions and related modelling languages, originally conceived for single-core, cannot effectively deal with multi-core specific challenges, such as core-interdependency and allocation of software to hardware. In this paper, we propose an extension to the Rubus Component Model, central to the Rubus model-based approach, for the modelling, analysis, and development of vehicular systems on multi-core. Our goal is to provide a lightweight transition of a model-based software development approach from single-core to multi-core, without disrupting the current technological assets in the vehicular domain.},
+  isbn = {978-3-319-61482-3},
+  keywords = {Embedded systems,Metamodelling,Model-based engineering,Multi-core,Real-time systems,Vehicular domain},
+  langid = {english},
+  series = {Lecture {{Notes}} in {{Computer Science}}}
+}
+
+@incollection{krasnoselskiiStaticHysteron1989,
+  title = {Static Hysteron},
+  booktitle = {Systems with {{Hysteresis}}},
+  author = {Krasnosel’skiǐ, Mark A. and Pokrovskiǐ, Aleksei V.},
+  editor = {Krasnosel’skiǐ, Mark A. and Pokrovskiǐ, Aleksei V.},
+  date = {1989},
+  pages = {1--58},
+  publisher = {{Springer}},
+  location = {{Berlin, Heidelberg}},
+  doi = {10.1007/978-3-642-61302-9_1},
+  file = {C\:\\Users\\mhaug\\Zotero\\storage\\BAECB45X\\Krasnosel’skiǐ und Pokrovskiǐ - 1989 - Static hysteron.pdf},
+  isbn = {978-3-642-61302-9},
+  keywords = {Canonical Representation,Continuous Input,Feasible State,Lipschitz Condition,Wiener Space},
+  langid = {english}
+}
