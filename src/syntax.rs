@@ -1,25 +1,32 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
 use unicode_xid::UnicodeXID;
 
 #[derive(Debug, PartialEq)]
-pub enum Symbols {
+/// Symbols that may be found when parsing a file.
+enum Symbols {
     Quotes,
     Braces,
 }
 
 #[derive(Clone, Debug, Default)]
+/// A Bib(La)TeX file entry as directly extracted, the strings are not yet parsed.
 pub struct BiblatexEntry<'s> {
+    /// The bibliography item's type, e.g. `inbook`.
     pub entry_type: &'s str,
+    /// A map of field names to field values.
     pub props: HashMap<&'s str, &'s str>,
 }
 
 #[derive(Clone, Debug)]
+/// A Bib(La)TeX file's most literal representation, the strings are not yet parsed.
 pub struct BiblatexFile<'s> {
+    /// TeX commands to be prepended to the document, only supported by BibTeX.
     pub preamble: String,
     pub entries: Vec<(&'s str, BiblatexEntry<'s>)>,
+    /// Map of reusable strings, only supported by BibTeX.
     pub strings: HashMap<&'s str, &'s str>,
 }
 
@@ -31,6 +38,7 @@ enum ParseMode {
     EntryMode,
 }
 
+/// Backing struct for parsing a Bib(La)TeX file into a `BiblatexFile` struct.
 pub struct BiblatexParser<'s> {
     allow_bibtex: bool,
     src: &'s str,
@@ -41,6 +49,7 @@ pub struct BiblatexParser<'s> {
     res: BiblatexFile<'s>,
 }
 
+/// Characters allowable in identifiers like cite keys.
 fn is_ident(c: char, first: bool) -> bool {
     let unpermissable = "\"#'(),={}%\\~";
     let interpunct = ":<->_";
@@ -54,6 +63,7 @@ fn is_ident(c: char, first: bool) -> bool {
 }
 
 impl<'s> BiblatexParser<'s> {
+    /// Constructs a new parser.
     pub fn new(src: &'s str, allow_bibtex: bool) -> Self {
         Self {
             allow_bibtex,
@@ -70,6 +80,7 @@ impl<'s> BiblatexParser<'s> {
         }
     }
 
+    /// Parses the file, consuming the parser in the process.
     pub fn parse(mut self) -> BiblatexFile<'s> {
         while let Some(c) = self.eat() {
             if c == '@' && !self.comment {
@@ -84,6 +95,7 @@ impl<'s> BiblatexParser<'s> {
         self.res
     }
 
+    /// Parse a bibliography entry.
     fn parse_entry(&mut self) {
         self.mode = ParseMode::Type;
 
@@ -184,6 +196,7 @@ impl<'s> BiblatexParser<'s> {
         self.mode = ParseMode::Outside;
     }
 
+    /// Read a field.
     fn read_prop(&mut self) -> Result<(&'s str, &'s str), ()> {
         self.skip_ws();
 
@@ -253,10 +266,13 @@ impl<'s> BiblatexParser<'s> {
         Ok((name, &self.src[val_start .. val_end]))
     }
 
+    /// Get the next character without advancing the parsing file iterator.
     fn peek(&mut self) -> Option<char> {
         self.iter.peek().copied()
     }
 
+    /// Advance the parsing file iterator to the next non-whitespace or comment
+    /// character.
     fn skip_ws(&mut self) {
         while let Some(c) = self.peek() {
             if c == '%' {
@@ -278,6 +294,7 @@ impl<'s> BiblatexParser<'s> {
         }
     }
 
+    /// Advance the parsing file iterator by one and return the consumed character.
     fn eat(&mut self) -> Option<char> {
         let c = self.iter.next()?;
         self.index += c.len_utf8();

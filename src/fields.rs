@@ -1,21 +1,29 @@
-use crate::parse::Value;
+use crate::parse::Chunk;
 extern crate inflector;
 use inflector::Inflector;
 
 #[derive(Debug)]
+/// An author, editor, or some other person affiliated with the cited work.
+/// When obtained through the constructor `Person::new`, the fields are trimmed.
 pub struct Person {
     pub given_name: String,
     pub name: String,
+    /// The prefix is placed between given name and name. It could, for example
+    /// be a nobiliary particle.
     pub prefix: String,
+    /// The suffix is placed after the name (e.g. "Jr.").
     pub suffix: String,
 }
 
 impl Person {
-    fn new(source: Vec<Value>) -> Self {
+    /// Constructs a new Person from a Chunk vector according to the specs of
+    /// [Nicolas Markey in "Tame the BeaST"](https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf),
+    /// pp. 23-24.
+    fn new(source: Vec<Chunk>) -> Self {
         let num_commas: usize = source
             .iter()
             .map(|val| {
-                if let Value::Normal(s) = val {
+                if let Chunk::Normal(s) = val {
                     s.matches(',').count()
                 } else {
                     0
@@ -39,7 +47,9 @@ impl Person {
         }
     }
 
-    fn from_unified(source: Vec<Value>) -> Self {
+    /// Constructs new person from a Chunk Vector if in the
+    /// form `<First> <Prefix> <Last>`.
+    fn from_unified(source: Vec<Chunk>) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
         // lowercase word), start of last capitalized seqence.
         // If there is no subsequent capitalized word, take last one.
@@ -89,9 +99,19 @@ impl Person {
         let mut prefix = String::new();
 
         for (index, (c, _)) in iter.clone().enumerate() {
-            if (index <= cap_word_end && seen_lowercase && seen_uppercase && !(index == 0 && c.is_lowercase())) || (index < last_word_start && !seen_lowercase) {
+            if (index <= cap_word_end
+                && seen_lowercase
+                && seen_uppercase
+                && !(index == 0 && c.is_lowercase()))
+                || (index < last_word_start && !seen_lowercase)
+            {
                 given_name.push(c);
-            } else if (index < cap_new_start && cap_new_start > cap_word_end) || (index < last_word_start && (!seen_uppercase2 || (last_word_start == last_lowercase_start && index < cap_new_start))) {
+            } else if (index < cap_new_start && cap_new_start > cap_word_end)
+                || (index < last_word_start
+                    && (!seen_uppercase2
+                        || (last_word_start == last_lowercase_start
+                            && index < cap_new_start)))
+            {
                 prefix.push(c);
             } else {
                 name.push(c);
@@ -106,7 +126,13 @@ impl Person {
         }
     }
 
-    fn from_single_comma(s1: Vec<Value>, s2: Vec<Value>) -> Self {
+    /// Constructs new person from a Chunk Vector if in the
+    /// form `<Prefix> <Last>, <First>`.
+    /// `s1` corresponds to the part before the comma
+    /// `s2` to the part behind it.
+    ///
+    /// The arguments should not contain the comma.
+    fn from_single_comma(s1: Vec<Chunk>, s2: Vec<Chunk>) -> Self {
         if s2.is_empty() || (s2.len() == 1 && format_verbatim(&s2).is_empty()) {
             let formatted = format_verbatim(&s1);
             let last_space = formatted.rfind(" ").unwrap_or(0);
@@ -154,9 +180,13 @@ impl Person {
         let mut name = String::new();
         let mut prefix = String::new();
         for (index, (c, _)) in iter.enumerate() {
-            if (index as i32 <= last_lower_case_end && has_seen_uppercase_words) || (!has_seen_uppercase_words && index < last_word_start) {
+            if (index as i32 <= last_lower_case_end && has_seen_uppercase_words)
+                || (!has_seen_uppercase_words && index < last_word_start)
+            {
                 prefix.push(c);
-            } else if has_seen_uppercase_words || (!has_seen_uppercase_words && index >= last_word_start) {
+            } else if has_seen_uppercase_words
+                || (!has_seen_uppercase_words && index >= last_word_start)
+            {
                 name.push(c);
             }
         }
@@ -169,7 +199,13 @@ impl Person {
         }
     }
 
-    fn from_two_commas(s1: Vec<Value>, s2: Vec<Value>, s3: Vec<Value>) -> Self {
+    /// Constructs new person from a Chunk Vector if in the
+    /// form `<Prefix> <Last>, <Suffix>, <First>`.
+    /// `s1`, `s2`, `s3` correspond to the first through third part of the
+    /// value respectively.
+    ///
+    /// The arguments should not contain the comma.
+    fn from_two_commas(s1: Vec<Chunk>, s2: Vec<Chunk>, s3: Vec<Chunk>) -> Self {
         let mut p = Person::from_single_comma(s1, s3);
         p.suffix = format_verbatim(&s2);
         p
@@ -177,14 +213,17 @@ impl Person {
 }
 
 #[derive(Clone)]
+/// This struct is an Iterator for Chunk slices that will iterate through the
+/// contained characters indicating whether they are Verbatim or not.
+/// Chunk types other than `Normal` or `Verbatim` will be ommitted.
 struct ValueCharIter<'s> {
-    vals: &'s [Value],
+    vals: &'s [Chunk],
     vec_index: usize,
     val_index: usize,
 }
 
 impl<'s> ValueCharIter<'s> {
-    fn new(vals: &'s [Value]) -> Self {
+    fn new(vals: &'s [Chunk]) -> Self {
         ValueCharIter { vals, vec_index: 0, val_index: 0 }
     }
 }
@@ -200,9 +239,9 @@ impl<'s> Iterator for ValueCharIter<'s> {
         let mut s;
         let mut verb;
         while {
-            let temp = if let Value::Normal(s) = &self.vals[self.vec_index] {
+            let temp = if let Chunk::Normal(s) = &self.vals[self.vec_index] {
                 (s.chars().nth(self.val_index), false)
-            } else if let Value::Verbatim(s) = &self.vals[self.vec_index] {
+            } else if let Chunk::Verbatim(s) = &self.vals[self.vec_index] {
                 (s.chars().nth(self.val_index), true)
             } else {
                 (None, false)
@@ -217,7 +256,7 @@ impl<'s> Iterator for ValueCharIter<'s> {
                 return None;
             }
 
-            if matches!(&self.vals[self.vec_index], Value::Normal(_) | Value::Verbatim(_))
+            if matches!(&self.vals[self.vec_index], Chunk::Normal(_) | Chunk::Verbatim(_))
             {
                 continue;
             }
@@ -229,7 +268,9 @@ impl<'s> Iterator for ValueCharIter<'s> {
     }
 }
 
-fn split_values(mut src: Vec<Value>, vi: usize, si: usize) -> (Vec<Value>, Vec<Value>) {
+/// Returns two Chunk Vectors with `src` split at Chunk index `vi` and
+/// char index `si` within that chunk.
+fn split_values(mut src: Vec<Chunk>, vi: usize, si: usize) -> (Vec<Chunk>, Vec<Chunk>) {
     if vi >= src.len() {
         return (vec![], src);
     }
@@ -241,35 +282,37 @@ fn split_values(mut src: Vec<Value>, vi: usize, si: usize) -> (Vec<Value>, Vec<V
 
     let item = src.pop().expect("Index checked above");
     let (content, verb) = match item {
-        Value::Normal(s) => (s, false),
-        Value::Verbatim(s) => (s, true),
-        Value::Resolve(s) => (s, true),
-        Value::CommandName(s, verb) => (s, verb),
-        Value::CommandArgs(s) => (s, true),
+        Chunk::Normal(s) => (s, false),
+        Chunk::Verbatim(s) => (s, true),
+        Chunk::Resolve(s) => (s, true),
+        Chunk::CommandName(s, verb) => (s, verb),
+        Chunk::CommandArgs(s) => (s, true),
     };
 
     let (s1, s2) = content.split_at(si);
     if verb {
-        src.push(Value::Verbatim(s1.trim_end().to_string()));
-        new.insert(0, Value::Verbatim(s2.trim_start().to_string()));
+        src.push(Chunk::Verbatim(s1.trim_end().to_string()));
+        new.insert(0, Chunk::Verbatim(s2.trim_start().to_string()));
     } else {
-        src.push(Value::Normal(s1.trim_end().to_string()));
-        new.insert(0, Value::Normal(s2.trim_start().to_string()));
+        src.push(Chunk::Normal(s1.trim_end().to_string()));
+        new.insert(0, Chunk::Normal(s2.trim_start().to_string()));
     }
 
     (src, new)
 }
 
+/// Splits a Chunk vector into two at the first occurrance of the character `c`.
+/// `omit` controls whether the output will contain `c`.
 fn split_at_normal_char(
-    src: Vec<Value>,
+    src: Vec<Chunk>,
     c: char,
     omit: bool,
-) -> (Vec<Value>, Vec<Value>) {
+) -> (Vec<Chunk>, Vec<Chunk>) {
     let mut found = false;
     let mut len = src.len();
     let mut si = 0;
     for (index, val) in src.iter().enumerate() {
-        if let Value::Normal(s) = val {
+        if let Chunk::Normal(s) = val {
             if let Some(pos) = s.find(c) {
                 found = true;
                 si = pos;
@@ -284,28 +327,29 @@ fn split_at_normal_char(
 
     if omit && found {
         let first = v2[0].clone();
-        if let Value::Normal(mut s) = first {
+        if let Chunk::Normal(mut s) = first {
             s.remove(0);
             s = s.trim_start().to_string();
-            v2[0] = Value::Normal(s);
+            v2[0] = Chunk::Normal(s);
         }
     }
 
     (v1, v2)
 }
 
-pub fn format_title(vals: &[Value]) -> String {
+/// Formats a Chunk slice in sentence case.
+pub fn format_sentence(vals: &[Chunk]) -> String {
     let mut out = String::new();
     let mut first = true;
     for val in vals {
-        if let Value::Normal(s) = val {
+        if let Chunk::Normal(s) = val {
             if first && !s.is_empty() {
                 first = false;
                 out += &s.to_title_case();
             } else {
                 out += &s.to_lowercase();
             }
-        } else if let Value::Verbatim(s) = val {
+        } else if let Chunk::Verbatim(s) = val {
             out += s;
         }
     }
@@ -313,12 +357,13 @@ pub fn format_title(vals: &[Value]) -> String {
     out
 }
 
-pub fn format_verbatim(vals: &[Value]) -> String {
+/// Outputs a Chunk slice in verbatim.
+pub fn format_verbatim(vals: &[Chunk]) -> String {
     let mut out = String::new();
     for val in vals {
-        if let Value::Normal(s) = val {
+        if let Chunk::Normal(s) = val {
             out += s;
-        } else if let Value::Verbatim(s) = val {
+        } else if let Chunk::Verbatim(s) = val {
             out += s;
         }
     }
@@ -326,22 +371,25 @@ pub fn format_verbatim(vals: &[Value]) -> String {
     out
 }
 
-pub fn split_token_lists(vals: Vec<Value>) -> Vec<Vec<Value>> {
+/// Splits Chunk Vectors that are a token list as defined per the
+/// [BibLaTeX Manual](http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf)
+/// p. 16 along occurances of the `and` keyword.
+pub fn split_token_lists(vals: Vec<Chunk>) -> Vec<Vec<Chunk>> {
     let mut out = vec![];
-    let mut latest: Vec<Value> = vec![];
+    let mut latest: Vec<Chunk> = vec![];
     for val in vals {
-        if let Value::Normal(s) = val {
+        if let Chunk::Normal(s) = val {
             let mut target = s.as_str();
 
             while let Some(pos) = target.find("and") {
                 let first = target[.. pos].trim_end();
-                latest.push(Value::Normal(first.to_string()));
+                latest.push(Chunk::Normal(first.to_string()));
                 out.push(latest);
                 latest = vec![];
                 target = target[pos + 3 ..].trim_start();
             }
 
-            latest.push(Value::Normal(target.to_string()));
+            latest.push(Chunk::Normal(target.to_string()));
         } else {
             latest.push(val);
         }
@@ -354,19 +402,22 @@ pub fn split_token_lists(vals: Vec<Value>) -> Vec<Vec<Value>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{split_at_normal_char, split_values, ValueCharIter, Person};
-    use crate::parse::Value;
+    use super::{split_at_normal_char, split_values, Person, ValueCharIter};
+    use crate::parse::Chunk;
 
-    fn R(s: &str) -> Value {
-        Value::Resolve(s.to_string())
+    #[allow(non_snake_case)]
+    fn R(s: &str) -> Chunk {
+        Chunk::Resolve(s.to_string())
     }
 
-    fn N(s: &str) -> Value {
-        Value::Normal(s.to_string())
+    #[allow(non_snake_case)]
+    fn N(s: &str) -> Chunk {
+        Chunk::Normal(s.to_string())
     }
 
-    fn V(s: &str) -> Value {
-        Value::Verbatim(s.to_string())
+    #[allow(non_snake_case)]
+    fn V(s: &str) -> Chunk {
+        Chunk::Verbatim(s.to_string())
     }
 
     #[test]

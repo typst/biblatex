@@ -5,15 +5,31 @@ use unicode_normalization::char;
 use crate::syntax::BiblatexParser;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value {
+/// A Chunk represents an element in a Bib(La)TeX field value.
+pub enum Chunk {
+    /// Values nested in braces that are to be printed like specified
+    /// in the file. Escapes keywords.
+    ///
+    /// Example: `"Inside {NASA}"` or `{Memes are {gReAT}}`.
     Verbatim(String),
+    /// Normal values within quotes or single braces subject to
+    /// capitalization formatting.
     Normal(String),
+    /// BibTeX allows strings to be saved and concatenated later.
+    /// This Chunk is a reference to a named string to be resolved.
+    ///
+    /// Example: `author1 # " and " # author2`
     Resolve(String),
+    /// LaTeX command names within quotes or braces.
+    /// May be followed by `Chunk::CommandArgs` in Chunk slices.
     CommandName(String, bool),
+    /// LaTeX command arguments.
+    /// Must be preceeded by `Chunk::CommandName` in Chunk slices.
     CommandArgs(String),
 }
 
 #[derive(Debug, PartialEq)]
+/// Symbols that may occur while parsing a field value.
 pub enum Symbols {
     Quotes,
     Braces,
@@ -21,11 +37,16 @@ pub enum Symbols {
 }
 
 #[derive(Clone, Debug, Default)]
+/// A bibliography entry in its intermediate form (parsed into Chunks, but not yet
+/// the appropriate data types).
 pub struct CollectionEntry<'s> {
+    /// Denotes the type of bibliography item (e.g. `article`).
     pub entry_type: &'s str,
-    pub props: HashMap<&'s str, Vec<Value>>,
+    /// Maps from field names to their associated Chunk vectors.
+    pub props: HashMap<&'s str, Vec<Chunk>>,
 }
 
+/// Create a Vector of cite key and `CollectionEntry` tuples from a source string.
 pub fn new_collection<'s>(
     src: &'s str,
     allow_bibtex: bool,
@@ -51,17 +72,20 @@ pub fn new_collection<'s>(
     coll_vec
 }
 
-fn process_string(s: &str) -> Vec<Value> {
-    let mut iter = s.chars().peekable();
+/// Create a Chunk vector from field value string references.
+fn process_string(s: &str) -> Vec<Chunk> {
+    let iter = s.chars().peekable();
     let mut stack: Vec<Symbols> = vec![];
-    let mut vals: Vec<Value> = vec![];
+    let mut vals: Vec<Chunk> = vec![];
     let mut allow_resolvable = true;
     let mut is_math = false;
     let mut expect_arg = false;
 
     #[derive(Debug, PartialEq)]
     enum EscCommandMode {
+        /// Character escapes and TeX commands are possible.
         Both,
+        /// Continuing a TeX command is possible.
         OnlyCommand,
         Neither,
     }
@@ -75,10 +99,10 @@ fn process_string(s: &str) -> Vec<Value> {
         match c {
             _ if esc_cmd_mode == EscCommandMode::Both && is_escapable(c) => {
                 let _success = if let Some(x) = vals.last_mut() {
-                    if let Value::Normal(s) = x {
+                    if let Chunk::Normal(s) = x {
                         s.push(c);
                         true
-                    } else if let Value::Verbatim(s) = x {
+                    } else if let Chunk::Verbatim(s) = x {
                         s.push(c);
                         true
                     } else {
@@ -130,14 +154,14 @@ fn process_string(s: &str) -> Vec<Value> {
             '\n' => {}
             '\r' => {}
             _ if expect_arg => {
-                vals.push(Value::CommandArgs(c.to_string()));
+                vals.push(Chunk::CommandArgs(c.to_string()));
                 stack.pop();
                 expect_arg = false;
             }
             _ if esc_cmd_mode != EscCommandMode::Neither && !c.is_whitespace() => {
                 let success = if esc_cmd_mode != EscCommandMode::Both {
                     if let Some(x) = vals.last_mut() {
-                        if let Value::CommandName(s, _) = x {
+                        if let Chunk::CommandName(s, _) = x {
                             s.push(c);
                             true
                         } else {
@@ -152,7 +176,7 @@ fn process_string(s: &str) -> Vec<Value> {
 
                 esc_cmd_mode = EscCommandMode::OnlyCommand;
                 if !success {
-                    vals.push(Value::CommandName(c.to_string(), stack.len() > 1));
+                    vals.push(Chunk::CommandName(c.to_string(), stack.len() > 1));
                     stack.push(Symbols::Command);
                     if is_single_char_func(c) {
                         esc_cmd_mode = EscCommandMode::Neither;
@@ -163,7 +187,7 @@ fn process_string(s: &str) -> Vec<Value> {
             }
             _ if stack.last() == Some(&Symbols::Command) => {
                 let success = if let Some(x) = vals.last_mut() {
-                    if let Value::CommandArgs(s) = x {
+                    if let Chunk::CommandArgs(s) = x {
                         s.push(c);
                         true
                     } else {
@@ -174,13 +198,13 @@ fn process_string(s: &str) -> Vec<Value> {
                 };
 
                 if !success {
-                    vals.push(Value::CommandArgs(c.to_string()))
+                    vals.push(Chunk::CommandArgs(c.to_string()))
                 }
             }
             _ if stack.is_empty() => {
                 let success = if !allow_resolvable {
                     if let Some(x) = vals.last_mut() {
-                        if let Value::Resolve(s) = x {
+                        if let Chunk::Resolve(s) = x {
                             s.push(c);
                             true
                         } else {
@@ -195,12 +219,12 @@ fn process_string(s: &str) -> Vec<Value> {
 
                 if !success && allow_resolvable {
                     allow_resolvable = false;
-                    vals.push(Value::Resolve(c.to_string()))
+                    vals.push(Chunk::Resolve(c.to_string()))
                 }
             }
             _ if stack.len() == 1 => {
                 let success = if let Some(x) = vals.last_mut() {
-                    if let Value::Normal(s) = x {
+                    if let Chunk::Normal(s) = x {
                         s.push(c);
                         true
                     } else {
@@ -211,12 +235,12 @@ fn process_string(s: &str) -> Vec<Value> {
                 };
 
                 if !success {
-                    vals.push(Value::Normal(c.to_string()))
+                    vals.push(Chunk::Normal(c.to_string()))
                 }
             }
             _ if stack.len() > 1 => {
                 let success = if let Some(x) = vals.last_mut() {
-                    if let Value::Verbatim(s) = x {
+                    if let Chunk::Verbatim(s) = x {
                         s.push(c);
                         true
                     } else {
@@ -227,7 +251,7 @@ fn process_string(s: &str) -> Vec<Value> {
                 };
 
                 if !success {
-                    vals.push(Value::Verbatim(c.to_string()))
+                    vals.push(Chunk::Verbatim(c.to_string()))
                 }
             }
             _ => unreachable!(),
@@ -238,11 +262,12 @@ fn process_string(s: &str) -> Vec<Value> {
     vals
 }
 
-fn resolve(s: Vec<Value>, map: &HashMap<&str, &str>) -> Vec<Value> {
-    let mut res: Vec<Value> = vec![];
+/// Resolves `Chunk::Resolve` items to their respective string values.
+fn resolve(s: Vec<Chunk>, map: &HashMap<&str, &str>) -> Vec<Chunk> {
+    let mut res: Vec<Chunk> = vec![];
 
     for elem in s.into_iter() {
-        if let Value::Resolve(x) = elem {
+        if let Chunk::Resolve(x) = elem {
             let val = map.get(x.as_str()).map(|&s| resolve(process_string(s), map));
 
             if let Some(mut x) = val {
@@ -256,29 +281,30 @@ fn resolve(s: Vec<Value>, map: &HashMap<&str, &str>) -> Vec<Value> {
     flatten(res)
 }
 
-fn flatten(s: Vec<Value>) -> Vec<Value> {
+/// Simplifies a Chunk vector by collapsing neighboring Normal or Verbatim chunks.
+fn flatten(s: Vec<Chunk>) -> Vec<Chunk> {
     let mut normal = String::new();
     let mut verbatim = String::new();
-    let mut res: Vec<Value> = vec![];
+    let mut res: Vec<Chunk> = vec![];
 
     for elem in s.into_iter() {
-        if let Value::Normal(x) = elem {
+        if let Chunk::Normal(x) = elem {
             if !verbatim.is_empty() {
-                res.push(Value::Verbatim(take(&mut verbatim)));
+                res.push(Chunk::Verbatim(take(&mut verbatim)));
             }
             normal += &x;
-        } else if let Value::Verbatim(x) = elem {
+        } else if let Chunk::Verbatim(x) = elem {
             if !normal.is_empty() {
-                res.push(Value::Normal(take(&mut normal)));
+                res.push(Chunk::Normal(take(&mut normal)));
             }
             verbatim += &x;
         } else {
             if !verbatim.is_empty() {
-                res.push(Value::Verbatim(take(&mut verbatim)));
+                res.push(Chunk::Verbatim(take(&mut verbatim)));
             }
 
             if !normal.is_empty() {
-                res.push(Value::Normal(take(&mut normal)));
+                res.push(Chunk::Normal(take(&mut normal)));
             }
 
             res.push(elem);
@@ -286,27 +312,30 @@ fn flatten(s: Vec<Value>) -> Vec<Value> {
     }
 
     if !verbatim.is_empty() {
-        res.push(Value::Verbatim(verbatim));
+        res.push(Chunk::Verbatim(verbatim));
     }
 
     if !normal.is_empty() {
-        res.push(Value::Normal(normal));
+        res.push(Chunk::Normal(normal));
     }
 
     res
 }
 
-fn eval_latex_commands(values: Vec<Value>) -> Vec<Value> {
-    let mut res: Vec<Value> = vec![];
+/// Best-effort evaluation of LaTeX commands with a focus on diacritics.
+/// Will dump the command arguments if evaluation not possible.
+/// Nested commands are not supported.
+fn eval_latex_commands(values: Vec<Chunk>) -> Vec<Chunk> {
+    let mut res: Vec<Chunk> = vec![];
     let mut iter = values.into_iter().peekable();
 
     fn modify_args(
-        val: Option<Value>,
+        val: Option<Chunk>,
         verb: bool,
         f: impl Fn(String) -> String,
-    ) -> Option<Value> {
+    ) -> Option<Chunk> {
         val.map(|val| {
-            if let Value::CommandArgs(args) = val {
+            if let Chunk::CommandArgs(args) = val {
                 to_value(&f(args), verb)
             } else {
                 val
@@ -323,16 +352,16 @@ fn eval_latex_commands(values: Vec<Value>) -> Vec<Value> {
         v
     }
 
-    fn to_value(s: &str, verb: bool) -> Value {
+    fn to_value(s: &str, verb: bool) -> Chunk {
         if verb {
-            Value::Verbatim(s.to_string())
+            Chunk::Verbatim(s.to_string())
         } else {
-            Value::Normal(s.to_string())
+            Chunk::Normal(s.to_string())
         }
     }
 
     while let Some(val) = iter.next() {
-        if let Value::CommandName(cmd, verb) = val {
+        if let Chunk::CommandName(cmd, verb) = val {
             let next = match cmd.as_str() {
                 "LaTeX" => Some(to_value("LaTeX", true)),
                 "TeX" => Some(to_value("TeX", true)),
@@ -345,7 +374,7 @@ fn eval_latex_commands(values: Vec<Value>) -> Vec<Value> {
                 "OE" => Some(to_value("Œ", verb)),
                 "ae" => Some(to_value("æ", verb)),
                 "AE" => Some(to_value("Æ", verb)),
-                "o" if !matches!(iter.peek(), Some(Value::CommandArgs(_))) => {
+                "o" if !matches!(iter.peek(), Some(Chunk::CommandArgs(_))) => {
                     Some(to_value("ø", verb))
                 }
                 "O" => Some(to_value("Ø", verb)),
@@ -425,11 +454,14 @@ fn eval_latex_commands(values: Vec<Value>) -> Vec<Value> {
     flatten(res)
 }
 
+/// Characters that can be escaped.
 fn is_escapable(c: char) -> bool {
     let escapable = "&%{},$'";
     escapable.contains(c)
 }
 
+/// Characters that are the name of a single-char command
+/// that automatically terminates.
 fn is_single_char_func(c: char) -> bool {
     let escapable = "\"´`^~=.";
     escapable.contains(c)
@@ -437,27 +469,32 @@ fn is_single_char_func(c: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{eval_latex_commands, process_string, resolve, Value};
+    use super::{eval_latex_commands, process_string, resolve, Chunk};
     use std::collections::HashMap;
 
-    fn R(s: &str) -> Value {
-        Value::Resolve(s.to_string())
+    #[allow(non_snake_case)]
+    fn R(s: &str) -> Chunk {
+        Chunk::Resolve(s.to_string())
     }
 
-    fn N(s: &str) -> Value {
-        Value::Normal(s.to_string())
+    #[allow(non_snake_case)]
+    fn N(s: &str) -> Chunk {
+        Chunk::Normal(s.to_string())
     }
 
-    fn V(s: &str) -> Value {
-        Value::Verbatim(s.to_string())
+    #[allow(non_snake_case)]
+    fn V(s: &str) -> Chunk {
+        Chunk::Verbatim(s.to_string())
     }
 
-    fn C(s: &str, verb: bool) -> Value {
-        Value::CommandName(s.to_string(), verb)
+    #[allow(non_snake_case)]
+    fn C(s: &str, verb: bool) -> Chunk {
+        Chunk::CommandName(s.to_string(), verb)
     }
 
-    fn CA(s: &str) -> Value {
-        Value::CommandArgs(s.to_string())
+    #[allow(non_snake_case)]
+    fn CA(s: &str) -> Chunk {
+        Chunk::CommandArgs(s.to_string())
     }
 
     #[test]

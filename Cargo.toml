@@ -3,9 +3,12 @@ name = "biblatex"
 version = "0.1.0"
 authors = ["Martin Haug <mhaug@live.de>"]
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/typst/biblatex"
 edition = "2018"
 
 [dependencies]
+chinese-number = "0.6.0"
 Inflector = "0.11.4"
+numerals = "0.1.4"
 unicode-normalization = "0.1.13"
 unicode-xid = "0.2"
