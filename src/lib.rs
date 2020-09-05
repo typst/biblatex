@@ -1,3 +1,7 @@
+#[macro_use]
+extern crate lazy_static;
+
+pub mod dtypes;
 pub mod fields;
 pub mod parse;
 pub mod syntax;
@@ -46,7 +50,7 @@ mod tests {
                 if y.0.to_lowercase() == "author" {
                     println!(
                         "{:?}",
-                        fields::split_token_lists(y.1)
+                        fields::split_token_lists(y.1, "and")
                             .iter()
                             .map(|x| fields::format_verbatim(x))
                             .collect::<Vec<String>>()
