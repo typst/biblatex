@@ -1,5 +1,5 @@
-use crate::parse::Chunk;
 use crate::dtypes::Person;
+use crate::parse::Chunk;
 
 enum Pagination {
     Page,
@@ -156,4 +156,3 @@ enum BibtexFields {
 
     Unknown(String, Vec<Chunk>),
 }
-

@@ -1,11 +1,11 @@
+extern crate chinese_number;
 extern crate inflector;
 extern crate numerals;
-extern crate chinese_number;
 
 use crate::parse::Chunk;
+use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
 use inflector::Inflector;
 use numerals::roman::Roman;
-use chinese_number::{ChineseNumberToNumber, ChineseNumberCountMethod};
 use regex::Regex;
 
 lazy_static! {
@@ -146,7 +146,7 @@ impl Person {
     fn from_single_comma(s1: Vec<Chunk>, s2: Vec<Chunk>) -> Self {
         if s2.is_empty() || (s2.len() == 1 && format_verbatim(&s2).is_empty()) {
             let formatted = format_verbatim(&s1);
-            let last_space = formatted.rfind(" ").unwrap_or(0);
+            let last_space = formatted.rfind(' ').unwrap_or(0);
             let (prefix, last) = formatted.split_at(last_space);
             return Person {
                 given_name: String::new(),
@@ -195,9 +195,7 @@ impl Person {
                 || (!has_seen_uppercase_words && index < last_word_start)
             {
                 prefix.push(c);
-            } else if has_seen_uppercase_words
-                || (!has_seen_uppercase_words && index >= last_word_start)
-            {
+            } else if has_seen_uppercase_words || index >= last_word_start {
                 name.push(c);
             }
         }
@@ -253,8 +251,9 @@ fn parse_integers(source: &[Chunk]) -> Result<i64, ()> {
     if let Ok(n) = str::parse::<i64>(s_t) {
         Ok(n)
     } else if let Some(roman) = Roman::parse(s_t) {
-        Ok(Roman::from(roman).value() as i64)
-    } else if let Ok(n) = s_t.parse_chinese_number(ChineseNumberCountMethod::TenThousand) {
+        Ok(roman.value() as i64)
+    } else if let Ok(n) = s_t.parse_chinese_number(ChineseNumberCountMethod::TenThousand)
+    {
         Ok(n)
     } else {
         Err(())
@@ -451,7 +450,9 @@ pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{split_at_normal_char, split_values, Person, ValueCharIter, parse_ranges};
+    use super::{
+        parse_ranges, split_at_normal_char, split_values, Person, ValueCharIter,
+    };
     use crate::parse::Chunk;
 
     #[allow(non_snake_case)]
