@@ -1,16 +1,35 @@
 extern crate chinese_number;
+extern crate chrono;
 extern crate inflector;
 extern crate numerals;
 
 use crate::parse::Chunk;
 use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
+use chrono::prelude::*;
 use inflector::Inflector;
 use numerals::roman::Roman;
 use regex::Regex;
 
+use std::cmp::Ordering;
+
 lazy_static! {
     static ref RANGE_REGEX: Regex =
         Regex::new(r"(?P<s>\d+)\s*-+\s*(\d+:)?(?P<e>\d+)").unwrap();
+
+    // Definite date Regexes
+    static ref MONTH_REGEX: Regex =
+        Regex::new(r"^(?P<y>(\+|-)?\d{4})-+(?P<m>\d{2})").unwrap();
+    static ref YEAR_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{4})").unwrap();
+
+    // Date range Regexes
+    static ref CENTURY_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{2})XX").unwrap();
+    static ref DECADE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{3})X").unwrap();
+    static ref MONTH_UNSURE_REGEX: Regex =
+        Regex::new(r"^(?P<y>(\+|-)?\d{4})-+XX").unwrap();
+    static ref DAY_UNSURE_REGEX: Regex =
+        Regex::new(r"^(?P<y>(\+|-)?\d{4})-*(?P<m>\d{2})-*XX").unwrap();
+    static ref DAY_MONTH_UNSURE_REGEX: Regex =
+        Regex::new(r"^(?P<y>(\+|-)?\d{4})-*XX-*XX").unwrap();
 }
 
 #[derive(Debug)]
@@ -218,6 +237,345 @@ impl Person {
         let mut p = Person::from_single_comma(s1, s3);
         p.suffix = format_verbatim(&s2);
         p
+    }
+}
+
+/// A date atom is a timezone-unaware Date that must specify a year
+/// and can specify month, day, and time. Flags about uncertainity / precision
+/// are stored within the parent `Date` struct.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DateAtom {
+    pub year: i32,
+    /// The month (starts at zero).
+    pub month: Option<u8>,
+    /// The day (starts at zero).
+    pub day: Option<u8>,
+    pub time: Option<NaiveTime>,
+}
+
+impl PartialOrd for DateAtom {
+    fn partial_cmp(&self, other: &DateAtom) -> Option<Ordering> {
+        let year_ord = self.year.cmp(&other.year);
+        if year_ord != Ordering::Equal {
+            return Some(year_ord);
+        }
+
+        if let Some(month) = self.month {
+            if let Some(month_o) = other.month {
+                let month_ord = month.cmp(&month_o);
+                if month_ord != Ordering::Equal {
+                    return Some(month_ord);
+                }
+            } else {
+                return None;
+            }
+        } else {
+            return if other.month.is_none() {
+                Some(Ordering::Equal)
+            } else {
+                None
+            };
+        }
+
+        if let Some(day) = self.day {
+            if let Some(day_o) = other.day {
+                let day_ord = day.cmp(&day_o);
+                if day_ord != Ordering::Equal {
+                    return Some(day_ord);
+                }
+            } else {
+                return None;
+            }
+        } else {
+            return if other.day.is_none() {
+                Some(Ordering::Equal)
+            } else {
+                None
+            };
+        }
+
+        if let Some(time) = self.time {
+            if let Some(time_o) = other.time {
+                Some(time.cmp(&time_o))
+            } else {
+                None
+            }
+        } else if other.time.is_none() {
+            Some(Ordering::Equal)
+        } else {
+            None
+        }
+    }
+}
+
+impl DateAtom {
+    fn new(mut source: String) -> Result<Self, ()> {
+        source.retain(|f| !f.is_whitespace());
+
+        let time = if let Some(pos) = source.find('T') {
+            if pos + 1 < source.len() {
+                let time_str = source.split_off(pos + 1);
+                source.pop();
+                time_str.parse::<NaiveTime>().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let full_date = source.parse::<NaiveDate>();
+
+        if let Ok(ndate) = full_date {
+            Ok(DateAtom {
+                year: ndate.year(),
+                month: Some(ndate.month0() as u8),
+                day: Some(ndate.day0() as u8),
+                time,
+            })
+        } else if let Some(captures) = MONTH_REGEX.captures(&source) {
+            Ok(DateAtom {
+                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
+                month: Some(
+                    (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap() - 1,
+                ),
+                day: None,
+                time,
+            })
+        } else if let Some(captures) = YEAR_REGEX.captures(&source) {
+            Ok(DateAtom {
+                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
+                month: None,
+                day: None,
+                time,
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+/// Indicates whether the start or end of a date interval is open or definite
+#[derive(Clone, Debug, PartialEq)]
+pub enum DateKind {
+    Open,
+    Definite(DateAtom),
+}
+
+/// Represents a date or a range of dates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Date {
+    /// Indicates whether the sources are sure about the date.
+    pub is_uncertain: bool,
+    /// Indicates the specificity of the date value.
+    pub is_approximate: bool,
+    /// The date's value, or its start point if `range_end.is_some()`.
+    pub value: DateKind,
+    /// If this is Some, the date is a range (`Date.value .. Date.range_end`).
+    pub range_end: Option<DateKind>,
+}
+
+// TODO: Handle open date kind
+// impl PartialOrd for Date {
+//     fn partial_cmp(&self, other: &Date) -> Option<Ordering> {
+//         if let Some(range_end) = &self.range_end {
+//             if let Some(range_end_o) = &other.range_end {
+//                 let start_cmp = self.value.partial_cmp(&other.value);
+//                 let end_cmp = range_end.partial_cmp(&range_end_o);
+
+//                 if start_cmp.is_none() || end_cmp.is_none() {
+//                     return None;
+//                 }
+
+//                 let start_cmp = start_cmp.unwrap();
+//                 let end_cmp = end_cmp.unwrap();
+
+//                 if start_cmp == end_cmp || end_cmp == Ordering::Equal {
+//                     Some(start_cmp)
+//                 } else if start_cmp == Ordering::Equal {
+//                     Some(end_cmp)
+//                 } else {
+//                     None
+//                 }
+//             } else {
+//                 self.value.partial_cmp(&other.value)
+//             }
+//         } else {
+//             // We do not have it
+//             if other.range_end.is_none() {
+//                 self.value.partial_cmp(&other.value)
+//             } else {
+//                 // Use the above implementation
+//                 other.partial_cmp(self).map(Ordering::reverse)
+//             }
+//         }
+//     }
+// }
+
+impl Date {
+    fn new(chunks: Vec<Chunk>) -> Result<Self, ()> {
+        let mut date_str = format_verbatim(&chunks).trim_end().to_string();
+
+        let last_char = date_str.chars().last().ok_or(())?;
+        let (is_uncertain, is_approximate) = match last_char {
+            '?' => (true, false),
+            '~' => (false, true),
+            '%' => (true, true),
+            _ => (false, false),
+        };
+
+        let date;
+
+        let range_end = if date_str.to_uppercase().contains('X') {
+            let (d1, d2) = Date::range_dates(date_str)?;
+            date = DateKind::Definite(d1);
+            Some(DateKind::Definite(d2))
+        } else {
+            if date_str.contains('/') {
+                let (s1, s2) = split_at_normal_char(chunks, '/', true);
+                let (s1, mut s2) = (format_verbatim(&s1), format_verbatim(&s2));
+
+                if is_uncertain || is_approximate {
+                    s2.pop();
+                }
+
+                if Date::is_open_range(&s1) {
+                    date = DateKind::Open;
+                } else {
+                    date = DateKind::Definite(DateAtom::new(s1)?);
+                }
+
+                if Date::is_open_range(&s2) {
+                    Some(DateKind::Open)
+                } else {
+                    Some(DateKind::Definite(DateAtom::new(s2)?))
+                }
+            } else {
+                if is_uncertain || is_approximate {
+                    date_str.pop();
+                }
+
+                date = DateKind::Definite(DateAtom::new(date_str)?);
+                None
+            }
+        };
+
+        Ok(Date {
+            is_approximate,
+            is_uncertain,
+            value: date,
+            range_end,
+        })
+    }
+
+    fn is_open_range(s: &str) -> bool {
+        if s.trim().is_empty() {
+            true
+        } else if s.trim() == ".." {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn range_dates(mut source: String) -> Result<(DateAtom, DateAtom), ()> {
+        source.retain(|c| !c.is_whitespace());
+
+        if let Some(captures) = CENTURY_REGEX.captures(&source) {
+            let century: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            Ok((
+                DateAtom {
+                    year: century * 100,
+                    month: None,
+                    day: None,
+                    time: None,
+                },
+                DateAtom {
+                    year: century * 100 + 99,
+                    month: None,
+                    day: None,
+                    time: None,
+                },
+            ))
+        } else if let Some(captures) = DECADE_REGEX.captures(&source) {
+            let decade: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            Ok((
+                DateAtom {
+                    year: decade * 10,
+                    month: None,
+                    day: None,
+                    time: None,
+                },
+                DateAtom {
+                    year: decade * 10 + 9,
+                    month: None,
+                    day: None,
+                    time: None,
+                },
+            ))
+        } else if let Some(captures) = MONTH_UNSURE_REGEX.captures(&source) {
+            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
+
+            Ok((
+                DateAtom {
+                    year,
+                    month: Some(0),
+                    day: None,
+                    time: None,
+                },
+                DateAtom {
+                    year,
+                    month: Some(11),
+                    day: None,
+                    time: None,
+                },
+            ))
+        } else if let Some(captures) = DAY_MONTH_UNSURE_REGEX.captures(&source) {
+            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
+
+            Ok((
+                DateAtom {
+                    year,
+                    month: Some(0),
+                    day: Some(0),
+                    time: None,
+                },
+                DateAtom {
+                    year,
+                    month: Some(11),
+                    day: Some(30),
+                    time: None,
+                },
+            ))
+        } else if let Some(captures) = DAY_UNSURE_REGEX.captures(&source) {
+            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            let month = (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap();
+
+            let days = if month == 12 {
+                NaiveDate::from_ymd(year + 1, 1, 1)
+            } else {
+                NaiveDate::from_ymd(year, month as u32 + 1, 1)
+            }
+            .signed_duration_since(NaiveDate::from_ymd(year, month as u32, 1))
+            .num_days();
+
+            Ok((
+                DateAtom {
+                    year,
+                    month: Some(month - 1),
+                    day: Some(0),
+                    time: None,
+                },
+                DateAtom {
+                    year,
+                    month: Some(month - 1),
+                    day: Some(days as u8 - 1),
+                    time: None,
+                },
+            ))
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -451,9 +809,11 @@ pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_ranges, split_at_normal_char, split_values, Person, ValueCharIter,
+        parse_ranges, split_at_normal_char, split_values, Date, DateAtom, DateKind,
+        Person, ValueCharIter,
     };
     use crate::parse::Chunk;
+    use chrono::NaiveTime;
 
     #[allow(non_snake_case)]
     fn R(s: &str) -> Chunk {
@@ -595,5 +955,120 @@ mod tests {
         assert_eq!(res[0], 31 .. 43);
         assert_eq!(res[1], 4 .. 6);
         assert_eq!(res[2], 194 .. 245);
+    }
+
+    #[test]
+    fn new_date_atom() {
+        let atom1 = DateAtom::new("2017-10 -25".to_string()).unwrap();
+        assert_eq!(atom1.year, 2017);
+        assert_eq!(atom1.month, Some(9));
+        assert_eq!(atom1.day, Some(24));
+        assert_eq!(atom1.time, None);
+
+        let atom2 = DateAtom::new("  2019 -- 03 ".to_string()).unwrap();
+        assert_eq!(atom2.year, 2019);
+        assert_eq!(atom2.month, Some(2));
+        assert_eq!(atom2.day, None);
+        assert_eq!(atom2.time, None);
+
+        let atom3 = DateAtom::new("  -0006".to_string()).unwrap();
+        assert_eq!(atom3.year, -6);
+        assert_eq!(atom3.month, None);
+        assert_eq!(atom3.day, None);
+        assert_eq!(atom3.time, None);
+
+        let atom4 = DateAtom::new("2020-09-06T13:39:00".to_string()).unwrap();
+        assert_eq!(atom4.year, 2020);
+        assert_eq!(atom4.month, Some(8));
+        assert_eq!(atom4.day, Some(5));
+        assert_eq!(atom4.time, Some(NaiveTime::from_hms(13, 39, 00)));
+
+        assert!(atom3 < atom4);
+        assert!(atom2 > atom1);
+    }
+
+    #[test]
+    fn new_date() {
+        let date = Date::new(vec![N("2017-10 -25?")]).unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, 2017);
+            assert_eq!(val.month, Some(9));
+            assert_eq!(val.day, Some(24));
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+        assert_eq!(date.is_uncertain, true);
+        assert_eq!(date.is_approximate, false);
+        assert_eq!(date.range_end, None);
+
+        let date = Date::new(vec![N("19XX~")]).unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, 1900);
+            assert_eq!(val.month,None);
+            assert_eq!(val.day, None);
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+        if let DateKind::Definite(val) = date.range_end.unwrap() {
+            assert_eq!(val.year, 1999);
+            assert_eq!(val.month, None);
+            assert_eq!(val.day, None);
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+        assert_eq!(date.is_uncertain, false);
+        assert_eq!(date.is_approximate, true);
+
+        let date = Date::new(vec![N("1948-03-02/1950")]).unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, 1948);
+            assert_eq!(val.month, Some(2));
+            assert_eq!(val.day, Some(1));
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+        if let DateKind::Definite(val) = date.range_end.unwrap() {
+            assert_eq!(val.year, 1950);
+            assert_eq!(val.month,None);
+            assert_eq!(val.day, None);
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+
+        assert_eq!(date.is_uncertain, false);
+        assert_eq!(date.is_approximate, false);
+
+        let date = Date::new(vec![N("2020-04-04T18:30:31/")]).unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, 2020);
+            assert_eq!(val.month, Some(3));
+            assert_eq!(val.day, Some(3));
+            assert_eq!(val.time, Some(NaiveTime::from_hms(18, 30, 31)));
+        } else {
+            panic!("Wrong DateKind");
+        }
+        assert_eq!(date.range_end.unwrap(), DateKind::Open);
+
+        assert_eq!(date.is_uncertain, false);
+        assert_eq!(date.is_approximate, false);
+
+        let date = Date::new(vec![N("/-0031-07%")]).unwrap();
+        if let DateKind::Definite(val) = date.range_end.unwrap() {
+            assert_eq!(val.year, -31);
+            assert_eq!(val.month, Some(6));
+            assert_eq!(val.day, None);
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+        assert_eq!(date.value, DateKind::Open);
+
+        assert_eq!(date.is_uncertain, true);
+        assert_eq!(date.is_approximate, true);
     }
 }

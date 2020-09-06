@@ -10,7 +10,7 @@ use crate::syntax::BiblatexParser;
 
 #[cfg(test)]
 mod tests {
-    use crate::fields;
+    use crate::dtypes;
     use crate::parse::new_collection;
     use std::fs;
 
@@ -50,9 +50,9 @@ mod tests {
                 if y.0.to_lowercase() == "author" {
                     println!(
                         "{:?}",
-                        fields::split_token_lists(y.1, "and")
+                        dtypes::split_token_lists(y.1, "and")
                             .iter()
-                            .map(|x| fields::format_verbatim(x))
+                            .map(|x| dtypes::format_verbatim(x))
                             .collect::<Vec<String>>()
                     );
                 }

@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 chinese-number = "0.6.0"
+chrono = "0.4.15"
 lazy_static = "1.4.0"
 Inflector = "0.11.4"
 numerals = "0.1.4"
