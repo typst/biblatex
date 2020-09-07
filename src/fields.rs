@@ -1,39 +1,5 @@
-use crate::dtypes::Person;
+use crate::dtypes::{Person, IntOrChunks, Pagination, EditorType, Gender};
 use crate::parse::Chunk;
-
-enum Pagination {
-    Page,
-    Column,
-    Line,
-    Verse,
-    Section,
-    Parapgraph,
-}
-
-enum EditorType {
-    Editor,
-    Compiler,
-    Founder,
-    Continuator,
-    Redactor,
-    Reviser,
-    Collaborator,
-    Organizer,
-}
-
-enum Gender {
-    SingularFemale,
-    SingularMale,
-    SingularNeuter,
-    PluralFemale,
-    PluralMale,
-    PluralNeuter,
-}
-
-struct IntOrChunks {
-    chunks: Option<Vec<Chunk>>,
-    int: i64,
-}
 
 enum BiblatexFields {
     Abstract(Vec<Chunk>),

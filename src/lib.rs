@@ -1,5 +1,8 @@
 #[macro_use]
 extern crate lazy_static;
+extern crate strum;
+#[macro_use]
+extern crate anyhow;
 
 pub mod dtypes;
 pub mod fields;

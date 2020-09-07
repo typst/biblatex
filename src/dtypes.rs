@@ -8,9 +8,11 @@ use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
 use chrono::prelude::*;
 use inflector::Inflector;
 use numerals::roman::Roman;
+use strum_macros::{EnumString, AsRefStr, Display};
 use regex::Regex;
 
 use std::cmp::Ordering;
+use std::str::FromStr;
 
 lazy_static! {
     static ref RANGE_REGEX: Regex =
@@ -31,6 +33,10 @@ lazy_static! {
     static ref DAY_MONTH_UNSURE_REGEX: Regex =
         Regex::new(r"^(?P<y>(\+|-)?\d{4})-*XX-*XX").unwrap();
 }
+
+/*********************************
+ ********* Name Parsing **********
+ *********************************/
 
 #[derive(Debug)]
 /// An author, editor, or some other person affiliated with the cited work.
@@ -240,6 +246,10 @@ impl Person {
     }
 }
 
+/*********************************
+ ********* Date Parsing **********
+ *********************************/
+
 /// A date atom is a timezone-unaware Date that must specify a year
 /// and can specify month, day, and time. Flags about uncertainity / precision
 /// are stored within the parent `Date` struct.
@@ -309,7 +319,7 @@ impl PartialOrd for DateAtom {
 }
 
 impl DateAtom {
-    fn new(mut source: String) -> Result<Self, ()> {
+    fn new(mut source: String) -> Result<Self, anyhow::Error> {
         source.retain(|f| !f.is_whitespace());
 
         let time = if let Some(pos) = source.find('T') {
@@ -350,7 +360,7 @@ impl DateAtom {
                 time,
             })
         } else {
-            Err(())
+            Err(anyhow!("Date does not match any known format"))
         }
     }
 }
@@ -413,10 +423,10 @@ pub struct Date {
 // }
 
 impl Date {
-    fn new(chunks: Vec<Chunk>) -> Result<Self, ()> {
+    fn new(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
         let mut date_str = format_verbatim(&chunks).trim_end().to_string();
 
-        let last_char = date_str.chars().last().ok_or(())?;
+        let last_char = date_str.chars().last().ok_or(anyhow!("Date string is empty"))?;
         let (is_uncertain, is_approximate) = match last_char {
             '?' => (true, false),
             '~' => (false, true),
@@ -478,7 +488,7 @@ impl Date {
         }
     }
 
-    fn range_dates(mut source: String) -> Result<(DateAtom, DateAtom), ()> {
+    fn range_dates(mut source: String) -> Result<(DateAtom, DateAtom), anyhow::Error> {
         source.retain(|c| !c.is_whitespace());
 
         if let Some(captures) = CENTURY_REGEX.captures(&source) {
@@ -574,10 +584,109 @@ impl Date {
                 },
             ))
         } else {
-            Err(())
+            Err(anyhow!("Date does not match any known format"))
         }
     }
 }
+
+/*********************************
+ ** Chunk type parsing adaptors **
+ *********************************/
+
+ /// Implementors represent the serialized form of an Bib(La)TeX data type.
+pub trait Type: Sized {
+    /// This function allows to extract data out of an
+    /// resolved Chunk vector for consumption elsewhere.
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error>;
+}
+
+impl Type for Vec<Vec<Chunk>> {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(split_token_lists(chunks, "and"))
+    }
+}
+
+impl Type for Vec<Person> {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        let list = <Vec<Vec<Chunk>>>::parse(chunks)?;
+        let mut persons = vec![];
+
+        for pers in list {
+            persons.push(Person::new(pers));
+        }
+
+        Ok(persons)
+    }
+}
+
+impl Type for Date {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Date::new(chunks)
+    }
+}
+
+impl Type for String {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(format_verbatim(&chunks))
+    }
+}
+
+impl Type for i64 {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        parse_integers(&chunks)
+    }
+}
+
+impl Type for IntOrChunks {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        let res = parse_integers(&chunks).ok();
+        if res.is_some() {
+            Ok(IntOrChunks { int: res, chunks: None })
+        } else {
+            Ok(IntOrChunks { int: res, chunks: Some(chunks) })
+        }
+    }
+}
+
+impl Type for std::ops::Range<u32> {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        let mut ranges = parse_ranges(chunks);
+
+        if !ranges.is_empty() {
+            Ok(ranges.remove(0))
+        } else {
+            Err(anyhow!("No range specified"))
+        }
+    }
+}
+
+impl Type for Vec<std::ops::Range<u32>> {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(parse_ranges(chunks))
+    }
+}
+
+impl Type for Pagination {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(Pagination::from_str(&format_verbatim(&chunks).to_lowercase())?)
+    }
+}
+
+impl Type for EditorType {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(EditorType::from_str(&format_verbatim(&chunks).to_lowercase())?)
+    }
+}
+
+impl Type for Gender {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Gender::from_str(&format_verbatim(&chunks).to_lowercase())
+    }
+}
+
+/*********************************
+ ************ Ranges *************
+ *********************************/
 
 /// Parse range fields with a number of ranges and an amount of dashes seperating
 /// start from end.
@@ -601,8 +710,12 @@ fn parse_ranges(source: Vec<Chunk>) -> Vec<std::ops::Range<u32>> {
     res
 }
 
+/*********************************
+ *********** Integers ************
+ *********************************/
+
 /// Parse integers. This method will accept arabic, roman, and chinese numerals.
-fn parse_integers(source: &[Chunk]) -> Result<i64, ()> {
+fn parse_integers(source: &[Chunk]) -> Result<i64, anyhow::Error> {
     let s = format_verbatim(source);
     let s_t = s.trim();
 
@@ -614,9 +727,132 @@ fn parse_integers(source: &[Chunk]) -> Result<i64, ()> {
     {
         Ok(n)
     } else {
-        Err(())
+        Err(anyhow!("Could not parse integer"))
     }
 }
+
+pub struct IntOrChunks {
+    pub chunks: Option<Vec<Chunk>>,
+    pub int: Option<i64>,
+}
+
+/*********************************
+ ********* Various Enums *********
+ *********************************/
+
+#[derive(EnumString, AsRefStr, Display, Debug, Clone, PartialEq)]
+#[strum(serialize_all = "snake_case")]
+/// How the page increment is triggered.
+pub enum Pagination {
+    Page,
+    Column,
+    Line,
+    Verse,
+    Section,
+    Parapgraph,
+}
+
+#[derive(EnumString, AsRefStr, Display, Debug, Clone, PartialEq)]
+#[strum(serialize_all = "snake_case")]
+/// Which role the according editor had (cf. EditorA, EditorB, EditorC fields).
+pub enum EditorType {
+    Editor,
+    Compiler,
+    Founder,
+    Continuator,
+    Redactor,
+    Reviser,
+    Collaborator,
+    Organizer,
+}
+
+#[derive(AsRefStr, Display, Debug, Clone, PartialEq)]
+/// Gender of the author or editor (if no author specified).
+pub enum Gender {
+    SingularFemale,
+    SingularMale,
+    SingularNeuter,
+    PluralFemale,
+    PluralMale,
+    PluralNeuter,
+}
+
+impl std::str::FromStr for Gender {
+    type Err = anyhow::Error;
+
+    /// Two-letter gender serialization in accordance with the BibLaTeX standard.
+    fn from_str(s: &str) -> ::std::result::Result<Gender, Self::Err> {
+        match s {
+            "sf" => Ok(Gender::SingularFemale),
+            "sm" => Ok(Gender::SingularMale),
+            "sn" => Ok(Gender::SingularNeuter),
+            "pf" => Ok(Gender::PluralFemale),
+            "pm" => Ok(Gender::PluralMale),
+            "pn" => Ok(Gender::PluralNeuter),
+            _    => Err(anyhow!("Unknown gender identifier")),
+        }
+    }
+}
+
+impl Gender {
+    /// Puts the gender into plural.
+    pub fn pluralize(&self) -> Self {
+        match self {
+            Gender::SingularFemale => Gender::PluralFemale,
+            Gender::SingularMale => Gender::PluralMale,
+            Gender::SingularNeuter => Gender::PluralNeuter,
+            _ => self.clone(),
+        }
+    }
+
+    /// Puts the gender into the singular.
+    pub fn singularize(&self) -> Self {
+        match self {
+            Gender::PluralFemale => Gender::SingularFemale,
+            Gender::PluralMale => Gender::SingularMale,
+            Gender::PluralNeuter => Gender::SingularNeuter,
+            _ => self.clone(),
+        }
+    }
+
+    /// Finds a gender to summarize a list of genders.
+    pub fn coalesce(list: &[Self]) -> Option<Self> {
+        if list.is_empty() {
+            return None;
+        }
+
+        if list.len() == 1 {
+            return Some(list[0].clone())
+        }
+
+        let mut was_female = false;
+        let mut was_male = false;
+        let mut was_neuter = false;
+
+        for g in list {
+            match g {
+                Gender::SingularFemale => { was_female = true; }
+                Gender::SingularMale => { was_male = true; }
+                Gender::SingularNeuter => { was_neuter = true; }
+                Gender::PluralFemale => { was_female = true; }
+                Gender::PluralMale => { was_male = true; }
+                Gender::PluralNeuter => { was_neuter = true; }
+            }
+        }
+
+        if was_female && !was_male && !was_neuter {
+            Some(Gender::PluralFemale)
+        } else if !was_female && was_male && !was_neuter {
+            Some(Gender::PluralMale)
+        } else {
+            Some(Gender::PluralNeuter)
+        }
+    }
+}
+
+/*********************************
+ *********** Utilities ***********
+ *********************************/
 
 #[derive(Clone)]
 /// This struct is an Iterator for Chunk slices that will iterate through the
@@ -1005,7 +1241,7 @@ mod tests {
         let date = Date::new(vec![N("19XX~")]).unwrap();
         if let DateKind::Definite(val) = date.value {
             assert_eq!(val.year, 1900);
-            assert_eq!(val.month,None);
+            assert_eq!(val.month, None);
             assert_eq!(val.day, None);
             assert_eq!(val.time, None);
         } else {
@@ -1033,7 +1269,7 @@ mod tests {
         }
         if let DateKind::Definite(val) = date.range_end.unwrap() {
             assert_eq!(val.year, 1950);
-            assert_eq!(val.month,None);
+            assert_eq!(val.month, None);
             assert_eq!(val.day, None);
             assert_eq!(val.time, None);
         } else {
