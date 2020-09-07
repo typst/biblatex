@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::mem::take;
 use unicode_normalization::char;
+use crate::dtypes::{Person, IntOrChunks, ChunkExt};
 
 use crate::syntax::BiblatexParser;
 
@@ -39,11 +40,12 @@ pub enum Symbols {
 #[derive(Clone, Debug, Default)]
 /// A bibliography entry in its intermediate form (parsed into Chunks, but not yet
 /// the appropriate data types).
-pub struct CollectionEntry<'s> {
+pub struct CollectionEntry {
+    pub cite_key: String,
     /// Denotes the type of bibliography item (e.g. `article`).
-    pub entry_type: &'s str,
+    pub entry_type: String,
     /// Maps from field names to their associated Chunk vectors.
-    pub props: HashMap<&'s str, Vec<Chunk>>,
+    props: HashMap<String, Vec<Chunk>>,
 }
 
 /// Create a Vector of cite key and `CollectionEntry` tuples from a source string.
@@ -57,12 +59,13 @@ pub fn new_collection<'s>(
     for e in parsed.entries.into_iter() {
         let cite_key = e.0;
         let mut collection_entry = CollectionEntry {
-            entry_type: e.1.entry_type,
+            cite_key: cite_key.to_string(),
+            entry_type: e.1.entry_type.to_lowercase().to_string(),
             props: HashMap::new(),
         };
         for prop in e.1.props {
             collection_entry.props.insert(
-                prop.0,
+                prop.0.to_string(),
                 eval_latex_commands(resolve(process_string(prop.1), &parsed.strings)),
             );
         }
@@ -70,6 +73,47 @@ pub fn new_collection<'s>(
     }
 
     coll_vec
+}
+
+impl CollectionEntry {
+    fn get<'a>(&'a self, key: &str) -> Vec<Chunk> {
+        self.props.get(&key.to_lowercase()).unwrap_or(&vec![]).clone()
+    }
+}
+
+macro_rules! fields {
+    {$($getter:ident : $field_name:expr => $res:ty),* $(,)*} => {
+        impl CollectionEntry {
+            $(
+                pub fn $getter<'a>(&'a self) -> Result<$res, anyhow::Error> {
+                    self.get($field_name).parse::<$res>()
+                }
+            )*
+        }
+    };
+}
+
+fields!{
+    get_address: "address" => Vec<Chunk>,
+    get_annote: "annote" => Vec<Chunk>,
+    get_author: "author" => Vec<Person>,
+    get_booktitle: "booktitle" => Vec<Chunk>,
+    get_chapter: "chapter" => Vec<Chunk>,
+    get_edition: "edition" => IntOrChunks,
+    get_editor: "editor" => Vec<Person>,
+    get_howpublished: "howpublished" => Vec<Chunk>,
+    get_institution: "institution" => Vec<Chunk>,
+    get_journal: "journal" => Vec<Chunk>,
+    get_note: "note" => Vec<Chunk>,
+    get_number: "number" => i64,
+    get_organization: "organization" => Vec<Chunk>,
+    get_pages: "pages" => Vec<std::ops::Range<u32>>,
+    get_publisher: "publisher" => Vec<Vec<Chunk>>,
+    get_school: "school" => Vec<Chunk>,
+    get_series: "series" => Vec<Chunk>,
+    get_title: "title" => Vec<Chunk>,
+    get_type: "type" => Vec<Chunk>,
+    get_volume: "volume" => Vec<Chunk>,
 }
 
 /// Create a Chunk vector from field value string references.
@@ -456,7 +500,7 @@ fn eval_latex_commands(values: Vec<Chunk>) -> Vec<Chunk> {
 
 /// Characters that can be escaped.
 fn is_escapable(c: char) -> bool {
-    let escapable = "&%{},$'";
+    let escapable = "&%{},$'_";
     escapable.contains(c)
 }
 

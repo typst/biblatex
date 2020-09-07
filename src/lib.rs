@@ -13,7 +13,7 @@ use crate::syntax::BiblatexParser;
 
 #[cfg(test)]
 mod tests {
-    use crate::dtypes;
+    use crate::dtypes::format_sentence;
     use crate::parse::new_collection;
     use std::fs;
 
@@ -30,7 +30,14 @@ mod tests {
         let contents = fs::read_to_string("test/rass.bib").expect("File not found");
         let bt = new_collection(&contents, true);
 
-        println!("{:#?}", bt);
+        for x in bt {
+            let authors = x.1.get_author().unwrap_or(vec![]);
+
+            for a in authors {
+                print!("{}, ", a)
+            }
+            println!("\"{}\".", format_sentence(&x.1.get_title().unwrap()));
+        }
     }
 
     #[test]
@@ -46,20 +53,15 @@ mod tests {
         let contents = fs::read_to_string("test/libra.bib").expect("File not found");
         let bt = new_collection(&contents, true);
 
-        println!("{:#?}", bt);
+        // println!("{:#?}", bt);
 
         for x in bt {
-            for y in x.1.props {
-                if y.0.to_lowercase() == "author" {
-                    println!(
-                        "{:?}",
-                        dtypes::split_token_lists(y.1, "and")
-                            .iter()
-                            .map(|x| dtypes::format_verbatim(x))
-                            .collect::<Vec<String>>()
-                    );
-                }
+            let authors = x.1.get_author().unwrap_or(vec![]);
+
+            for a in authors {
+                print!("{}, ", a)
             }
+            println!("\"{}\".", format_sentence(&x.1.get_title().unwrap()));
         }
     }
 }

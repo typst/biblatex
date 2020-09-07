@@ -1,18 +1,17 @@
 extern crate chinese_number;
 extern crate chrono;
-extern crate inflector;
 extern crate numerals;
 
 use crate::parse::Chunk;
 use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
 use chrono::prelude::*;
-use inflector::Inflector;
 use numerals::roman::Roman;
-use strum_macros::{EnumString, AsRefStr, Display};
 use regex::Regex;
+use strum_macros::{AsRefStr, Display, EnumString};
 
 use std::cmp::Ordering;
 use std::str::FromStr;
+use std::fmt;
 
 lazy_static! {
     static ref RANGE_REGEX: Regex =
@@ -243,6 +242,26 @@ impl Person {
         let mut p = Person::from_single_comma(s1, s3);
         p.suffix = format_verbatim(&s2);
         p
+    }
+}
+
+impl fmt::Display for Person {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.given_name.is_empty() {
+            write!(f, "{} ", self.given_name)?;
+        }
+
+        if !self.prefix.is_empty() {
+            write!(f, "{} ", self.prefix)?;
+        }
+
+        write!(f, "{}", self.name)?;
+
+        if !self.suffix.is_empty() {
+            write!(f, " {}", self.suffix)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -593,11 +612,17 @@ impl Date {
  ** Chunk type parsing adaptors **
  *********************************/
 
- /// Implementors represent the serialized form of an Bib(La)TeX data type.
+/// Implementors represent the serialized form of an Bib(La)TeX data type.
 pub trait Type: Sized {
     /// This function allows to extract data out of an
     /// resolved Chunk vector for consumption elsewhere.
     fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error>;
+}
+
+impl Type for Vec<Chunk> {
+    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+        Ok(chunks)
+    }
 }
 
 impl Type for Vec<Vec<Chunk>> {
@@ -608,7 +633,7 @@ impl Type for Vec<Vec<Chunk>> {
 
 impl Type for Vec<Person> {
     fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        let list = <Vec<Vec<Chunk>>>::parse(chunks)?;
+        let list = chunks.parse::<Vec<Vec<Chunk>>>()?;
         let mut persons = vec![];
 
         for pers in list {
@@ -668,19 +693,33 @@ impl Type for Vec<std::ops::Range<u32>> {
 
 impl Type for Pagination {
     fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(Pagination::from_str(&format_verbatim(&chunks).to_lowercase())?)
+        Ok(Pagination::from_str(
+            &format_verbatim(&chunks).to_lowercase(),
+        )?)
     }
 }
 
 impl Type for EditorType {
     fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(EditorType::from_str(&format_verbatim(&chunks).to_lowercase())?)
+        Ok(EditorType::from_str(
+            &format_verbatim(&chunks).to_lowercase(),
+        )?)
     }
 }
 
 impl Type for Gender {
     fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
         Gender::from_str(&format_verbatim(&chunks).to_lowercase())
+    }
+}
+
+pub trait ChunkExt {
+    fn parse<T: Type>(&self) -> Result<T, anyhow::Error>;
+}
+
+impl ChunkExt for Vec<Chunk> {
+    fn parse<T: Type>(&self) -> Result<T, anyhow::Error> {
+        T::parse(self.clone())
     }
 }
 
@@ -789,7 +828,7 @@ impl std::str::FromStr for Gender {
             "pf" => Ok(Gender::PluralFemale),
             "pm" => Ok(Gender::PluralMale),
             "pn" => Ok(Gender::PluralNeuter),
-            _    => Err(anyhow!("Unknown gender identifier")),
+            _ => Err(anyhow!("Unknown gender identifier")),
         }
     }
 }
@@ -822,7 +861,7 @@ impl Gender {
         }
 
         if list.len() == 1 {
-            return Some(list[0].clone())
+            return Some(list[0].clone());
         }
 
         let mut was_female = false;
@@ -831,12 +870,24 @@ impl Gender {
 
         for g in list {
             match g {
-                Gender::SingularFemale => { was_female = true; }
-                Gender::SingularMale => { was_male = true; }
-                Gender::SingularNeuter => { was_neuter = true; }
-                Gender::PluralFemale => { was_female = true; }
-                Gender::PluralMale => { was_male = true; }
-                Gender::PluralNeuter => { was_neuter = true; }
+                Gender::SingularFemale => {
+                    was_female = true;
+                }
+                Gender::SingularMale => {
+                    was_male = true;
+                }
+                Gender::SingularNeuter => {
+                    was_neuter = true;
+                }
+                Gender::PluralFemale => {
+                    was_female = true;
+                }
+                Gender::PluralMale => {
+                    was_male = true;
+                }
+                Gender::PluralNeuter => {
+                    was_neuter = true;
+                }
             }
         }
 
@@ -985,15 +1036,18 @@ pub fn format_sentence(vals: &[Chunk]) -> String {
     let mut first = true;
     for val in vals {
         if let Chunk::Normal(s) = val {
-            if first && !s.is_empty() {
+            for c in s.chars() {
+                if first {
+                    out.push_str(&c.to_uppercase().to_string());
+                } else {
+                    out.push(c);
+                }
                 first = false;
-                out += &s.to_title_case();
-            } else {
-                out += &s.to_lowercase();
             }
         } else if let Chunk::Verbatim(s) = val {
             out += s;
         }
+        first = false;
     }
 
     out

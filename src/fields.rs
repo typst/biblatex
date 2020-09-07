@@ -1,4 +1,4 @@
-use crate::dtypes::{Person, IntOrChunks, Pagination, EditorType, Gender};
+use crate::dtypes::{EditorType, Gender, IntOrChunks, Pagination, Person};
 use crate::parse::Chunk;
 
 enum BiblatexFields {
