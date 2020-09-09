@@ -432,13 +432,8 @@ impl Date {
     }
 
     fn is_open_range(s: &str) -> bool {
-        if s.trim().is_empty() {
-            true
-        } else if s.trim() == ".." {
-            true
-        } else {
-            false
-        }
+        let s = s.trim();
+        if s.is_empty() || s == ".." { true } else { false }
     }
 
     fn range_dates(mut source: String) -> anyhow::Result<(DateAtom, DateAtom)> {
@@ -729,6 +724,15 @@ impl Type for Vec<Person> {
 impl Type for Date {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Date::new(chunks)
+    }
+}
+
+impl Type for Vec<String> {
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Ok(split_token_lists(chunks, ",")
+            .into_iter()
+            .map(|chunks| chunks.format_verbatim())
+            .collect::<Vec<String>>())
     }
 }
 

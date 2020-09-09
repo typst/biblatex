@@ -9,7 +9,7 @@ use anyhow::anyhow;
 
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
-use crate::types::{Date, IntOrChunks, Person, Type};
+use crate::types::{Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type};
 
 /// A fully parsed bibliography.
 pub struct Bibliography(pub Vec<Entry>);
@@ -94,6 +94,20 @@ impl Entry {
             .ok_or_else(|| anyhow!("The {} field is not present", key))
             .and_then(|chunks| chunks.parse::<T>())
     }
+
+    /// Get a date for a field name with its appropriate sub-fields.
+    fn get_prefixed_date(&self, prefix: &str) -> anyhow::Result<Date> {
+        let key = prefix.to_string();
+        if let Some(chunks) = self.get(&(key.clone() + "date")) {
+            chunks.parse::<Date>()
+        } else {
+            Date::new_from_three_fields(
+                self.get(&(key.clone() + "year")),
+                self.get(&(key.clone() + "month")),
+                self.get(&(key + "day")),
+            )
+        }
+    }
 }
 
 macro_rules! fields {
@@ -114,43 +128,212 @@ macro_rules! fields {
     (@type $res:ty) => {$res};
 }
 
+macro_rules! alias_fields {
+    ($($getter:ident: $field_name:expr, $field_alias:expr $(=> $res:ty)?),* $(,)*) => {
+        $(
+            #[doc = "Get and parse the `"]
+            #[doc = $field_name]
+            #[doc = "` field, falling back on `"]
+            #[doc = $field_alias]
+            #[doc = "` if `"]
+            #[doc = $field_name]
+            #[doc = "` is empty."]
+            pub fn $getter(&self) -> anyhow::Result<fields!(@type $($res)?)> {
+                self.get($field_name)
+                    .or_else(|| self.get($field_alias))
+                    .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
+                    $(.and_then(|chunks| chunks.parse::<$res>()))?
+            }
+        )*
+    };
+
+    (@type) => {&[Chunk]};
+    (@type $res:ty) => {$res};
+}
+
+macro_rules! date_fields {
+    ($($getter:ident: $field_prefix:expr),* $(,)*) => {
+        $(
+            #[doc = "Get and parse the `"]
+            #[doc = $field_prefix]
+            #[doc = "date` field, falling back to the `"]
+            #[doc = $field_prefix]
+            #[doc = "year`, `"]
+            #[doc = $field_prefix]
+            #[doc = "month`, and `"]
+            #[doc = $field_prefix]
+            #[doc = "day` fields when not present"]
+            pub fn $getter(&self) -> anyhow::Result<Date> {
+                self.get_prefixed_date($field_prefix)
+            }
+        )*
+    };
+}
+
 impl Entry {
-    /// Get and parse the `date` field, falling back to the `year`, `month` and `day`
-    /// fields when not present.
-    pub fn get_date(&self) -> anyhow::Result<Date> {
-        if let Some(chunks) = self.get("date") {
-            chunks.parse::<Date>()
-        } else {
-            Date::new_from_three_fields(
-                self.get("year"),
-                self.get("month"),
-                self.get("day"),
-            )
+    /// Get and parse the `editor` and `editora` through `editorc` fields
+    /// and their respective `editortype` annotation fields.
+    /// If any of the above fields is present, this function will return a
+    /// vector with between one and four entries, one for each editorial role.
+    ///
+    /// The default EditorType `Editor` will be assumed if the type field
+    /// is empty.
+    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
+        let mut editors = vec![];
+
+        self.get("editor")
+            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+            .and_then(|eds| {
+                Some((
+                    eds,
+                    self.get("editortype")
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor),
+                ))
+            })
+            .and_then(|eds| Some(editors.push(eds)));
+        self.get("editora")
+            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+            .and_then(|eds| {
+                Some((
+                    eds,
+                    self.get("editoratype")
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor),
+                ))
+            })
+            .and_then(|eds| Some(editors.push(eds)));
+        self.get("editorb")
+            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+            .and_then(|eds| {
+                Some((
+                    eds,
+                    self.get("editorbtype")
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor),
+                ))
+            })
+            .and_then(|eds| Some(editors.push(eds)));
+        self.get("editorc")
+            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+            .and_then(|eds| {
+                Some((
+                    eds,
+                    self.get("editorctype")
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor),
+                ))
+            })
+            .and_then(|eds| Some(editors.push(eds)));
+
+        if editors.is_empty() {
+            return Err(anyhow!("No editor fields present"));
         }
+
+        Ok(editors)
     }
 
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
-        get_address: "address",
-        get_annote: "annote",
+        // BibTeX fields.
         get_author: "author" => Vec<Person>,
-        get_booktitle: "booktitle",
+        get_book_title: "booktitle",
         get_chapter: "chapter",
         get_edition: "edition" => IntOrChunks,
-        get_editor: "editor" => Vec<Person>,
-        get_howpublished: "howpublished",
-        get_institution: "institution",
-        get_journal: "journal",
+        get_how_published: "howpublished",
         get_note: "note",
-        get_number: "number" => i64,
-        get_organization: "organization",
+        get_number: "number",
+        get_organization: "organization" => Vec<Vec<Chunk>>,
         get_pages: "pages" => Vec<std::ops::Range<u32>>,
         get_publisher: "publisher" => Vec<Vec<Chunk>>,
-        get_school: "school",
         get_series: "series",
         get_title: "title",
         get_type: "type",
-        get_volume: "volume",
+        get_volume: "volume" => i64,
+
+        // BibLaTeX supplemental fields.
+        get_abstract: "abstract",
+        get_addendum: "addendum",
+        get_afterword: "afterword" => Vec<Person>,
+        get_annotator: "annotator" => Vec<Person>,
+        get_author_type: "authortype" => String,
+        get_book_author: "bookauthor" => Vec<Person>,
+        get_book_pagination: "bookpagination" => Pagination,
+        get_book_subtitle: "booksubtitle",
+        get_book_title_addon: "booktitleaddon",
+        get_commentator: "commentator" => Vec<Person>,
+        get_doi: "doi" => String,
+        get_eid: "eid",
+        get_entry_subtype: "entrysubtype",
+        get_eprint: "eprint" => String,
+        get_eprint_class: "eprintclass",
+        get_eventtitle: "eventtitle",
+        get_eventtitle_addon: "eventtitleaddon",
+        get_foreword: "foreword" => Vec<Person>,
+        get_holder: "holder" => Vec<Person>,
+        get_index_title: "indextitle",
+        get_introduction: "introduction" => Vec<Person>,
+        get_isan: "isan",
+        get_isbn: "isbn",
+        get_ismn: "ismn",
+        get_isrn: "isrn",
+        get_issn: "issn",
+        get_issue: "issue",
+        get_issue_subtitle: "issuesubtitle",
+        get_issue_title: "issuetitle",
+        get_issue_title_addon: "issuetitleaddon",
+        get_iswc: "iswc",
+        get_journal_subtitle: "journalsubtitle",
+        get_journal_title_addon: "journaltitleaddon",
+        get_keywords: "keywords",
+        get_label: "label",
+        get_language: "language" => String,
+        get_library: "library",
+        get_main_subtitle: "mainsubtitle",
+        get_main_title: "maintitle",
+        get_main_title_addon: "maintitleaddon",
+        get_name_addon: "nameaddon",
+        get_options: "options",
+        get_orig_language: "origlanguage" => String,
+        get_orig_location: "origlocation",
+        get_page_total: "pagetotal",
+        get_pagination: "pagination" => Pagination,
+        get_part: "part",
+        get_pubstate: "pubstate",
+        get_reprint_title: "reprinttitle",
+        get_short_author: "shortauthor" => Vec<Person>,
+        get_short_editor: "shorteditor" => Vec<Person>,
+        get_shorthand: "shorthand",
+        get_short_series: "shortseries",
+        get_short_title: "shorttitle",
+        get_subtitle: "subtitle",
+        get_title_addon: "titleaddon",
+        get_translator: "translator" => Vec<Person>,
+        get_url: "url" => String,
+        get_venue: "venue",
+        get_version: "version",
+        get_volumes: "volumes" => i64,
+        get_gender: "gender" => Gender,
+    }
+
+    alias_fields! {
+        get_address: "address", "location",
+        get_location: "location", "address",
+        get_annotation: "annotation", "annote",
+        get_eprint_type: "eprinttype", "archiveprefix",
+        get_journal: "journal", "journaltitle",
+        get_journal_title: "journaltitle", "journal",
+        get_sort_key: "key", "sortkey" => String,
+        get_file: "file", "pdf" => String,
+        get_school: "school", "institution",
+        get_institution: "institution", "school",
+    }
+
+    date_fields! {
+        get_date: "",
+        get_event_date: "event",
+        get_orig_date: "orig",
+        get_url_date: "url",
     }
 }
 
