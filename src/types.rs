@@ -1,3 +1,5 @@
+//! A collection of strong field types parsable from chunks.
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Range;
@@ -11,7 +13,7 @@ use numerals::roman::Roman;
 use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumString};
 
-use crate::parse::Chunk;
+use super::{Chunk, ChunksExt};
 
 #[rustfmt::skip]
 lazy_static! {
@@ -52,11 +54,11 @@ pub struct Person {
 }
 
 impl Person {
-    /// Constructs a new Person from a Chunk vector according to the specs of
+    /// Constructs a new Person from a chunk vector according to the specs of
     /// [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
-    fn new(source: Vec<Chunk>) -> Self {
+    pub fn new(source: &[Chunk]) -> Self {
         let num_commas: usize = source
             .iter()
             .map(|val| {
@@ -69,24 +71,22 @@ impl Person {
             .sum();
 
         match num_commas {
-            0 => Person::from_unified(source),
+            0 => Self::from_unified(&source),
             1 => {
                 let (v1, v2) = split_at_normal_char(source, ',', true);
-
-                Person::from_single_comma(v1, v2)
+                Self::from_single_comma(&v1, &v2)
             }
             _ => {
                 let (v1, v2) = split_at_normal_char(source, ',', true);
-                let (v2, v3) = split_at_normal_char(v2, ',', true);
-
-                Person::from_two_commas(v1, v2, v3)
+                let (v2, v3) = split_at_normal_char(&v2, ',', true);
+                Self::from_two_commas(&v1, &v2, &v3)
             }
         }
     }
 
-    /// Constructs new person from a Chunk Vector if in the
+    /// Constructs new person from a chunk slice if in the
     /// form `<First> <Prefix> <Last>`.
-    fn from_unified(source: Vec<Chunk>) -> Self {
+    fn from_unified(source: &[Chunk]) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
         // lowercase word), start of last capitalized seqence.
         // If there is no subsequent capitalized word, take last one.
@@ -155,7 +155,7 @@ impl Person {
             }
         }
 
-        Person {
+        Self {
             name: name.trim_start().to_string(),
             given_name: given_name.trim_end().to_string(),
             prefix: prefix.trim().to_string(),
@@ -163,18 +163,18 @@ impl Person {
         }
     }
 
-    /// Constructs new person from a Chunk Vector if in the
+    /// Constructs new person from chunk slices if in the
     /// form `<Prefix> <Last>, <First>`.
-    /// `s1` corresponds to the part before the comma
-    /// `s2` to the part behind it.
+    /// - `s1` corresponds to the part before the comma,
+    /// - `s2` to the part behind it.
     ///
     /// The arguments should not contain the comma.
-    fn from_single_comma(s1: Vec<Chunk>, s2: Vec<Chunk>) -> Self {
-        if s2.is_empty() || (s2.len() == 1 && format_verbatim(&s2).is_empty()) {
-            let formatted = format_verbatim(&s1);
+    fn from_single_comma(s1: &[Chunk], s2: &[Chunk]) -> Self {
+        if s2.is_empty() || (s2.len() == 1 && s2.format_verbatim().is_empty()) {
+            let formatted = s1.format_verbatim();
             let last_space = formatted.rfind(' ').unwrap_or(0);
             let (prefix, last) = formatted.split_at(last_space);
-            return Person {
+            return Self {
                 given_name: String::new(),
                 name: last.trim_start().to_string(),
                 prefix: prefix.trim_end().to_string(),
@@ -182,7 +182,7 @@ impl Person {
             };
         }
 
-        let given_name = format_verbatim(&s2);
+        let given_name = s2.format_verbatim();
 
         let mut word_start = true;
         let mut last_lower_case_end: i32 = -1;
@@ -226,7 +226,7 @@ impl Person {
             }
         }
 
-        Person {
+        Self {
             name: name.trim_start().to_string(),
             given_name: given_name.trim_start().to_string(),
             prefix: prefix.trim_end().to_string(),
@@ -234,16 +234,16 @@ impl Person {
         }
     }
 
-    /// Constructs new person from a Chunk Vector if in the
+    /// Constructs new person from chunk slices if in the
     /// form `<Prefix> <Last>, <Suffix>, <First>`.
     ///
     /// `s1`, `s2`, `s3` correspond to the first through third part of the
     /// value respectively.
     ///
     /// The arguments should not contain the comma.
-    fn from_two_commas(s1: Vec<Chunk>, s2: Vec<Chunk>, s3: Vec<Chunk>) -> Self {
-        let mut p = Person::from_single_comma(s1, s3);
-        p.suffix = format_verbatim(&s2);
+    fn from_two_commas(s1: &[Chunk], s2: &[Chunk], s3: &[Chunk]) -> Self {
+        let mut p = Self::from_single_comma(s1, s3);
+        p.suffix = s2.format_verbatim();
         p
     }
 }
@@ -270,28 +270,37 @@ impl fmt::Display for Person {
 
 // *********************************** Date Parsing *********************************** //
 
-/// Represents a date or a range of dates.
+/// Represents a date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Date {
     /// Indicates whether the sources are sure about the date.
     pub is_uncertain: bool,
     /// Indicates the specificity of the date value.
     pub is_approximate: bool,
-    /// The date's value, or its start point if `range_end.is_some()`.
-    pub value: DateKind,
-    /// If this is Some, the date is a range (`Date.value .. Date.range_end`).
-    pub range_end: Option<DateKind>,
+    /// The date or the date range.
+    pub value: DateValue,
+}
+
+/// Represents a atomic date or a range of dates.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum DateValue {
+    /// A single date.
+    Atom(DateAtom),
+    /// A range of dates that may be open or definite at both start and end.
+    Range(DateBound, DateBound),
 }
 
 /// Indicates whether the start or end of a date interval is open or definite.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum DateKind {
+pub enum DateBound {
+    /// The start or end of the range is open / unknown.
     Open,
+    /// The start or end of the range is definite / known.
     Definite(DateAtom),
 }
 
-/// A date atom is a timezone-unaware Date that must specify a year
-/// and can specify month, day, and time. Flags about uncertainity / precision
+/// A date atom is a timezone-unaware date that must specify a year
+/// and may specify month, day, and time. Flags about uncertainity / precision
 /// are stored within the parent `Date` struct.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DateAtom {
@@ -310,8 +319,9 @@ pub struct DateAtom {
 }
 
 impl Date {
-    fn new(chunks: Vec<Chunk>) -> anyhow::Result<Self> {
-        let mut date_str = format_verbatim(&chunks).trim_end().to_string();
+    /// Create a new date from a chunk vector.
+    pub fn new(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        let mut date_str = chunks.format_verbatim().trim_end().to_string();
 
         let last_char = date_str.chars().last().ok_or(anyhow!("Date string is empty"))?;
         let (is_uncertain, is_approximate) = match last_char {
@@ -321,57 +331,41 @@ impl Date {
             _ => (false, false),
         };
 
-        let date;
-
-        let range_end = if date_str.to_uppercase().contains('X') {
-            let (d1, d2) = Date::range_dates(date_str)?;
-            date = DateKind::Definite(d1);
-            Some(DateKind::Definite(d2))
+        let value = if date_str.to_uppercase().contains('X') {
+            let (d1, d2) = Self::range_dates(date_str)?;
+            DateValue::Range(DateBound::Definite(d1), DateBound::Definite(d2))
         } else {
             if date_str.contains('/') {
                 let (s1, s2) = split_at_normal_char(chunks, '/', true);
-                let (s1, mut s2) = (format_verbatim(&s1), format_verbatim(&s2));
+                let (s1, mut s2) = (s1.format_verbatim(), s2.format_verbatim());
 
                 if is_uncertain || is_approximate {
                     s2.pop();
                 }
 
-                if Date::is_open_range(&s1) {
-                    date = DateKind::Open;
+                let start = if Self::is_open_range(&s1) {
+                    DateBound::Open
                 } else {
-                    date = DateKind::Definite(DateAtom::new(s1)?);
-                }
+                    DateBound::Definite(DateAtom::new(s1)?)
+                };
 
-                if Date::is_open_range(&s2) {
-                    Some(DateKind::Open)
+                let end = if Self::is_open_range(&s2) {
+                    DateBound::Open
                 } else {
-                    Some(DateKind::Definite(DateAtom::new(s2)?))
-                }
+                    DateBound::Definite(DateAtom::new(s2)?)
+                };
+
+                DateValue::Range(start, end)
             } else {
                 if is_uncertain || is_approximate {
                     date_str.pop();
                 }
 
-                date = DateKind::Definite(DateAtom::new(date_str)?);
-                None
+                DateValue::Atom(DateAtom::new(date_str)?)
             }
         };
 
-        Ok(Date {
-            is_approximate,
-            is_uncertain,
-            value: date,
-            range_end,
-        })
-    }
-
-    fn new_from_date_atom(atom: DateAtom) -> Self {
-        Date {
-            is_approximate: false,
-            is_uncertain: false,
-            range_end: None,
-            value: DateKind::Definite(atom),
-        }
+        Ok(Self { is_approximate, is_uncertain, value })
     }
 
     pub fn new_from_three_fields(
@@ -379,16 +373,20 @@ impl Date {
         month: Option<&[Chunk]>,
         day: Option<&[Chunk]>,
     ) -> Result<Self, anyhow::Error> {
-        let mut year = format_verbatim(year.ok_or_else(|| anyhow!("Year field must be set"))?);
+        let mut year = year
+            .ok_or_else(|| anyhow!("Year field must be set"))?
+            .format_verbatim();
+
         year.retain(|c| !c.is_whitespace());
+
         let capt = YEAR_REGEX.captures(&year).ok_or(anyhow!("Invalid year data"))?;
         let year: i32 = capt.name("y").unwrap().as_str().parse().unwrap();
         let mut date_atom = DateAtom { year, month: None, day: None, time: None };
 
         if let Some(month) = month {
-            let month = format_verbatim(month);
+            let month = month.format_verbatim();
             if let Some(day) = day {
-                let mut day = format_verbatim(day);
+                let mut day = day.format_verbatim();
                 day.retain(|c| !c.is_whitespace());
                 let day: u8 = day.parse()?;
 
@@ -423,6 +421,14 @@ impl Date {
         }
 
         Ok(Date::new_from_date_atom(date_atom))
+    }
+
+    fn new_from_date_atom(atom: DateAtom) -> Self {
+        Date {
+            is_approximate: false,
+            is_uncertain: false,
+            value: DateValue::Atom(atom),
+        }
     }
 
     fn is_open_range(s: &str) -> bool {
@@ -537,7 +543,7 @@ impl Date {
 }
 
 /// Used to resolve month abbreviations to their respective values.
-pub fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
+pub(crate) fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
     match month.to_lowercase().as_str() {
         "jan" => Some(("January".to_string(), 0)),
         "feb" => Some(("February".to_string(), 1)),
@@ -611,7 +617,8 @@ fn get_month_for_name(month: &str) -> Option<u8> {
 // }
 
 impl DateAtom {
-    fn new(mut source: String) -> anyhow::Result<Self> {
+    /// Parse a date atom from a string.
+    pub fn new(mut source: String) -> anyhow::Result<Self> {
         source.retain(|f| !f.is_whitespace());
 
         let time = if let Some(pos) = source.find('T') {
@@ -705,7 +712,7 @@ pub trait Type: Sized {
 impl Type for Vec<Vec<Chunk>> {
     /// Splits the chunks at `"and"`s.
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(split_token_lists(chunks.to_vec(), "and"))
+        Ok(split_token_lists(chunks, "and"))
     }
 }
 
@@ -714,20 +721,20 @@ impl Type for Vec<Person> {
         Ok(chunks
             .parse::<Vec<Vec<Chunk>>>()?
             .into_iter()
-            .map(|subchunks| Person::new(subchunks))
+            .map(|subchunks| Person::new(&subchunks))
             .collect())
     }
 }
 
 impl Type for Date {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Date::new(chunks.to_vec())
+        Date::new(chunks)
     }
 }
 
 impl Type for String {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(format_verbatim(chunks))
+        Ok(chunks.format_verbatim())
     }
 }
 
@@ -749,7 +756,7 @@ impl Type for IntOrChunks {
 
 impl Type for Range<u32> {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        if let Some(range) = parse_ranges(chunks.to_vec()).into_iter().next() {
+        if let Some(range) = parse_ranges(chunks).into_iter().next() {
             Ok(range)
         } else {
             Err(anyhow!("No range specified"))
@@ -759,14 +766,14 @@ impl Type for Range<u32> {
 
 impl Type for Vec<Range<u32>> {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(parse_ranges(chunks.to_vec()))
+        Ok(parse_ranges(chunks))
     }
 }
 
 impl Type for Pagination {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(Pagination::from_str(
-            &format_verbatim(chunks).to_lowercase(),
+            &chunks.format_verbatim().to_lowercase(),
         )?)
     }
 }
@@ -774,25 +781,14 @@ impl Type for Pagination {
 impl Type for EditorType {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(EditorType::from_str(
-            &format_verbatim(chunks).to_lowercase(),
+            &chunks.format_verbatim().to_lowercase(),
         )?)
     }
 }
 
 impl Type for Gender {
     fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Gender::from_str(&format_verbatim(chunks).to_lowercase())
-    }
-}
-
-/// Enables parsing of types from chunks in method-chains.
-pub trait ChunkExt {
-    fn parse<T: Type>(&self) -> anyhow::Result<T>;
-}
-
-impl ChunkExt for &[Chunk] {
-    fn parse<T: Type>(&self) -> anyhow::Result<T> {
-        T::parse(self)
+        Gender::from_str(&chunks.format_verbatim().to_lowercase())
     }
 }
 
@@ -800,10 +796,11 @@ impl ChunkExt for &[Chunk] {
 
 /// Parse range fields with a number of ranges and an amount of dashes seperating
 /// start from end.
-fn parse_ranges(source: Vec<Chunk>) -> Vec<Range<u32>> {
+fn parse_ranges(source: &[Chunk]) -> Vec<Range<u32>> {
     let range_vecs = split_token_lists(source, ",");
+
     let mut res = vec![];
-    for range_candidate in range_vecs.iter().map(|f| format_verbatim(f)) {
+    for range_candidate in range_vecs.iter().map(|f| f.format_verbatim()) {
         let caps = RANGE_REGEX.captures(&range_candidate);
         if let Some(caps) = caps {
             let start: u32 =
@@ -820,7 +817,7 @@ fn parse_ranges(source: Vec<Chunk>) -> Vec<Range<u32>> {
     res
 }
 
-// ************************************* Integers ************************************* //
+// ********************************* Integer Parsing ********************************** //
 
 /// An integer or a chunk vector.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -831,7 +828,7 @@ pub enum IntOrChunks {
 
 /// Parse integers. This method will accept arabic, roman, and chinese numerals.
 fn parse_integers(source: &[Chunk]) -> anyhow::Result<i64> {
-    let s = format_verbatim(source);
+    let s = source.format_verbatim();
     let s = s.trim();
 
     if let Ok(n) = str::parse::<i64>(s) {
@@ -847,7 +844,7 @@ fn parse_integers(source: &[Chunk]) -> anyhow::Result<i64> {
 
 // ********************************** Various enums *********************************** //
 
-/// How the page increment is triggered.
+/// Defines the pagination scheme to use for formatting purposes.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Pagination {
@@ -956,50 +953,14 @@ impl Gender {
 
 // ************************************ Utilities ************************************* //
 
-/// Formats a chunk slice in sentence case.
-pub fn format_sentence(vals: &[Chunk]) -> String {
-    let mut out = String::new();
-    let mut first = true;
-    for val in vals {
-        if let Chunk::Normal(s) = val {
-            for c in s.chars() {
-                if first {
-                    out.push_str(&c.to_uppercase().to_string());
-                } else {
-                    out.push_str(&c.to_lowercase().to_string());
-                }
-                first = false;
-            }
-        } else if let Chunk::Verbatim(s) = val {
-            out += s;
-        }
-        first = false;
-    }
-
-    out
-}
-
-/// Outputs a chunk slice in verbatim.
-pub fn format_verbatim(vals: &[Chunk]) -> String {
-    let mut out = String::new();
-    for val in vals {
-        if let Chunk::Normal(s) = val {
-            out += s;
-        } else if let Chunk::Verbatim(s) = val {
-            out += s;
-        }
-    }
-
-    out
-}
-
 /// Splits chunk vectors that are a token lists as defined per the
 /// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
 ///
 /// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
-pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
+fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Vec<Chunk>> {
     let mut out = vec![];
-    let mut latest: Vec<Chunk> = vec![];
+    let mut latest = vec![];
+
     for val in vals {
         if let Chunk::Normal(s) = val {
             let mut target = s.as_str();
@@ -1014,71 +975,17 @@ pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
 
             latest.push(Chunk::Normal(target.to_string()));
         } else {
-            latest.push(val);
+            latest.push(val.clone());
         }
     }
 
     out.push(latest);
-
     out
-}
-
-/// An iterator over the characters in each chunk, indicating whether they are verbatim or
-/// not. Chunk types other than `Normal` or `Verbatim` are ommitted.
-fn chunk_chars<'a>(chunks: &'a [Chunk]) -> impl Iterator<Item = (char, bool)> + 'a {
-    chunks.iter().flat_map(|chunk| {
-        let (chars, verbatim) = match chunk {
-            Chunk::Normal(s) => (Some(s), false),
-            Chunk::Verbatim(s) => (Some(s), true),
-            _ => (None, false),
-        };
-
-        chars
-            .into_iter()
-            .flat_map(move |s| s.chars().map(move |c| (c, verbatim)))
-    })
-}
-
-/// Returns two chunk vectors with `src` split at chunk index `vi` and
-/// char index `si` within that chunk.
-fn split_values(mut src: Vec<Chunk>, vi: usize, si: usize) -> (Vec<Chunk>, Vec<Chunk>) {
-    if vi >= src.len() {
-        return (vec![], src);
-    }
-
-    let mut new = vec![];
-    while src.len() > vi + 1 {
-        new.insert(0, src.pop().expect("Index checked above"));
-    }
-
-    let item = src.pop().expect("Index checked above");
-    let (content, verb) = match item {
-        Chunk::Normal(s) => (s, false),
-        Chunk::Verbatim(s) => (s, true),
-        Chunk::Resolve(s) => (s, true),
-        Chunk::CommandName(s, verb) => (s, verb),
-        Chunk::CommandArgs(s) => (s, true),
-    };
-
-    let (s1, s2) = content.split_at(si);
-    if verb {
-        src.push(Chunk::Verbatim(s1.trim_end().to_string()));
-        new.insert(0, Chunk::Verbatim(s2.trim_start().to_string()));
-    } else {
-        src.push(Chunk::Normal(s1.trim_end().to_string()));
-        new.insert(0, Chunk::Normal(s2.trim_start().to_string()));
-    }
-
-    (src, new)
 }
 
 /// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
-fn split_at_normal_char(
-    src: Vec<Chunk>,
-    c: char,
-    omit: bool,
-) -> (Vec<Chunk>, Vec<Chunk>) {
+fn split_at_normal_char(src: &[Chunk], c: char, omit: bool) -> (Vec<Chunk>, Vec<Chunk>) {
     let mut found = false;
     let mut len = src.len();
     let mut si = 0;
@@ -1108,17 +1015,58 @@ fn split_at_normal_char(
     (v1, v2)
 }
 
+/// Returns two chunk vectors with `src` split at chunk index `vi` and
+/// char index `si` within that chunk.
+fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Vec<Chunk>, Vec<Chunk>) {
+    let mut src = src.to_vec();
+    if vi >= src.len() {
+        return (vec![], src);
+    }
+
+    let mut new = vec![];
+    while src.len() > vi + 1 {
+        new.insert(0, src.pop().expect("index checked above"));
+    }
+
+    let item = src.pop().expect("index checked above");
+    let (content, verb) = match item {
+        Chunk::Normal(s) => (s, false),
+        Chunk::Verbatim(s) => (s, true),
+    };
+
+    let (s1, s2) = content.split_at(si);
+    if verb {
+        src.push(Chunk::Verbatim(s1.trim_end().to_string()));
+        new.insert(0, Chunk::Verbatim(s2.trim_start().to_string()));
+    } else {
+        src.push(Chunk::Normal(s1.trim_end().to_string()));
+        new.insert(0, Chunk::Normal(s2.trim_start().to_string()));
+    }
+
+    (src, new)
+}
+
+/// An iterator over the characters in each chunk, indicating whether they are verbatim or
+/// not. Chunk types other than `Normal` or `Verbatim` are ommitted.
+fn chunk_chars<'a>(chunks: &'a [Chunk]) -> impl Iterator<Item = (char, bool)> + 'a {
+    chunks.iter().flat_map(|chunk| {
+        let (s, verbatim) = match chunk {
+            Chunk::Normal(s) => (s, false),
+            Chunk::Verbatim(s) => (s, true),
+        };
+
+        s.chars().map(move |c| (c, verbatim))
+    })
+}
+
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
     use chrono::NaiveTime;
 
     use super::*;
-    use crate::parse::Chunk;
+    use DateBound::Definite;
 
-    fn R(s: &str) -> Chunk {
-        Chunk::Resolve(s.to_string())
-    }
     fn N(s: &str) -> Chunk {
         Chunk::Normal(s.to_string())
     }
@@ -1128,8 +1076,8 @@ mod tests {
 
     #[test]
     fn test_value_iterator() {
-        let vls = vec![N("it "), R("crap"), V("te")];
-        let mut iter = chunk_chars(&vls);
+        let vls = &[N("it "), V("te")];
+        let mut iter = chunk_chars(vls);
         assert_eq!(iter.next(), Some(('i', false)));
         assert_eq!(iter.next(), Some(('t', false)));
         assert_eq!(iter.next(), Some((' ', false)));
@@ -1141,9 +1089,9 @@ mod tests {
 
     #[test]
     fn test_value_split() {
-        let vls = vec![N("split "), V("exac^tly"), N("here")];
-        let ref1 = vec![N("split "), V("exac^")];
-        let ref2 = vec![V("tly"), N("here")];
+        let vls = &[N("split "), V("exac^tly"), N("here")];
+        let ref1 = &[N("split "), V("exac^")];
+        let ref2 = &[V("tly"), N("here")];
         let split = split_values(vls, 1, 5);
         assert_eq!(split.0, ref1);
         assert_eq!(split.1, ref2);
@@ -1151,27 +1099,27 @@ mod tests {
 
     #[test]
     fn test_person_comma() {
-        let p = Person::new(vec![N("jean de la fontaine,")]);
+        let p = Person::new(&[N("jean de la fontaine,")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(vec![N("de la fontaine, Jean")]);
+        let p = Person::new(&[N("de la fontaine, Jean")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(vec![N("De La Fontaine, Jean")]);
+        let p = Person::new(&[N("De La Fontaine, Jean")]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(vec![N("De la Fontaine, Jean")]);
+        let p = Person::new(&[N("De la Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De la");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(vec![N("de La Fontaine, Jean")]);
+        let p = Person::new(&[N("de La Fontaine, Jean")]);
         assert_eq!(p.name, "La Fontaine");
         assert_eq!(p.prefix, "de");
         assert_eq!(p.given_name, "Jean");
@@ -1179,47 +1127,47 @@ mod tests {
 
     #[test]
     fn test_person_no_comma() {
-        let p = Person::new(vec![N("jean de la fontaine")]);
+        let p = Person::new(&[N("jean de la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(vec![N("Jean de la fontaine")]);
+        let p = Person::new(&[N("Jean de la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(vec![N("Jean "), V("de"), N(" la fontaine")]);
+        let p = Person::new(&[N("Jean "), V("de"), N(" la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "la");
         assert_eq!(p.given_name, "Jean de");
 
-        let p = Person::new(vec![N("Jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        let p = Person::new(&[N("Jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean de la");
 
-        let p = Person::new(vec![N("jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        let p = Person::new(&[N("jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
         assert_eq!(p.name, "de la fontaine");
         assert_eq!(p.prefix, "jean");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(vec![N("Jean De La Fontaine")]);
+        let p = Person::new(&[N("Jean De La Fontaine")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean De La");
 
-        let p = Person::new(vec![N("jean De la Fontaine")]);
+        let p = Person::new(&[N("jean De la Fontaine")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "jean De la");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(vec![N("Jean de La Fontaine")]);
+        let p = Person::new(&[N("Jean de La Fontaine")]);
         assert_eq!(p.name, "La Fontaine");
         assert_eq!(p.prefix, "de");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(vec![N("")]);
+        let p = Person::new(&[N("")]);
         assert_eq!(p.name, "");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "");
@@ -1227,7 +1175,7 @@ mod tests {
 
     #[test]
     fn test_person_two_comma() {
-        let p = Person::new(vec![N("Mudd, Sr., Harcourt Fenton")]);
+        let p = Person::new(&[N("Mudd, Sr., Harcourt Fenton")]);
         assert_eq!(p.name, "Mudd");
         assert_eq!(p.prefix, "");
         assert_eq!(p.suffix, "Sr.");
@@ -1236,9 +1184,9 @@ mod tests {
 
     #[test]
     fn test_value_split_at_normal_char() {
-        let vls = vec![N("split "), V("not, "), N("but rather, here")];
-        let ref1 = vec![N("split "), V("not, "), N("but rather")];
-        let ref2 = vec![N("here")];
+        let vls = &[N("split "), V("not, "), N("but rather, here")];
+        let ref1 = &[N("split "), V("not, "), N("but rather")];
+        let ref2 = &[N("here")];
         let split = split_at_normal_char(vls, ',', true);
         assert_eq!(split.0, ref1);
         assert_eq!(split.1, ref2);
@@ -1246,7 +1194,7 @@ mod tests {
 
     #[test]
     fn test_ranges() {
-        let ranges = vec![N("31--43,21:4-21:6,  194 --- 245")];
+        let ranges = &[N("31--43,21:4-21:6,  194 --- 245")];
         let res = parse_ranges(ranges);
         assert_eq!(res[0], 31 .. 43);
         assert_eq!(res[1], 4 .. 6);
@@ -1285,116 +1233,103 @@ mod tests {
 
     #[test]
     fn test_new_date() {
-        let date = Date::new(vec![N("2017-10 -25?")]).unwrap();
-        if let DateKind::Definite(val) = date.value {
+        let date = Date::new(&[N("2017-10 -25?")]).unwrap();
+        assert_eq!(date.is_uncertain, true);
+        assert_eq!(date.is_approximate, false);
+        if let DateValue::Atom(val) = date.value {
             assert_eq!(val.year, 2017);
             assert_eq!(val.month, Some(9));
             assert_eq!(val.day, Some(24));
             assert_eq!(val.time, None);
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
-        assert_eq!(date.is_uncertain, true);
-        assert_eq!(date.is_approximate, false);
-        assert_eq!(date.range_end, None);
 
-        let date = Date::new(vec![N("19XX~")]).unwrap();
-        if let DateKind::Definite(val) = date.value {
-            assert_eq!(val.year, 1900);
-            assert_eq!(val.month, None);
-            assert_eq!(val.day, None);
-            assert_eq!(val.time, None);
-        } else {
-            panic!("Wrong DateKind");
-        }
-        if let DateKind::Definite(val) = date.range_end.unwrap() {
-            assert_eq!(val.year, 1999);
-            assert_eq!(val.month, None);
-            assert_eq!(val.day, None);
-            assert_eq!(val.time, None);
-        } else {
-            panic!("Wrong DateKind");
-        }
+        let date = Date::new(&[N("19XX~")]).unwrap();
         assert_eq!(date.is_uncertain, false);
         assert_eq!(date.is_approximate, true);
+        if let DateValue::Range(Definite(start), Definite(end)) = date.value {
+            assert_eq!(start.year, 1900);
+            assert_eq!(start.month, None);
+            assert_eq!(start.day, None);
+            assert_eq!(start.time, None);
 
-        let date = Date::new(vec![N("1948-03-02/1950")]).unwrap();
-        if let DateKind::Definite(val) = date.value {
-            assert_eq!(val.year, 1948);
-            assert_eq!(val.month, Some(2));
-            assert_eq!(val.day, Some(1));
-            assert_eq!(val.time, None);
+            assert_eq!(end.year, 1999);
+            assert_eq!(end.month, None);
+            assert_eq!(end.day, None);
+            assert_eq!(end.time, None);
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
-        if let DateKind::Definite(val) = date.range_end.unwrap() {
-            assert_eq!(val.year, 1950);
-            assert_eq!(val.month, None);
-            assert_eq!(val.day, None);
-            assert_eq!(val.time, None);
-        } else {
-            panic!("Wrong DateKind");
-        }
+
+        let date = Date::new(&[N("1948-03-02/1950")]).unwrap();
         assert_eq!(date.is_uncertain, false);
         assert_eq!(date.is_approximate, false);
+        if let DateValue::Range(Definite(start), Definite(end)) = date.value {
+            assert_eq!(start.year, 1948);
+            assert_eq!(start.month, Some(2));
+            assert_eq!(start.day, Some(1));
+            assert_eq!(start.time, None);
 
-        let date = Date::new(vec![N("2020-04-04T18:30:31/")]).unwrap();
-        if let DateKind::Definite(val) = date.value {
-            assert_eq!(val.year, 2020);
-            assert_eq!(val.month, Some(3));
-            assert_eq!(val.day, Some(3));
-            assert_eq!(val.time, Some(NaiveTime::from_hms(18, 30, 31)));
+            assert_eq!(end.year, 1950);
+            assert_eq!(end.month, None);
+            assert_eq!(end.day, None);
+            assert_eq!(end.time, None);
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
-        assert_eq!(date.range_end.unwrap(), DateKind::Open);
+
+        let date = Date::new(&[N("2020-04-04T18:30:31/")]).unwrap();
         assert_eq!(date.is_uncertain, false);
         assert_eq!(date.is_approximate, false);
-
-        let date = Date::new(vec![N("/-0031-07%")]).unwrap();
-        if let DateKind::Definite(val) = date.range_end.unwrap() {
-            assert_eq!(val.year, -31);
-            assert_eq!(val.month, Some(6));
-            assert_eq!(val.day, None);
-            assert_eq!(val.time, None);
+        if let DateValue::Range(Definite(start), DateBound::Open) = date.value {
+            assert_eq!(start.year, 2020);
+            assert_eq!(start.month, Some(3));
+            assert_eq!(start.day, Some(3));
+            assert_eq!(start.time, Some(NaiveTime::from_hms(18, 30, 31)));
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
-        assert_eq!(date.value, DateKind::Open);
+
+        let date = Date::new(&[N("/-0031-07%")]).unwrap();
         assert_eq!(date.is_uncertain, true);
         assert_eq!(date.is_approximate, true);
+        if let DateValue::Range(DateBound::Open, Definite(end)) = date.value {
+            assert_eq!(end.year, -31);
+            assert_eq!(end.month, Some(6));
+            assert_eq!(end.day, None);
+            assert_eq!(end.time, None);
+        } else {
+            panic!("wrong date kind");
+        }
     }
 
     #[test]
     fn test_new_date_from_three_fields() {
-        let date = Date::new_from_three_fields(
-            Some(&vec![N("2020")]),
-            Some(&vec![N("January\u{A0}12th")]),
-            None,
-        )
-        .unwrap();
-        if let DateKind::Definite(val) = date.value {
+        let year = &[N("2020")];
+        let month = &[N("January\u{A0}12th")];
+        let date = Date::new_from_three_fields(Some(year), Some(month), None).unwrap();
+        if let DateValue::Atom(val) = date.value {
             assert_eq!(val.year, 2020);
             assert_eq!(val.month, Some(0));
             assert_eq!(val.day, Some(11));
             assert_eq!(val.time, None);
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
 
-        let date = Date::new_from_three_fields(
-            Some(&vec![N("-0004")]),
-            Some(&vec![N("aug")]),
-            Some(&vec![N("28")]),
-        )
-        .unwrap();
-        if let DateKind::Definite(val) = date.value {
+        let year = &[N("-0004")];
+        let month = &[N("aug")];
+        let day = &[N("28")];
+        let date =
+            Date::new_from_three_fields(Some(year), Some(month), Some(day)).unwrap();
+        if let DateValue::Atom(val) = date.value {
             assert_eq!(val.year, -4);
             assert_eq!(val.month, Some(7));
             assert_eq!(val.day, Some(27));
             assert_eq!(val.time, None);
         } else {
-            panic!("Wrong DateKind");
+            panic!("wrong date kind");
         }
     }
 }

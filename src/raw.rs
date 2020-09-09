@@ -1,23 +1,25 @@
+//! Low-level representation of a bibliography file.
+
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
 use unicode_xid::UnicodeXID;
 
-/// A Bib(La)TeX file's most literal representation, with strings not yet parsed.
+/// The file's most literal representation, with abbreviations not yet resolved.
 #[derive(Debug, Clone)]
-pub struct BiblatexFile<'s> {
+pub struct RawBibliography<'s> {
     /// TeX commands to be prepended to the document, only supported by BibTeX.
     pub preamble: String,
     /// The collection of citation keys and bibliography entries.
-    pub entries: Vec<BiblatexEntry<'s>>,
-    /// Map of reusable strings, only supported by BibTeX.
-    pub strings: HashMap<&'s str, &'s str>,
+    pub entries: Vec<RawEntry<'s>>,
+    /// Map of reusable abbreviations, only supported by BibTeX.
+    pub abbreviations: HashMap<&'s str, &'s str>,
 }
 
-/// A directly extracted Bib(La)TeX file entry, with strings not yet parsed.
+/// A directly extracted entry, with abbreviations not yet resolved.
 #[derive(Debug, Clone)]
-pub struct BiblatexEntry<'s> {
+pub struct RawEntry<'s> {
     /// The citation key.
     pub cite_key: &'s str,
     /// Denotes the type of bibliography item (e.g. `article`).
@@ -26,9 +28,11 @@ pub struct BiblatexEntry<'s> {
     pub fields: HashMap<&'s str, &'s str>,
 }
 
-/// Parse a biblatex file from a source string.
-pub fn parse_file(src: &str, allow_bibtex: bool) -> BiblatexFile<'_> {
-    BiblatexParser::new(src, allow_bibtex).parse()
+impl<'s> RawBibliography<'s> {
+    /// Parse a raw bibliography from a source string.
+    pub fn from_str(src: &'s str, allow_bibtex: bool) -> Self {
+        BiblatexParser::new(src, allow_bibtex).parse()
+    }
 }
 
 /// Backing struct for parsing a Bib(La)TeX file into a `BiblatexFile` struct.
@@ -40,7 +44,7 @@ struct BiblatexParser<'s> {
     index: usize,
     comment: bool,
     iter: Peekable<Chars<'s>>,
-    res: BiblatexFile<'s>,
+    res: RawBibliography<'s>,
 }
 
 /// Symbols that may be found when parsing a file.
@@ -69,16 +73,16 @@ impl<'s> BiblatexParser<'s> {
             index: 0,
             comment: false,
             iter: src.chars().peekable(),
-            res: BiblatexFile {
+            res: RawBibliography {
                 preamble: String::new(),
                 entries: vec![],
-                strings: HashMap::new(),
+                abbreviations: HashMap::new(),
             },
         }
     }
 
     /// Parses the file, consuming the parser in the process.
-    pub fn parse(mut self) -> BiblatexFile<'s> {
+    pub fn parse(mut self) -> RawBibliography<'s> {
         while let Some(c) = self.eat() {
             if c == '@' && !self.comment {
                 self.parse_entry();
@@ -180,7 +184,7 @@ impl<'s> BiblatexParser<'s> {
                     }
                     let s = self.read_prop().expect("Hallo");
                     if is_string {
-                        self.res.strings.insert(s.0, s.1);
+                        self.res.abbreviations.insert(s.0, s.1);
                     } else {
                         fields.insert(s.0, s.1);
                     }
@@ -190,7 +194,7 @@ impl<'s> BiblatexParser<'s> {
         }
 
         if !is_string {
-            self.res.entries.push(BiblatexEntry {
+            self.res.entries.push(RawEntry {
                 cite_key: &self.src[key_start .. key_end],
                 entry_type: entry_type.unwrap_or_default(),
                 fields,
@@ -319,7 +323,7 @@ fn is_ident(c: char, first: bool) -> bool {
 mod tests {
     use super::*;
 
-    fn parse(src: &str, allow_bibtex: bool) -> BiblatexFile<'_> {
+    fn parse(src: &str, allow_bibtex: bool) -> RawBibliography<'_> {
         BiblatexParser::new(src, allow_bibtex).parse()
     }
 
@@ -349,7 +353,7 @@ mod tests {
     #[test]
     fn test_resolve_string() {
         let bt = parse("@string{BT = \"bibtex\"}", true);
-        assert_eq!(bt.strings.get("BT"), Some(&"\"bibtex\""));
+        assert_eq!(bt.abbreviations.get("BT"), Some(&"\"bibtex\""));
     }
 
     #[test]
