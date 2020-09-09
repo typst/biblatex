@@ -94,20 +94,6 @@ impl Entry {
             .ok_or_else(|| anyhow!("The {} field is not present", key))
             .and_then(|chunks| chunks.parse::<T>())
     }
-
-    /// Get a date for a field name with its appropriate sub-fields.
-    fn get_prefixed_date(&self, prefix: &str) -> anyhow::Result<Date> {
-        let key = prefix.to_string();
-        if let Some(chunks) = self.get(&(key.clone() + "date")) {
-            chunks.parse::<Date>()
-        } else {
-            Date::new_from_three_fields(
-                self.get(&(key.clone() + "year")),
-                self.get(&(key.clone() + "month")),
-                self.get(&(key + "day")),
-            )
-        }
-    }
 }
 
 macro_rules! fields {
@@ -153,86 +139,41 @@ macro_rules! alias_fields {
 
 macro_rules! date_fields {
     ($($getter:ident: $field_prefix:expr),* $(,)*) => {
+        $(date_fields!(
+            $getter:
+            concat!($field_prefix, "date"),
+            concat!($field_prefix, "year"),
+            concat!($field_prefix, "month"),
+            concat!($field_prefix, "day")
+        );)*
+    };
+    ($($getter:ident: $date:expr, $year:expr, $month:expr, $day:expr),* $(,)*) => {
         $(
             #[doc = "Get and parse the `"]
-            #[doc = $field_prefix]
-            #[doc = "date` field, falling back to the `"]
-            #[doc = $field_prefix]
-            #[doc = "year`, `"]
-            #[doc = $field_prefix]
-            #[doc = "month`, and `"]
-            #[doc = $field_prefix]
-            #[doc = "day` fields when not present"]
+            #[doc = $date]
+            #[doc = "` field, falling back to the `"]
+            #[doc = $year]
+            #[doc = "`, `"]
+            #[doc = $month]
+            #[doc = "`, and `"]
+            #[doc = $day]
+            #[doc = "` fields when not present."]
             pub fn $getter(&self) -> anyhow::Result<Date> {
-                self.get_prefixed_date($field_prefix)
+                if let Some(chunks) = self.get($date) {
+                    chunks.parse::<Date>()
+                } else {
+                    Date::new_from_three_fields(
+                        self.get($year),
+                        self.get($month),
+                        self.get($day),
+                    )
+                }
             }
         )*
     };
 }
 
 impl Entry {
-    /// Get and parse the `editor` and `editora` through `editorc` fields
-    /// and their respective `editortype` annotation fields.
-    /// If any of the above fields is present, this function will return a
-    /// vector with between one and four entries, one for each editorial role.
-    ///
-    /// The default EditorType `Editor` will be assumed if the type field
-    /// is empty.
-    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
-        let mut editors = vec![];
-
-        self.get("editor")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editortype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editora")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editoratype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editorb")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editorbtype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editorc")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editorctype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-
-        if editors.is_empty() {
-            return Err(anyhow!("No editor fields present"));
-        }
-
-        Ok(editors)
-    }
-
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
         // BibTeX fields.
@@ -250,7 +191,63 @@ impl Entry {
         get_title: "title",
         get_type: "type",
         get_volume: "volume" => i64,
+    }
 
+    /// Get and parse the `editor` and `editora` through `editorc` fields
+    /// and their respective `editortype` annotation fields.
+    /// If any of the above fields is present, this function will return a
+    /// vector with between one and four entries, one for each editorial role.
+    ///
+    /// The default `EditorType::Editor` will be assumed if the type field
+    /// is empty.
+    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
+        let mut editors = vec![];
+
+        let mut parse_editor_field = |name_field: &str, editor_field: &str| {
+            self.get(name_field)
+                .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+                .map(|persons| {
+                    let editor_type = self
+                        .get(editor_field)
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor);
+                    editors.push((persons, editor_type));
+                });
+        };
+
+        parse_editor_field("editor", "editortype");
+        parse_editor_field("editora", "editoratype");
+        parse_editor_field("editorb", "editorbtype");
+        parse_editor_field("editorc", "editorctype");
+
+        if editors.is_empty() {
+            return Err(anyhow!("No editor fields present"));
+        }
+
+        Ok(editors)
+    }
+
+    date_fields! {
+        get_date: "",
+        get_event_date: "event",
+        get_orig_date: "orig",
+        get_url_date: "url",
+    }
+
+    alias_fields! {
+        get_address: "address", "location",
+        get_location: "location", "address",
+        get_annotation: "annotation", "annote",
+        get_eprint_type: "eprinttype", "archiveprefix",
+        get_journal: "journal", "journaltitle",
+        get_journal_title: "journaltitle", "journal",
+        get_sort_key: "key", "sortkey" => String,
+        get_file: "file", "pdf" => String,
+        get_school: "school", "institution",
+        get_institution: "institution", "school",
+    }
+
+    fields! {
         // BibLaTeX supplemental fields.
         get_abstract: "abstract",
         get_addendum: "addendum",
@@ -314,26 +311,6 @@ impl Entry {
         get_version: "version",
         get_volumes: "volumes" => i64,
         get_gender: "gender" => Gender,
-    }
-
-    alias_fields! {
-        get_address: "address", "location",
-        get_location: "location", "address",
-        get_annotation: "annotation", "annote",
-        get_eprint_type: "eprinttype", "archiveprefix",
-        get_journal: "journal", "journaltitle",
-        get_journal_title: "journaltitle", "journal",
-        get_sort_key: "key", "sortkey" => String,
-        get_file: "file", "pdf" => String,
-        get_school: "school", "institution",
-        get_institution: "institution", "school",
-    }
-
-    date_fields! {
-        get_date: "",
-        get_event_date: "event",
-        get_orig_date: "orig",
-        get_url_date: "url",
     }
 }
 
