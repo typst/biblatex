@@ -698,101 +698,202 @@ impl PartialOrd for DateAtom {
 
 // *************************** Chunk Type Parsing Adaptors **************************** //
 
+fn chunk_list_seperated(chunks: &[Chunk], sep: &str) -> Vec<Chunk> {
+    let mut res = vec![];
+    let mut chunks = chunks.to_vec().into_iter();
+    if let Some(chunk) = chunks.next() {
+        res.push(chunk);
+
+        for chunk in chunks {
+            res.push(Chunk::Normal(sep.to_string()));
+            res.push(chunk);
+        }
+    }
+    res
+}
+
 /// Trait for deserializing Bib(La)TeX data types from chunk slices.
 pub trait Type: Sized {
     /// Allows to interpret data from a resolved chunk slices as a type.
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self>;
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self>;
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>>;
 }
 
 impl Type for Vec<Vec<Chunk>> {
     /// Splits the chunks at `"and"`s.
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(split_token_lists(chunks, "and"))
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        todo!()
     }
 }
 
 impl Type for Vec<Person> {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(chunks
             .parse::<Vec<Vec<Chunk>>>()?
             .into_iter()
             .map(|subchunks| Person::new(&subchunks))
             .collect())
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        let chunks = self
+            .iter()
+            .map(|p| {
+                let name_str = if !p.suffix.is_empty() {
+                    format!(
+                        "{}{}{}, {}, {}",
+                        p.prefix,
+                        if p.prefix.is_empty() { "" } else { " " },
+                        p.name,
+                        p.suffix,
+                        p.given_name
+                    )
+                } else {
+                    format!(
+                        "{}{}{}, {}",
+                        p.prefix,
+                        if p.prefix.is_empty() { "" } else { " " },
+                        p.name,
+                        p.given_name
+                    )
+                };
+                Chunk::Normal(name_str)
+            })
+            .collect::<Vec<Chunk>>();
+
+        Ok(chunk_list_seperated(&chunks, " and "))
+    }
 }
 
 impl Type for Date {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Date::new(chunks)
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        todo!()
     }
 }
 
 impl Type for Vec<String> {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(split_token_lists(chunks, ",")
             .into_iter()
             .map(|chunks| chunks.format_verbatim())
             .collect::<Vec<String>>())
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        let chunks = self.iter().map(|s| Chunk::Normal(s.clone())).collect::<Vec<Chunk>>();
+
+        Ok(chunk_list_seperated(&chunks, ","))
+    }
 }
 
 impl Type for String {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(chunks.format_verbatim())
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Verbatim(self.clone())])
     }
 }
 
 impl Type for i64 {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         parse_integers(chunks)
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Normal(self.to_string())])
     }
 }
 
 impl Type for IntOrChunks {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         if let Ok(int) = parse_integers(chunks) {
             Ok(IntOrChunks::Int(int))
         } else {
             Ok(IntOrChunks::Chunks(chunks.to_vec()))
         }
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        if let IntOrChunks::Int(int) = self {
+            Ok(vec![Chunk::Normal(int.to_string())])
+        } else if let IntOrChunks::Chunks(chunks) = self {
+            Ok(chunks.clone())
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 impl Type for Range<u32> {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         if let Some(range) = parse_ranges(chunks).into_iter().next() {
             Ok(range)
         } else {
             Err(anyhow!("No range specified"))
         }
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Normal(format!("{}-{}", self.start, self.end))])
+    }
 }
 
 impl Type for Vec<Range<u32>> {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(parse_ranges(chunks))
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        let chunks = self
+            .iter()
+            .map(|range| Chunk::Normal(format!("{}-{}", range.start, range.end)))
+            .collect::<Vec<Chunk>>();
+
+        Ok(chunk_list_seperated(&chunks, ","))
     }
 }
 
 impl Type for Pagination {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(Pagination::from_str(
             &chunks.format_verbatim().to_lowercase(),
         )?)
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Normal(self.to_string())])
+    }
 }
 
 impl Type for EditorType {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(EditorType::from_str(
             &chunks.format_verbatim().to_lowercase(),
         )?)
     }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Normal(self.to_string())])
+    }
 }
 
 impl Type for Gender {
-    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Gender::from_str(&chunks.format_verbatim().to_lowercase())
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(vec![Chunk::Normal(self.to_string())])
     }
 }
 

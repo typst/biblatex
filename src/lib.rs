@@ -41,14 +41,15 @@ pub enum Chunk {
 
 impl Bibliography {
     /// Parse a bibliography from a source string.
-    pub fn from_str(src: &str, allow_bibtex: bool) -> Vec<Entry> {
+    pub fn from_str(src: &str, allow_bibtex: bool) -> Self {
         Self::from_raw(RawBibliography::from_str(src, allow_bibtex))
     }
 
     /// Parse a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Vec<Entry> {
+    pub fn from_raw(raw: RawBibliography) -> Self {
         let abbreviations = &raw.abbreviations;
-        raw.entries
+        let entries = raw
+            .entries
             .into_iter()
             .map(|entry| Entry {
                 cite_key: entry.cite_key.to_string(),
@@ -59,7 +60,9 @@ impl Bibliography {
                     .map(|(key, value)| (key.to_string(), resolve(value, abbreviations)))
                     .collect(),
             })
-            .collect()
+            .collect();
+
+        Self { 0: entries }
     }
 
     /// Try to find an entry with the given cite key.
@@ -93,20 +96,6 @@ impl Entry {
         self.get(key)
             .ok_or_else(|| anyhow!("The {} field is not present", key))
             .and_then(|chunks| chunks.parse::<T>())
-    }
-
-    /// Get a date for a field name with its appropriate sub-fields.
-    fn get_prefixed_date(&self, prefix: &str) -> anyhow::Result<Date> {
-        let key = prefix.to_string();
-        if let Some(chunks) = self.get(&(key.clone() + "date")) {
-            chunks.parse::<Date>()
-        } else {
-            Date::new_from_three_fields(
-                self.get(&(key.clone() + "year")),
-                self.get(&(key.clone() + "month")),
-                self.get(&(key + "day")),
-            )
-        }
     }
 }
 
@@ -153,24 +142,54 @@ macro_rules! alias_fields {
 
 macro_rules! date_fields {
     ($($getter:ident: $field_prefix:expr),* $(,)*) => {
+        $(date_fields!(
+            $getter:
+            concat!($field_prefix, "date"),
+            concat!($field_prefix, "year"),
+            concat!($field_prefix, "month"),
+            concat!($field_prefix, "day")
+        );)*
+    };
+    ($($getter:ident: $date:expr, $year:expr, $month:expr, $day:expr),* $(,)*) => {
         $(
             #[doc = "Get and parse the `"]
-            #[doc = $field_prefix]
-            #[doc = "date` field, falling back to the `"]
-            #[doc = $field_prefix]
-            #[doc = "year`, `"]
-            #[doc = $field_prefix]
-            #[doc = "month`, and `"]
-            #[doc = $field_prefix]
-            #[doc = "day` fields when not present"]
+            #[doc = $date]
+            #[doc = "` field, falling back to the `"]
+            #[doc = $year]
+            #[doc = "`, `"]
+            #[doc = $month]
+            #[doc = "`, and `"]
+            #[doc = $day]
+            #[doc = "` fields when not present."]
             pub fn $getter(&self) -> anyhow::Result<Date> {
-                self.get_prefixed_date($field_prefix)
+                if let Some(chunks) = self.get($date) {
+                    chunks.parse::<Date>()
+                } else {
+                    Date::new_from_three_fields(
+                        self.get($year),
+                        self.get($month),
+                        self.get($day),
+                    )
+                }
             }
         )*
     };
 }
 
 impl Entry {
+    fn get_editor_with_type(&self, ed_key: &str) -> Option<(Vec<Person>, EditorType)> {
+        self.get(ed_key)
+            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+            .and_then(|eds| {
+                Some((
+                    eds,
+                    self.get(&format!("{}type", ed_key))
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor),
+                ))
+            })
+    }
+
     /// Get and parse the `editor` and `editora` through `editorc` fields
     /// and their respective `editortype` annotation fields.
     /// If any of the above fields is present, this function will return a
@@ -181,50 +200,9 @@ impl Entry {
     pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
         let mut editors = vec![];
 
-        self.get("editor")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editortype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editora")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editoratype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editorb")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editorbtype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
-        self.get("editorc")
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get("editorctype")
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-            .and_then(|eds| Some(editors.push(eds)));
+        for ed in vec!["editor", "editora", "editorb", "editorc"] {
+            self.get_editor_with_type(ed).map(|eds| Some(editors.push(eds)));
+        }
 
         if editors.is_empty() {
             return Err(anyhow!("No editor fields present"));
@@ -248,9 +226,31 @@ impl Entry {
         get_publisher: "publisher" => Vec<Vec<Chunk>>,
         get_series: "series",
         get_title: "title",
-        get_type: "type",
+        get_type: "type" => String,
         get_volume: "volume" => i64,
+    }
 
+    date_fields! {
+        get_date: "",
+        get_event_date: "event",
+        get_orig_date: "orig",
+        get_url_date: "url",
+    }
+
+    alias_fields! {
+        get_address: "address", "location",
+        get_location: "location", "address",
+        get_annotation: "annotation", "annote",
+        get_eprint_type: "eprinttype", "archiveprefix",
+        get_journal: "journal", "journaltitle",
+        get_journal_title: "journaltitle", "journal",
+        get_sort_key: "key", "sortkey" => String,
+        get_file: "file", "pdf" => String,
+        get_school: "school", "institution",
+        get_institution: "institution", "school",
+    }
+
+    fields! {
         // BibLaTeX supplemental fields.
         get_abstract: "abstract",
         get_addendum: "addendum",
@@ -304,6 +304,8 @@ impl Entry {
         get_short_author: "shortauthor" => Vec<Person>,
         get_short_editor: "shorteditor" => Vec<Person>,
         get_shorthand: "shorthand",
+        get_shorthand_intro: "shorthandintro",
+        get_short_journal: "shortjournal",
         get_short_series: "shortseries",
         get_short_title: "shorttitle",
         get_subtitle: "subtitle",
@@ -314,26 +316,6 @@ impl Entry {
         get_version: "version",
         get_volumes: "volumes" => i64,
         get_gender: "gender" => Gender,
-    }
-
-    alias_fields! {
-        get_address: "address", "location",
-        get_location: "location", "address",
-        get_annotation: "annotation", "annote",
-        get_eprint_type: "eprinttype", "archiveprefix",
-        get_journal: "journal", "journaltitle",
-        get_journal_title: "journaltitle", "journal",
-        get_sort_key: "key", "sortkey" => String,
-        get_file: "file", "pdf" => String,
-        get_school: "school", "institution",
-        get_institution: "institution", "school",
-    }
-
-    date_fields! {
-        get_date: "",
-        get_event_date: "event",
-        get_orig_date: "orig",
-        get_url_date: "url",
     }
 }
 
@@ -351,7 +333,7 @@ pub trait ChunksExt {
 
 impl ChunksExt for [Chunk] {
     fn parse<T: Type>(&self) -> anyhow::Result<T> {
-        T::parse(self)
+        T::from_chunks(self)
     }
 
     fn format_sentence(&self) -> String {
@@ -419,7 +401,7 @@ mod tests {
     fn dump_debug(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
         let bibliography = Bibliography::from_str(&contents, true);
-        println!("{:#?}", bibliography);
+        println!("{:#?}", bibliography.0);
     }
 
     fn dump_author_title(file: &str) {
