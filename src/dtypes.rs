@@ -10,8 +10,8 @@ use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumString};
 
 use std::cmp::Ordering;
-use std::str::FromStr;
 use std::fmt;
+use std::str::FromStr;
 
 lazy_static! {
     static ref RANGE_REGEX: Regex =
@@ -20,7 +20,7 @@ lazy_static! {
     // Definite date Regexes
     static ref MONTH_REGEX: Regex =
         Regex::new(r"^(?P<y>(\+|-)?\d{4})-+(?P<m>\d{2})").unwrap();
-    static ref YEAR_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{4})").unwrap();
+    static ref YEAR_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})").unwrap();
 
     // Date range Regexes
     static ref CENTURY_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{2})XX").unwrap();
@@ -31,6 +31,10 @@ lazy_static! {
         Regex::new(r"^(?P<y>(\+|-)?\d{4})-*(?P<m>\d{2})-*XX").unwrap();
     static ref DAY_MONTH_UNSURE_REGEX: Regex =
         Regex::new(r"^(?P<y>(\+|-)?\d{4})-*XX-*XX").unwrap();
+
+    // Date part Regexes
+    static ref MONTH_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)").unwrap();
+    static ref MONTH_DAY_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)(-|\u{00a0}|\s)+(?P<d>[0-9]+)").unwrap();
 }
 
 /*********************************
@@ -497,6 +501,66 @@ impl Date {
         })
     }
 
+    fn new_from_date_atom(atom: DateAtom) -> Self {
+        Date {
+            is_approximate: false,
+            is_uncertain: false,
+            range_end: None,
+            value: DateKind::Definite(atom),
+        }
+    }
+
+    pub fn new_from_three_fields(
+        year: Option<&[Chunk]>,
+        month: Option<&[Chunk]>,
+        day: Option<&[Chunk]>,
+    ) -> Result<Self, anyhow::Error> {
+        let mut year = format_verbatim(year.ok_or_else(|| anyhow!("Year field must be set"))?);
+        year.retain(|c| !c.is_whitespace());
+        let capt = YEAR_REGEX.captures(&year).ok_or(anyhow!("Invalid year data"))?;
+        let year: i32 = capt.name("y").unwrap().as_str().parse().unwrap();
+        let mut date_atom = DateAtom { year, month: None, day: None, time: None };
+
+        if let Some(month) = month {
+            let month = format_verbatim(month);
+            if let Some(day) = day {
+                let mut day = format_verbatim(day);
+                day.retain(|c| !c.is_whitespace());
+                let day: u8 = day.parse()?;
+
+                if day > 31 || day < 1 {
+                    return Err(anyhow!("Day not within range"));
+                }
+                date_atom.day = Some(day - 1);
+
+                let capt = MONTH_PART_REGEX.captures(&month);
+                if let Some(capt) = capt {
+                    let name = capt.name("m").unwrap().as_str();
+                    date_atom.month = get_month_for_name(name)
+                        .or_else(|| get_month_for_abbr(name).map(|x| x.1));
+                }
+            } else if let Some(capt) = MONTH_DAY_PART_REGEX.captures(&month) {
+                let name = capt.name("m").unwrap().as_str();
+                date_atom.month = get_month_for_name(name)
+                    .or_else(|| get_month_for_abbr(name).map(|x| x.1));
+                if date_atom.month.is_some() {
+                    let day: u8 = capt.name("d").unwrap().as_str().parse().unwrap();
+
+                    if day > 31 || day < 1 {
+                        return Err(anyhow!("Day not within range"));
+                    }
+                    date_atom.day = Some(day - 1);
+                }
+            } else if let Some(capt) = MONTH_PART_REGEX.captures(&month) {
+                let name = capt.name("m").unwrap().as_str();
+                date_atom.month = get_month_for_name(name)
+                    .or_else(|| get_month_for_abbr(name).map(|x| x.1));
+            }
+        }
+
+        Ok(Date::new_from_date_atom(date_atom))
+    }
+
     fn is_open_range(s: &str) -> bool {
         if s.trim().is_empty() {
             true
@@ -605,6 +669,44 @@ impl Date {
         } else {
             Err(anyhow!("Date does not match any known format"))
         }
+    }
+}
+
+/// Used to resolve month abbreviations to their respective values
+pub fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
+    match month.to_lowercase().as_str() {
+        "jan" => Some(("January".to_string(), 0)),
+        "feb" => Some(("February".to_string(), 1)),
+        "mar" => Some(("March".to_string(), 2)),
+        "apr" => Some(("April".to_string(), 3)),
+        "may" => Some(("May".to_string(), 4)),
+        "jun" => Some(("June".to_string(), 5)),
+        "jul" => Some(("July".to_string(), 6)),
+        "aug" => Some(("August".to_string(), 7)),
+        "sep" => Some(("September".to_string(), 8)),
+        "oct" => Some(("October".to_string(), 9)),
+        "nov" => Some(("November".to_string(), 10)),
+        "dec" => Some(("December".to_string(), 11)),
+        _ => None,
+    }
+}
+
+/// Used to resolve month names to their respective values
+fn get_month_for_name(month: &str) -> Option<u8> {
+    match month.to_lowercase().as_str() {
+        "january" => Some(0),
+        "february" => Some(1),
+        "march" => Some(2),
+        "april" => Some(3),
+        "may" => Some(4),
+        "june" => Some(5),
+        "july" => Some(6),
+        "august" => Some(7),
+        "september" => Some(8),
+        "october" => Some(9),
+        "november" => Some(10),
+        "december" => Some(11),
+        _ => None,
     }
 }
 
@@ -1040,7 +1142,7 @@ pub fn format_sentence(vals: &[Chunk]) -> String {
                 if first {
                     out.push_str(&c.to_uppercase().to_string());
                 } else {
-                    out.push(c);
+                    out.push_str(&c.to_lowercase().to_string());
                 }
                 first = false;
             }
@@ -1360,5 +1462,38 @@ mod tests {
 
         assert_eq!(date.is_uncertain, true);
         assert_eq!(date.is_approximate, true);
+    }
+
+    #[test]
+    fn test_new_date_from_three_fields() {
+        let date = Date::new_from_three_fields(
+            Some(&vec![N("2020")]),
+            Some(&vec![N("January\u{A0}12th")]),
+            None,
+        )
+        .unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, 2020);
+            assert_eq!(val.month, Some(0));
+            assert_eq!(val.day, Some(11));
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
+
+        let date = Date::new_from_three_fields(
+            Some(&vec![N("-0004")]),
+            Some(&vec![N("aug")]),
+            Some(&vec![N("28")]),
+        )
+        .unwrap();
+        if let DateKind::Definite(val) = date.value {
+            assert_eq!(val.year, -4);
+            assert_eq!(val.month, Some(7));
+            assert_eq!(val.day, Some(27));
+            assert_eq!(val.time, None);
+        } else {
+            panic!("Wrong DateKind");
+        }
     }
 }

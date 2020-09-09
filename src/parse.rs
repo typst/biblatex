@@ -1,7 +1,7 @@
+use crate::dtypes::{get_month_for_abbr, ChunkExt, Date, IntOrChunks, Person};
 use std::collections::HashMap;
 use std::mem::take;
 use unicode_normalization::char;
-use crate::dtypes::{Person, IntOrChunks, ChunkExt};
 
 use crate::syntax::BiblatexParser;
 
@@ -79,6 +79,24 @@ impl CollectionEntry {
     fn get<'a>(&'a self, key: &str) -> Vec<Chunk> {
         self.props.get(&key.to_lowercase()).unwrap_or(&vec![]).clone()
     }
+
+    fn get_opt<'a>(&'a self, key: &str) -> Option<&'a [Chunk]> {
+        self.props.get(&key.to_lowercase()).map(|v| v.as_slice())
+    }
+
+    pub fn get_date<'a>(&'a self) -> Result<Date, anyhow::Error> {
+        let date_field = self.get_opt("date");
+        if let Some(date) = date_field {
+            let date: Vec<Chunk> = Vec::from(date);
+            date.parse::<Date>()
+        } else {
+            Date::new_from_three_fields(
+                self.get_opt("year"),
+                self.get_opt("month"),
+                self.get_opt("day")
+            )
+        }
+    }
 }
 
 macro_rules! fields {
@@ -93,7 +111,7 @@ macro_rules! fields {
     };
 }
 
-fields!{
+fields! {
     get_address: "address" => Vec<Chunk>,
     get_annote: "annote" => Vec<Chunk>,
     get_author: "author" => Vec<Person>,
@@ -266,6 +284,30 @@ fn process_string(s: &str) -> Vec<Chunk> {
                     vals.push(Chunk::Resolve(c.to_string()))
                 }
             }
+            '~' if !stack.is_empty() => {
+                // Non-breaking space
+                let success = if let Some(x) = vals.last_mut() {
+                    if let Chunk::Normal(s) = x {
+                        s.push('\u{00A0}');
+                        true
+                    } else if let Chunk::Verbatim(s) = x {
+                        s.push('\u{00A0}');
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !success {
+                    if stack.len() == 1 {
+                        vals.push(Chunk::Normal('\u{00A0}'.to_string()))
+                    } else if stack.len() > 1 {
+                        vals.push(Chunk::Verbatim('\u{00A0}'.to_string()))
+                    }
+                }
+            }
             _ if stack.len() == 1 => {
                 let success = if let Some(x) = vals.last_mut() {
                     if let Chunk::Normal(s) = x {
@@ -316,6 +358,8 @@ fn resolve(s: Vec<Chunk>, map: &HashMap<&str, &str>) -> Vec<Chunk> {
 
             if let Some(mut x) = val {
                 res.append(&mut x);
+            } else if let Some(x) = get_month_for_abbr(&x) {
+                res.push(Chunk::Normal(x.0));
             }
         } else {
             res.push(elem);
@@ -603,13 +647,18 @@ mod tests {
         assert_eq!(res[1], C("\"", false));
         assert_eq!(res[2], CA("a"));
         assert_eq!(res[3], N(" and others"));
+
+        let res = process_string("Jan # \"~12\"");
+        let map = HashMap::new();
+        let res = resolve(res, &map);
+        assert_eq!(res[0], N("January\u{A0}12"));
     }
 
     #[test]
     fn test_commands() {
         let res =
-            eval_latex_commands(process_string("{\\LaTeX{} is gre\\`at\\o \\t{oo}"));
+            eval_latex_commands(process_string("{\\LaTeX{}~is gr\\~e\\`at\\o \\t{oo}"));
         assert_eq!(res[0], V("LaTeX"));
-        assert_eq!(res[1], N(" is greàtøo\u{361}o"));
+        assert_eq!(res[1], N("\u{00A0}is grẽàtøo\u{361}o"));
     }
 }
