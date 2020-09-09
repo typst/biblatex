@@ -4,7 +4,7 @@ use std::mem::take;
 use anyhow::anyhow;
 use unicode_normalization::char;
 
-use crate::dtypes::{ChunkExt, IntOrChunks, Person};
+use crate::dtypes::{get_month_for_abbr, ChunkExt, Date, IntOrChunks, Person};
 use crate::syntax::parse_file;
 
 /// Parse a vector of collection entries from a source string.
@@ -49,13 +49,12 @@ impl CollectionEntry {
     }
 
     fn get_opt<'a>(&'a self, key: &str) -> Option<&'a [Chunk]> {
-        self.props.get(&key.to_lowercase()).map(|v| v.as_slice())
+        self.fields.get(&key.to_lowercase()).map(|v| v.as_slice())
     }
 
     pub fn get_date<'a>(&'a self) -> Result<Date, anyhow::Error> {
         let date_field = self.get_opt("date");
         if let Some(date) = date_field {
-            let date: Vec<Chunk> = Vec::from(date);
             date.parse::<Date>()
         } else {
             Date::new_from_three_fields(
