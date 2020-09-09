@@ -4,42 +4,36 @@ use std::str::Chars;
 
 use unicode_xid::UnicodeXID;
 
-#[derive(Debug, PartialEq)]
-/// Symbols that may be found when parsing a file.
-enum Symbols {
-    Quotes,
-    Braces,
-}
-
-#[derive(Clone, Debug, Default)]
-/// A Bib(La)TeX file entry as directly extracted, the strings are not yet parsed.
-pub struct BiblatexEntry<'s> {
-    /// The bibliography item's type, e.g. `inbook`.
-    pub entry_type: &'s str,
-    /// A map of field names to field values.
-    pub props: HashMap<&'s str, &'s str>,
-}
-
-#[derive(Clone, Debug)]
-/// A Bib(La)TeX file's most literal representation, the strings are not yet parsed.
+/// A Bib(La)TeX file's most literal representation, with strings not yet parsed.
+#[derive(Debug, Clone)]
 pub struct BiblatexFile<'s> {
     /// TeX commands to be prepended to the document, only supported by BibTeX.
     pub preamble: String,
-    pub entries: Vec<(&'s str, BiblatexEntry<'s>)>,
+    /// The collection of citation keys and bibliography entries.
+    pub entries: Vec<BiblatexEntry<'s>>,
     /// Map of reusable strings, only supported by BibTeX.
     pub strings: HashMap<&'s str, &'s str>,
 }
 
-enum ParseMode {
-    Outside,
-    Type,
-    KeyMode,
-    PreambleMode,
-    EntryMode,
+/// A directly extracted Bib(La)TeX file entry, with strings not yet parsed.
+#[derive(Debug, Clone)]
+pub struct BiblatexEntry<'s> {
+    /// The citation key.
+    pub cite_key: &'s str,
+    /// Denotes the type of bibliography item (e.g. `article`).
+    pub entry_type: &'s str,
+    /// Maps from field names to their associated values.
+    pub fields: HashMap<&'s str, &'s str>,
+}
+
+/// Parse a biblatex file from a source string.
+pub fn parse_file(src: &str, allow_bibtex: bool) -> BiblatexFile<'_> {
+    BiblatexParser::new(src, allow_bibtex).parse()
 }
 
 /// Backing struct for parsing a Bib(La)TeX file into a `BiblatexFile` struct.
-pub struct BiblatexParser<'s> {
+struct BiblatexParser<'s> {
+    #[allow(unused)]
     allow_bibtex: bool,
     src: &'s str,
     mode: ParseMode,
@@ -49,17 +43,20 @@ pub struct BiblatexParser<'s> {
     res: BiblatexFile<'s>,
 }
 
-/// Characters allowable in identifiers like cite keys.
-fn is_ident(c: char, first: bool) -> bool {
-    let unpermissable = "\"#'(),={}%\\~";
-    let interpunct = ":<->_";
+/// Symbols that may be found when parsing a file.
+#[derive(Debug, PartialEq)]
+enum Symbols {
+    Quotes,
+    Braces,
+}
 
-    !unpermissable.contains(c)
-        && if first {
-            UnicodeXID::is_xid_start(c)
-        } else {
-            UnicodeXID::is_xid_continue(c) || interpunct.contains(c)
-        }
+#[derive(Debug, PartialEq)]
+enum ParseMode {
+    Outside,
+    Type,
+    KeyMode,
+    PreambleMode,
+    EntryMode,
 }
 
 impl<'s> BiblatexParser<'s> {
@@ -70,8 +67,8 @@ impl<'s> BiblatexParser<'s> {
             src,
             mode: ParseMode::Outside,
             index: 0,
-            iter: src.chars().peekable(),
             comment: false,
+            iter: src.chars().peekable(),
             res: BiblatexFile {
                 preamble: String::new(),
                 entries: vec![],
@@ -103,9 +100,10 @@ impl<'s> BiblatexParser<'s> {
         let mut type_end = self.index;
         let mut key_start: usize = 0;
         let mut key_end: usize = 0;
-        self.mode = ParseMode::Type;
-        let mut entry = BiblatexEntry::default();
         let mut is_string = false;
+
+        let mut entry_type = None;
+        let mut fields = HashMap::new();
 
         while let Some(c) = self.peek() {
             match self.mode {
@@ -114,13 +112,14 @@ impl<'s> BiblatexParser<'s> {
                         self.eat();
                         type_end = self.index;
                     } else {
-                        entry.entry_type = &self.src[type_start .. type_end];
+                        entry_type = Some(&self.src[type_start .. type_end]);
                         if c.is_whitespace() {
                             self.eat();
                         } else if c == '{' {
+                            self.eat();
+
                             let lower_type =
                                 &self.src[type_start .. type_end].to_lowercase();
-                            self.eat();
 
                             if lower_type == "string" {
                                 self.mode = ParseMode::EntryMode;
@@ -133,7 +132,7 @@ impl<'s> BiblatexParser<'s> {
                                 self.mode = ParseMode::KeyMode;
                             }
                         } else {
-                            // TODO Invalid
+                            // TODO: Invalid
                             self.mode = ParseMode::Outside;
                             break;
                         }
@@ -150,7 +149,7 @@ impl<'s> BiblatexParser<'s> {
                         self.eat();
                         self.mode = ParseMode::EntryMode;
                     } else {
-                        // TODO Invalid
+                        // TODO: Invalid
                         self.mode = ParseMode::Outside;
                         break;
                     }
@@ -159,7 +158,7 @@ impl<'s> BiblatexParser<'s> {
                 ParseMode::PreambleMode => {
                     self.skip_ws();
 
-                    // This does not allow string concatenation in preambles
+                    // This does not allow string concatenation in preambles.
                     if c == '\"' {
                         self.eat();
                         while let Some(c) = self.eat() {
@@ -183,14 +182,19 @@ impl<'s> BiblatexParser<'s> {
                     if is_string {
                         self.res.strings.insert(s.0, s.1);
                     } else {
-                        entry.props.insert(s.0, s.1);
+                        fields.insert(s.0, s.1);
                     }
                 }
                 _ => break,
             }
         }
+
         if !is_string {
-            self.res.entries.push((&self.src[key_start .. key_end], entry));
+            self.res.entries.push(BiblatexEntry {
+                cite_key: &self.src[key_start .. key_end],
+                entry_type: entry_type.unwrap_or_default(),
+                fields,
+            });
         }
 
         self.mode = ParseMode::Outside;
@@ -234,23 +238,16 @@ impl<'s> BiblatexParser<'s> {
                 '{' if escape => {}
                 '}' if escape => {}
                 '"' if escape => {}
-                ',' if stack.is_empty() => {
-                    break;
-                }
+                ',' if stack.is_empty() => break,
                 '}' if stack.is_empty() => {
                     self.mode = ParseMode::Outside;
-                    println!("name {}", name);
                     break;
                 }
                 '"' if stack.last() == Some(&Symbols::Quotes) => {
                     stack.pop();
                 }
-                '"' if stack.is_empty() => {
-                    stack.push(Symbols::Quotes);
-                }
-                '{' => {
-                    stack.push(Symbols::Braces);
-                }
+                '"' if stack.is_empty() => stack.push(Symbols::Quotes),
+                '{' => stack.push(Symbols::Braces),
                 '}' => {
                     let x = stack.pop();
                     if x != Some(Symbols::Braces) {
@@ -298,66 +295,65 @@ impl<'s> BiblatexParser<'s> {
     fn eat(&mut self) -> Option<char> {
         let c = self.iter.next()?;
         self.index += c.len_utf8();
-
         Some(c)
     }
 }
 
+/// Characters allowable in identifiers like cite keys.
+fn is_ident(c: char, first: bool) -> bool {
+    match c {
+        '"' | '#' | '\'' | '(' | ')' | ',' | '=' | '{' | '}' | '%' | '\\' | '~' => false,
+        ':' | '<' | '-' | '>' | '_' if !first => true,
+        _ => {
+            if first {
+                c.is_xid_start()
+            } else {
+                c.is_xid_continue()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
-    use super::BiblatexParser;
+    use super::*;
 
-    macro_rules! bt {
-        ($src:expr, $mode:expr $(,)?) => {{
-            let p = BiblatexParser::new($src, $mode);
-            p.parse()
-        }};
+    fn parse(src: &str, allow_bibtex: bool) -> BiblatexFile<'_> {
+        BiblatexParser::new(src, allow_bibtex).parse()
     }
 
-    fn test_prop<'a>(prop_name: &'a str, prop: &'a str) -> String {
-        let scaffold = "@article{test, ";
-        let mut test_obj = scaffold.to_string() + prop_name;
-        test_obj.push('=');
-        test_obj.push_str(prop);
-        test_obj.push('}');
-        let bt = bt!(&test_obj, true);
-        let article = &bt.entries[0].1;
-        article.props.get(prop_name).expect("fail").to_string()
+    fn test_prop(key: &str, value: &str) -> String {
+        let test = format!("@article{{test, {}={}}}", key, value);
+        let bt = parse(&test, true);
+        let article = &bt.entries[0];
+        article.fields.get(key).expect("fail").to_string()
     }
 
     #[test]
-    fn it_works() {
-        let bt = bt!(
-            "@article{haug2020,\n\n  title = \"Great proceedings\\{\",\n   year=2002,\n   author={Haug, {Martin} and Haug, Gregor}}",
-            true
-        );
+    fn test_parse_article() {
+        let file = "@article{haug2020,
+            title = \"Great proceedings\\{\",
+            year=2002,
+            author={Haug, {Martin} and Haug, Gregor}}";
 
-        let article = &bt.entries[0].1;
+        let bt = parse(file, true);
+        let article = &bt.entries[0];
+
         assert_eq!(article.entry_type, "article");
-        assert_eq!(
-            *article.props.get("title").expect("fail"),
-            "\"Great proceedings\\{\""
-        );
-        assert_eq!(*article.props.get("year").expect("fail"), "2002");
-        assert_eq!(
-            *article.props.get("author").expect("fail"),
-            "{Haug, {Martin} and Haug, Gregor}"
-        );
+        assert_eq!(article.fields.get("title"), Some(&"\"Great proceedings\\{\""));
+        assert_eq!(article.fields.get("year"), Some(&"2002"));
+        assert_eq!(article.fields.get("author"), Some(&"{Haug, {Martin} and Haug, Gregor}"));
     }
 
     #[test]
-    fn test_strings() {
-        let bt = bt!("@string{BT = \"bibtex\"}", true);
-
-        let &bts = bt.strings.get("BT").expect("fail");
-        assert_eq!(bts, "\"bibtex\"");
+    fn test_resolve_string() {
+        let bt = parse("@string{BT = \"bibtex\"}", true);
+        assert_eq!(bt.strings.get("BT"), Some(&"\"bibtex\""));
     }
 
     #[test]
     fn test_escape() {
-        assert_eq!(
-            test_prop("author", "{Mister A\\}\"B\"}"),
-            "{Mister A\\}\"B\"}"
-        );
+        assert_eq!(test_prop("author", "{Mister A\\}\"B\"}"), "{Mister A\\}\"B\"}");
     }
 }

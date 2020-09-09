@@ -1,53 +1,50 @@
-extern crate chinese_number;
-extern crate chrono;
-extern crate numerals;
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Range;
+use std::str::FromStr;
 
-use crate::parse::Chunk;
+use anyhow::anyhow;
 use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
-use chrono::prelude::*;
+use chrono::{Datelike, NaiveDate, NaiveTime};
+use lazy_static::lazy_static;
 use numerals::roman::Roman;
 use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumString};
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::str::FromStr;
+use crate::parse::Chunk;
 
+#[rustfmt::skip]
 lazy_static! {
-    static ref RANGE_REGEX: Regex =
-        Regex::new(r"(?P<s>\d+)\s*-+\s*(\d+:)?(?P<e>\d+)").unwrap();
+    // Range regex (like `5 -- 7`).
+    static ref RANGE_REGEX: Regex = Regex::new(r"(?P<s>\d+)\s*-+\s*(\d+:)?(?P<e>\d+)").unwrap();
 
-    // Definite date Regexes
-    static ref MONTH_REGEX: Regex =
-        Regex::new(r"^(?P<y>(\+|-)?\d{4})-+(?P<m>\d{2})").unwrap();
+    // Definite (i.e. non-range) date regexes.
+    static ref MONTH_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-+(?P<m>\d{2})").unwrap();
     static ref YEAR_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})").unwrap();
 
-    // Date range Regexes
+    // Date range regexes.
     static ref CENTURY_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{2})XX").unwrap();
     static ref DECADE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{3})X").unwrap();
-    static ref MONTH_UNSURE_REGEX: Regex =
-        Regex::new(r"^(?P<y>(\+|-)?\d{4})-+XX").unwrap();
-    static ref DAY_UNSURE_REGEX: Regex =
-        Regex::new(r"^(?P<y>(\+|-)?\d{4})-*(?P<m>\d{2})-*XX").unwrap();
-    static ref DAY_MONTH_UNSURE_REGEX: Regex =
-        Regex::new(r"^(?P<y>(\+|-)?\d{4})-*XX-*XX").unwrap();
+    static ref MONTH_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-+XX").unwrap();
+    static ref DAY_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-*(?P<m>\d{2})-*XX").unwrap();
+    static ref DAY_MONTH_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-*XX-*XX").unwrap();
 
     // Date part Regexes
     static ref MONTH_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)").unwrap();
     static ref MONTH_DAY_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)(-|\u{00a0}|\s)+(?P<d>[0-9]+)").unwrap();
 }
 
-/*********************************
- ********* Name Parsing **********
- *********************************/
+// *********************************** Name Parsing *********************************** //
 
-#[derive(Debug)]
 /// An author, editor, or some other person affiliated with the cited work.
 /// When obtained through the constructor `Person::new`, the fields are trimmed.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Person {
-    pub given_name: String,
+    /// The surname / family name / last name.
     pub name: String,
-    /// The prefix is placed between given name and name. It could, for example
+    /// The given name / first name / forename.
+    pub given_name: String,
+    /// The prefix is placed between given name and name. It could, for example,
     /// be a nobiliary particle.
     pub prefix: String,
     /// The suffix is placed after the name (e.g. "Jr.").
@@ -56,8 +53,9 @@ pub struct Person {
 
 impl Person {
     /// Constructs a new Person from a Chunk vector according to the specs of
-    /// [Nicolas Markey in "Tame the BeaST"](https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf),
-    /// pp. 23-24.
+    /// [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
+    ///
+    /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
     fn new(source: Vec<Chunk>) -> Self {
         let num_commas: usize = source
             .iter()
@@ -94,7 +92,6 @@ impl Person {
         // If there is no subsequent capitalized word, take last one.
         // Treat verbatim as capital letters
 
-        let iter = ValueCharIter::new(&source);
         let mut word_start = true;
         let mut capital = false;
         let mut seen_lowercase = false;
@@ -104,7 +101,8 @@ impl Person {
         let mut cap_word_end = 0;
         let mut last_word_start = 0;
         let mut last_lowercase_start = 0;
-        for (index, (c, v)) in iter.clone().enumerate() {
+
+        for (index, (c, v)) in chunk_chars(&source).enumerate() {
             if c.is_whitespace() && !v {
                 word_start = true;
                 continue;
@@ -137,7 +135,7 @@ impl Person {
         let mut given_name = String::new();
         let mut prefix = String::new();
 
-        for (index, (c, _)) in iter.clone().enumerate() {
+        for (index, (c, _)) in chunk_chars(&source).enumerate() {
             if (index <= cap_word_end
                 && seen_lowercase
                 && seen_uppercase
@@ -191,8 +189,8 @@ impl Person {
         let mut is_lowercase = false;
         let mut last_word_start = 0;
         let mut has_seen_uppercase_words = false;
-        let iter = ValueCharIter::new(&s1);
-        for (index, (c, v)) in iter.clone().enumerate() {
+
+        for (index, (c, v)) in chunk_chars(&s1).enumerate() {
             if c.is_whitespace() && !v {
                 word_start = true;
                 continue;
@@ -218,7 +216,7 @@ impl Person {
 
         let mut name = String::new();
         let mut prefix = String::new();
-        for (index, (c, _)) in iter.enumerate() {
+        for (index, (c, _)) in chunk_chars(&s1).enumerate() {
             if (index as i32 <= last_lower_case_end && has_seen_uppercase_words)
                 || (!has_seen_uppercase_words && index < last_word_start)
             {
@@ -238,6 +236,7 @@ impl Person {
 
     /// Constructs new person from a Chunk Vector if in the
     /// form `<Prefix> <Last>, <Suffix>, <First>`.
+    ///
     /// `s1`, `s2`, `s3` correspond to the first through third part of the
     /// value respectively.
     ///
@@ -269,134 +268,10 @@ impl fmt::Display for Person {
     }
 }
 
-/*********************************
- ********* Date Parsing **********
- *********************************/
-
-/// A date atom is a timezone-unaware Date that must specify a year
-/// and can specify month, day, and time. Flags about uncertainity / precision
-/// are stored within the parent `Date` struct.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DateAtom {
-    pub year: i32,
-    /// The month (starts at zero).
-    pub month: Option<u8>,
-    /// The day (starts at zero).
-    pub day: Option<u8>,
-    pub time: Option<NaiveTime>,
-}
-
-impl PartialOrd for DateAtom {
-    fn partial_cmp(&self, other: &DateAtom) -> Option<Ordering> {
-        let year_ord = self.year.cmp(&other.year);
-        if year_ord != Ordering::Equal {
-            return Some(year_ord);
-        }
-
-        if let Some(month) = self.month {
-            if let Some(month_o) = other.month {
-                let month_ord = month.cmp(&month_o);
-                if month_ord != Ordering::Equal {
-                    return Some(month_ord);
-                }
-            } else {
-                return None;
-            }
-        } else {
-            return if other.month.is_none() {
-                Some(Ordering::Equal)
-            } else {
-                None
-            };
-        }
-
-        if let Some(day) = self.day {
-            if let Some(day_o) = other.day {
-                let day_ord = day.cmp(&day_o);
-                if day_ord != Ordering::Equal {
-                    return Some(day_ord);
-                }
-            } else {
-                return None;
-            }
-        } else {
-            return if other.day.is_none() {
-                Some(Ordering::Equal)
-            } else {
-                None
-            };
-        }
-
-        if let Some(time) = self.time {
-            if let Some(time_o) = other.time {
-                Some(time.cmp(&time_o))
-            } else {
-                None
-            }
-        } else if other.time.is_none() {
-            Some(Ordering::Equal)
-        } else {
-            None
-        }
-    }
-}
-
-impl DateAtom {
-    fn new(mut source: String) -> Result<Self, anyhow::Error> {
-        source.retain(|f| !f.is_whitespace());
-
-        let time = if let Some(pos) = source.find('T') {
-            if pos + 1 < source.len() {
-                let time_str = source.split_off(pos + 1);
-                source.pop();
-                time_str.parse::<NaiveTime>().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let full_date = source.parse::<NaiveDate>();
-
-        if let Ok(ndate) = full_date {
-            Ok(DateAtom {
-                year: ndate.year(),
-                month: Some(ndate.month0() as u8),
-                day: Some(ndate.day0() as u8),
-                time,
-            })
-        } else if let Some(captures) = MONTH_REGEX.captures(&source) {
-            Ok(DateAtom {
-                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
-                month: Some(
-                    (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap() - 1,
-                ),
-                day: None,
-                time,
-            })
-        } else if let Some(captures) = YEAR_REGEX.captures(&source) {
-            Ok(DateAtom {
-                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
-                month: None,
-                day: None,
-                time,
-            })
-        } else {
-            Err(anyhow!("Date does not match any known format"))
-        }
-    }
-}
-
-/// Indicates whether the start or end of a date interval is open or definite
-#[derive(Clone, Debug, PartialEq)]
-pub enum DateKind {
-    Open,
-    Definite(DateAtom),
-}
+// *********************************** Date Parsing *********************************** //
 
 /// Represents a date or a range of dates.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Date {
     /// Indicates whether the sources are sure about the date.
     pub is_uncertain: bool,
@@ -408,45 +283,34 @@ pub struct Date {
     pub range_end: Option<DateKind>,
 }
 
-// TODO: Handle open date kind
-// impl PartialOrd for Date {
-//     fn partial_cmp(&self, other: &Date) -> Option<Ordering> {
-//         if let Some(range_end) = &self.range_end {
-//             if let Some(range_end_o) = &other.range_end {
-//                 let start_cmp = self.value.partial_cmp(&other.value);
-//                 let end_cmp = range_end.partial_cmp(&range_end_o);
+/// Indicates whether the start or end of a date interval is open or definite.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum DateKind {
+    Open,
+    Definite(DateAtom),
+}
 
-//                 if start_cmp.is_none() || end_cmp.is_none() {
-//                     return None;
-//                 }
-
-//                 let start_cmp = start_cmp.unwrap();
-//                 let end_cmp = end_cmp.unwrap();
-
-//                 if start_cmp == end_cmp || end_cmp == Ordering::Equal {
-//                     Some(start_cmp)
-//                 } else if start_cmp == Ordering::Equal {
-//                     Some(end_cmp)
-//                 } else {
-//                     None
-//                 }
-//             } else {
-//                 self.value.partial_cmp(&other.value)
-//             }
-//         } else {
-//             // We do not have it
-//             if other.range_end.is_none() {
-//                 self.value.partial_cmp(&other.value)
-//             } else {
-//                 // Use the above implementation
-//                 other.partial_cmp(self).map(Ordering::reverse)
-//             }
-//         }
-//     }
-// }
+/// A date atom is a timezone-unaware Date that must specify a year
+/// and can specify month, day, and time. Flags about uncertainity / precision
+/// are stored within the parent `Date` struct.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct DateAtom {
+    /// The year.
+    ///
+    /// AD years are counted starting from one and thus represented as exactly their year
+    /// (e.g. 2000 AD is `2000`) whereas BC years are counted starting from zero downwards
+    /// (e.g. 1000 BC is `999`)
+    pub year: i32,
+    /// The month (starting at zero).
+    pub month: Option<u8>,
+    /// The day (starting at zero).
+    pub day: Option<u8>,
+    /// The timezone-unaware time.
+    pub time: Option<NaiveTime>,
+}
 
 impl Date {
-    fn new(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+    fn new(chunks: Vec<Chunk>) -> anyhow::Result<Self> {
         let mut date_str = format_verbatim(&chunks).trim_end().to_string();
 
         let last_char = date_str.chars().last().ok_or(anyhow!("Date string is empty"))?;
@@ -571,7 +435,7 @@ impl Date {
         }
     }
 
-    fn range_dates(mut source: String) -> Result<(DateAtom, DateAtom), anyhow::Error> {
+    fn range_dates(mut source: String) -> anyhow::Result<(DateAtom, DateAtom)> {
         source.retain(|c| !c.is_whitespace());
 
         if let Some(captures) = CENTURY_REGEX.captures(&source) {
@@ -672,7 +536,7 @@ impl Date {
     }
 }
 
-/// Used to resolve month abbreviations to their respective values
+/// Used to resolve month abbreviations to their respective values.
 pub fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
     match month.to_lowercase().as_str() {
         "jan" => Some(("January".to_string(), 0)),
@@ -691,7 +555,7 @@ pub fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
     }
 }
 
-/// Used to resolve month names to their respective values
+/// Used to resolve month names to their respective values.
 fn get_month_for_name(month: &str) -> Option<u8> {
     match month.to_lowercase().as_str() {
         "january" => Some(0),
@@ -710,128 +574,233 @@ fn get_month_for_name(month: &str) -> Option<u8> {
     }
 }
 
-/*********************************
- ** Chunk type parsing adaptors **
- *********************************/
+// TODO: Handle open date kind
+// impl PartialOrd for Date {
+//     fn partial_cmp(&self, other: &Date) -> Option<Ordering> {
+//         if let Some(range_end) = &self.range_end {
+//             if let Some(range_end_o) = &other.range_end {
+//                 let start_cmp = self.value.partial_cmp(&other.value);
+//                 let end_cmp = range_end.partial_cmp(&range_end_o);
+//                 if start_cmp.is_none() || end_cmp.is_none() {
+//                     return None;
+//                 }
 
-/// Implementors represent the serialized form of an Bib(La)TeX data type.
-pub trait Type: Sized {
-    /// This function allows to extract data out of an
-    /// resolved Chunk vector for consumption elsewhere.
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error>;
-}
+//                 let start_cmp = start_cmp.unwrap();
+//                 let end_cmp = end_cmp.unwrap();
 
-impl Type for Vec<Chunk> {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(chunks)
+//                 if start_cmp == end_cmp || end_cmp == Ordering::Equal {
+//                     Some(start_cmp)
+//                 } else if start_cmp == Ordering::Equal {
+//                     Some(end_cmp)
+//                 } else {
+//                     None
+//                 }
+//             } else {
+//                 self.value.partial_cmp(&other.value)
+//             }
+//         } else {
+//             // We do not have it
+//             if other.range_end.is_none() {
+//                 self.value.partial_cmp(&other.value)
+//             } else {
+//                 // Use the above implementation
+//                 other.partial_cmp(self).map(Ordering::reverse)
+//             }
+//         }
+//     }
+// }
+
+impl DateAtom {
+    fn new(mut source: String) -> anyhow::Result<Self> {
+        source.retain(|f| !f.is_whitespace());
+
+        let time = if let Some(pos) = source.find('T') {
+            if pos + 1 < source.len() {
+                let time_str = source.split_off(pos + 1);
+                source.pop();
+                time_str.parse::<NaiveTime>().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let full_date = source.parse::<NaiveDate>();
+
+        if let Ok(ndate) = full_date {
+            Ok(DateAtom {
+                year: ndate.year(),
+                month: Some(ndate.month0() as u8),
+                day: Some(ndate.day0() as u8),
+                time,
+            })
+        } else if let Some(captures) = MONTH_REGEX.captures(&source) {
+            Ok(DateAtom {
+                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
+                month: Some(
+                    (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap() - 1,
+                ),
+                day: None,
+                time,
+            })
+        } else if let Some(captures) = YEAR_REGEX.captures(&source) {
+            Ok(DateAtom {
+                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
+                month: None,
+                day: None,
+                time,
+            })
+        } else {
+            Err(anyhow!("Date does not match any known format"))
+        }
     }
 }
 
+impl PartialOrd for DateAtom {
+    fn partial_cmp(&self, other: &DateAtom) -> Option<Ordering> {
+        let year_ord = self.year.cmp(&other.year);
+        if year_ord != Ordering::Equal {
+            return Some(year_ord);
+        }
+
+        match (self.month, other.month) {
+            (Some(s), Some(o)) => {
+                let month_ord = s.cmp(&o);
+                if month_ord != Ordering::Equal {
+                    return Some(month_ord);
+                }
+            }
+            (None, None) => return Some(Ordering::Equal),
+            _ => return None,
+        }
+
+        match (self.day, other.day) {
+            (Some(s), Some(o)) => {
+                let day_ord = s.cmp(&o);
+                if day_ord != Ordering::Equal {
+                    return Some(day_ord);
+                }
+            }
+            (None, None) => return Some(Ordering::Equal),
+            _ => return None,
+        }
+
+        match (self.time, other.time) {
+            (Some(s), Some(o)) => Some(s.cmp(&o)),
+            (None, None) => Some(Ordering::Equal),
+            _ => None,
+        }
+    }
+}
+
+// *************************** Chunk Type Parsing Adaptors **************************** //
+
+/// Trait for deserializing Bib(La)TeX data types from chunk slices.
+pub trait Type: Sized {
+    /// Allows to interpret data from a resolved chunk slices as a type.
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self>;
+}
+
 impl Type for Vec<Vec<Chunk>> {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(split_token_lists(chunks, "and"))
+    /// Splits the chunks at `"and"`s.
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Ok(split_token_lists(chunks.to_vec(), "and"))
     }
 }
 
 impl Type for Vec<Person> {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        let list = chunks.parse::<Vec<Vec<Chunk>>>()?;
-        let mut persons = vec![];
-
-        for pers in list {
-            persons.push(Person::new(pers));
-        }
-
-        Ok(persons)
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Ok(chunks
+            .parse::<Vec<Vec<Chunk>>>()?
+            .into_iter()
+            .map(|subchunks| Person::new(subchunks))
+            .collect())
     }
 }
 
 impl Type for Date {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Date::new(chunks)
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Date::new(chunks.to_vec())
     }
 }
 
 impl Type for String {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(format_verbatim(&chunks))
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Ok(format_verbatim(chunks))
     }
 }
 
 impl Type for i64 {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        parse_integers(&chunks)
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        parse_integers(chunks)
     }
 }
 
 impl Type for IntOrChunks {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        let res = parse_integers(&chunks).ok();
-        if res.is_some() {
-            Ok(IntOrChunks { int: res, chunks: None })
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        if let Ok(int) = parse_integers(chunks) {
+            Ok(IntOrChunks::Int(int))
         } else {
-            Ok(IntOrChunks { int: res, chunks: Some(chunks) })
+            Ok(IntOrChunks::Chunks(chunks.to_vec()))
         }
     }
 }
 
-impl Type for std::ops::Range<u32> {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        let mut ranges = parse_ranges(chunks);
-
-        if !ranges.is_empty() {
-            Ok(ranges.remove(0))
+impl Type for Range<u32> {
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        if let Some(range) = parse_ranges(chunks.to_vec()).into_iter().next() {
+            Ok(range)
         } else {
             Err(anyhow!("No range specified"))
         }
     }
 }
 
-impl Type for Vec<std::ops::Range<u32>> {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Ok(parse_ranges(chunks))
+impl Type for Vec<Range<u32>> {
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Ok(parse_ranges(chunks.to_vec()))
     }
 }
 
 impl Type for Pagination {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(Pagination::from_str(
-            &format_verbatim(&chunks).to_lowercase(),
+            &format_verbatim(chunks).to_lowercase(),
         )?)
     }
 }
 
 impl Type for EditorType {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(EditorType::from_str(
-            &format_verbatim(&chunks).to_lowercase(),
+            &format_verbatim(chunks).to_lowercase(),
         )?)
     }
 }
 
 impl Type for Gender {
-    fn parse(chunks: Vec<Chunk>) -> Result<Self, anyhow::Error> {
-        Gender::from_str(&format_verbatim(&chunks).to_lowercase())
+    fn parse(chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Gender::from_str(&format_verbatim(chunks).to_lowercase())
     }
 }
 
+/// Enables parsing of types from chunks in method-chains.
 pub trait ChunkExt {
-    fn parse<T: Type>(&self) -> Result<T, anyhow::Error>;
+    fn parse<T: Type>(&self) -> anyhow::Result<T>;
 }
 
-impl ChunkExt for Vec<Chunk> {
-    fn parse<T: Type>(&self) -> Result<T, anyhow::Error> {
-        T::parse(self.clone())
+impl ChunkExt for &[Chunk] {
+    fn parse<T: Type>(&self) -> anyhow::Result<T> {
+        T::parse(self)
     }
 }
 
-/*********************************
- ************ Ranges *************
- *********************************/
+// ********************************** Range Parsing *********************************** //
 
 /// Parse range fields with a number of ranges and an amount of dashes seperating
 /// start from end.
-fn parse_ranges(source: Vec<Chunk>) -> Vec<std::ops::Range<u32>> {
+fn parse_ranges(source: Vec<Chunk>) -> Vec<Range<u32>> {
     let range_vecs = split_token_lists(source, ",");
     let mut res = vec![];
     for range_candidate in range_vecs.iter().map(|f| format_verbatim(f)) {
@@ -851,51 +820,48 @@ fn parse_ranges(source: Vec<Chunk>) -> Vec<std::ops::Range<u32>> {
     res
 }
 
-/*********************************
- *********** Integers ************
- *********************************/
+// ************************************* Integers ************************************* //
+
+/// An integer or a chunk vector.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum IntOrChunks {
+    Int(i64),
+    Chunks(Vec<Chunk>),
+}
 
 /// Parse integers. This method will accept arabic, roman, and chinese numerals.
-fn parse_integers(source: &[Chunk]) -> Result<i64, anyhow::Error> {
+fn parse_integers(source: &[Chunk]) -> anyhow::Result<i64> {
     let s = format_verbatim(source);
-    let s_t = s.trim();
+    let s = s.trim();
 
-    if let Ok(n) = str::parse::<i64>(s_t) {
+    if let Ok(n) = str::parse::<i64>(s) {
         Ok(n)
-    } else if let Some(roman) = Roman::parse(s_t) {
+    } else if let Some(roman) = Roman::parse(s) {
         Ok(roman.value() as i64)
-    } else if let Ok(n) = s_t.parse_chinese_number(ChineseNumberCountMethod::TenThousand)
-    {
+    } else if let Ok(n) = s.parse_chinese_number(ChineseNumberCountMethod::TenThousand) {
         Ok(n)
     } else {
         Err(anyhow!("Could not parse integer"))
     }
 }
 
-pub struct IntOrChunks {
-    pub chunks: Option<Vec<Chunk>>,
-    pub int: Option<i64>,
-}
+// ********************************** Various enums *********************************** //
 
-/*********************************
- ********* Various Enums *********
- *********************************/
-
-#[derive(EnumString, AsRefStr, Display, Debug, Clone, PartialEq)]
-#[strum(serialize_all = "snake_case")]
 /// How the page increment is triggered.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum Pagination {
     Page,
     Column,
     Line,
     Verse,
     Section,
-    Parapgraph,
+    Paragraph,
 }
 
-#[derive(EnumString, AsRefStr, Display, Debug, Clone, PartialEq)]
-#[strum(serialize_all = "snake_case")]
 /// Which role the according editor had (cf. EditorA, EditorB, EditorC fields).
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum EditorType {
     Editor,
     Compiler,
@@ -907,8 +873,8 @@ pub enum EditorType {
     Organizer,
 }
 
-#[derive(AsRefStr, Display, Debug, Clone, PartialEq)]
 /// Gender of the author or editor (if no author specified).
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Display, AsRefStr)]
 pub enum Gender {
     SingularFemale,
     SingularMale,
@@ -918,11 +884,11 @@ pub enum Gender {
     PluralNeuter,
 }
 
-impl std::str::FromStr for Gender {
+impl FromStr for Gender {
     type Err = anyhow::Error;
 
     /// Two-letter gender serialization in accordance with the BibLaTeX standard.
-    fn from_str(s: &str) -> ::std::result::Result<Gender, Self::Err> {
+    fn from_str(s: &str) -> Result<Gender, Self::Err> {
         match s {
             "sf" => Ok(Gender::SingularFemale),
             "sm" => Ok(Gender::SingularMale),
@@ -937,22 +903,22 @@ impl std::str::FromStr for Gender {
 
 impl Gender {
     /// Puts the gender into plural.
-    pub fn pluralize(&self) -> Self {
+    pub fn pluralize(self) -> Self {
         match self {
             Gender::SingularFemale => Gender::PluralFemale,
             Gender::SingularMale => Gender::PluralMale,
             Gender::SingularNeuter => Gender::PluralNeuter,
-            _ => self.clone(),
+            _ => self,
         }
     }
 
     /// Puts the gender into the singular.
-    pub fn singularize(&self) -> Self {
+    pub fn singularize(self) -> Self {
         match self {
             Gender::PluralFemale => Gender::SingularFemale,
             Gender::PluralMale => Gender::SingularMale,
             Gender::PluralNeuter => Gender::SingularNeuter,
-            _ => self.clone(),
+            _ => self,
         }
     }
 
@@ -963,7 +929,7 @@ impl Gender {
         }
 
         if list.len() == 1 {
-            return Some(list[0].clone());
+            return Some(list[0]);
         }
 
         let mut was_female = false;
@@ -972,24 +938,9 @@ impl Gender {
 
         for g in list {
             match g {
-                Gender::SingularFemale => {
-                    was_female = true;
-                }
-                Gender::SingularMale => {
-                    was_male = true;
-                }
-                Gender::SingularNeuter => {
-                    was_neuter = true;
-                }
-                Gender::PluralFemale => {
-                    was_female = true;
-                }
-                Gender::PluralMale => {
-                    was_male = true;
-                }
-                Gender::PluralNeuter => {
-                    was_neuter = true;
-                }
+                Self::SingularFemale | Gender::PluralFemale => was_female = true,
+                Self::SingularMale | Self::PluralMale => was_male = true,
+                Self::SingularNeuter | Self::PluralNeuter => was_neuter = true,
             }
         }
 
@@ -1003,67 +954,92 @@ impl Gender {
     }
 }
 
-/*********************************
- *********** Utilities ***********
- *********************************/
+// ************************************ Utilities ************************************* //
 
-#[derive(Clone)]
-/// This struct is an Iterator for Chunk slices that will iterate through the
-/// contained characters indicating whether they are Verbatim or not.
-/// Chunk types other than `Normal` or `Verbatim` will be ommitted.
-struct ValueCharIter<'s> {
-    vals: &'s [Chunk],
-    vec_index: usize,
-    val_index: usize,
-}
-
-impl<'s> ValueCharIter<'s> {
-    fn new(vals: &'s [Chunk]) -> Self {
-        ValueCharIter { vals, vec_index: 0, val_index: 0 }
-    }
-}
-
-impl<'s> Iterator for ValueCharIter<'s> {
-    type Item = (char, bool);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.vec_index >= self.vals.len() {
-            return None;
+/// Formats a chunk slice in sentence case.
+pub fn format_sentence(vals: &[Chunk]) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for val in vals {
+        if let Chunk::Normal(s) = val {
+            for c in s.chars() {
+                if first {
+                    out.push_str(&c.to_uppercase().to_string());
+                } else {
+                    out.push_str(&c.to_lowercase().to_string());
+                }
+                first = false;
+            }
+        } else if let Chunk::Verbatim(s) = val {
+            out += s;
         }
+        first = false;
+    }
 
-        let mut s;
-        let mut verb;
-        while {
-            let temp = if let Chunk::Normal(s) = &self.vals[self.vec_index] {
-                (s.chars().nth(self.val_index), false)
-            } else if let Chunk::Verbatim(s) = &self.vals[self.vec_index] {
-                (s.chars().nth(self.val_index), true)
-            } else {
-                (None, false)
-            };
-            s = temp.0;
-            verb = temp.1;
-            s.is_none()
-        } {
-            self.val_index = 0;
-            self.vec_index += 1;
-            if self.vec_index >= self.vals.len() {
-                return None;
+    out
+}
+
+/// Outputs a chunk slice in verbatim.
+pub fn format_verbatim(vals: &[Chunk]) -> String {
+    let mut out = String::new();
+    for val in vals {
+        if let Chunk::Normal(s) = val {
+            out += s;
+        } else if let Chunk::Verbatim(s) = val {
+            out += s;
+        }
+    }
+
+    out
+}
+
+/// Splits chunk vectors that are a token lists as defined per the
+/// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
+///
+/// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
+pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
+    let mut out = vec![];
+    let mut latest: Vec<Chunk> = vec![];
+    for val in vals {
+        if let Chunk::Normal(s) = val {
+            let mut target = s.as_str();
+
+            while let Some(pos) = target.find(keyword) {
+                let first = target[.. pos].trim_end();
+                latest.push(Chunk::Normal(first.to_string()));
+                out.push(latest);
+                latest = vec![];
+                target = target[pos + keyword.len() ..].trim_start();
             }
 
-            if matches!(&self.vals[self.vec_index], Chunk::Normal(_) | Chunk::Verbatim(_))
-            {
-                continue;
-            }
+            latest.push(Chunk::Normal(target.to_string()));
+        } else {
+            latest.push(val);
         }
-
-        self.val_index += 1;
-
-        Some((s.expect("Has to be some"), verb))
     }
+
+    out.push(latest);
+
+    out
 }
 
-/// Returns two Chunk Vectors with `src` split at Chunk index `vi` and
+/// An iterator over the characters in each chunk, indicating whether they are verbatim or
+/// not. Chunk types other than `Normal` or `Verbatim` are ommitted.
+fn chunk_chars<'a>(chunks: &'a [Chunk]) -> impl Iterator<Item = (char, bool)> + 'a {
+    chunks.iter().flat_map(|chunk| {
+        let (chars, verbatim) = match chunk {
+            Chunk::Normal(s) => (Some(s), false),
+            Chunk::Verbatim(s) => (Some(s), true),
+            _ => (None, false),
+        };
+
+        chars
+            .into_iter()
+            .flat_map(move |s| s.chars().map(move |c| (c, verbatim)))
+    })
+}
+
+/// Returns two chunk vectors with `src` split at chunk index `vi` and
 /// char index `si` within that chunk.
 fn split_values(mut src: Vec<Chunk>, vi: usize, si: usize) -> (Vec<Chunk>, Vec<Chunk>) {
     if vi >= src.len() {
@@ -1096,7 +1072,7 @@ fn split_values(mut src: Vec<Chunk>, vi: usize, si: usize) -> (Vec<Chunk>, Vec<C
     (src, new)
 }
 
-/// Splits a Chunk vector into two at the first occurrance of the character `c`.
+/// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
 fn split_at_normal_char(
     src: Vec<Chunk>,
@@ -1132,92 +1108,20 @@ fn split_at_normal_char(
     (v1, v2)
 }
 
-/// Formats a Chunk slice in sentence case.
-pub fn format_sentence(vals: &[Chunk]) -> String {
-    let mut out = String::new();
-    let mut first = true;
-    for val in vals {
-        if let Chunk::Normal(s) = val {
-            for c in s.chars() {
-                if first {
-                    out.push_str(&c.to_uppercase().to_string());
-                } else {
-                    out.push_str(&c.to_lowercase().to_string());
-                }
-                first = false;
-            }
-        } else if let Chunk::Verbatim(s) = val {
-            out += s;
-        }
-        first = false;
-    }
-
-    out
-}
-
-/// Outputs a Chunk slice in verbatim.
-pub fn format_verbatim(vals: &[Chunk]) -> String {
-    let mut out = String::new();
-    for val in vals {
-        if let Chunk::Normal(s) = val {
-            out += s;
-        } else if let Chunk::Verbatim(s) = val {
-            out += s;
-        }
-    }
-
-    out
-}
-
-/// Splits Chunk Vectors that are a token list as defined per the
-/// [BibLaTeX Manual](http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf)
-/// p. 16 along occurances of the keyword.
-pub fn split_token_lists(vals: Vec<Chunk>, keyword: &str) -> Vec<Vec<Chunk>> {
-    let mut out = vec![];
-    let mut latest: Vec<Chunk> = vec![];
-    for val in vals {
-        if let Chunk::Normal(s) = val {
-            let mut target = s.as_str();
-
-            while let Some(pos) = target.find(keyword) {
-                let first = target[.. pos].trim_end();
-                latest.push(Chunk::Normal(first.to_string()));
-                out.push(latest);
-                latest = vec![];
-                target = target[pos + keyword.len() ..].trim_start();
-            }
-
-            latest.push(Chunk::Normal(target.to_string()));
-        } else {
-            latest.push(val);
-        }
-    }
-
-    out.push(latest);
-
-    out
-}
-
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
-    use super::{
-        parse_ranges, split_at_normal_char, split_values, Date, DateAtom, DateKind,
-        Person, ValueCharIter,
-    };
-    use crate::parse::Chunk;
     use chrono::NaiveTime;
 
-    #[allow(non_snake_case)]
+    use super::*;
+    use crate::parse::Chunk;
+
     fn R(s: &str) -> Chunk {
         Chunk::Resolve(s.to_string())
     }
-
-    #[allow(non_snake_case)]
     fn N(s: &str) -> Chunk {
         Chunk::Normal(s.to_string())
     }
-
-    #[allow(non_snake_case)]
     fn V(s: &str) -> Chunk {
         Chunk::Verbatim(s.to_string())
     }
@@ -1225,7 +1129,7 @@ mod tests {
     #[test]
     fn test_value_iterator() {
         let vls = vec![N("it "), R("crap"), V("te")];
-        let mut iter = ValueCharIter::new(&vls);
+        let mut iter = chunk_chars(&vls);
         assert_eq!(iter.next(), Some(('i', false)));
         assert_eq!(iter.next(), Some(('t', false)));
         assert_eq!(iter.next(), Some((' ', false)));
@@ -1350,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn new_date_atom() {
+    fn test_new_date_atom() {
         let atom1 = DateAtom::new("2017-10 -25".to_string()).unwrap();
         assert_eq!(atom1.year, 2017);
         assert_eq!(atom1.month, Some(9));
@@ -1380,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn new_date() {
+    fn test_new_date() {
         let date = Date::new(vec![N("2017-10 -25?")]).unwrap();
         if let DateKind::Definite(val) = date.value {
             assert_eq!(val.year, 2017);
@@ -1431,7 +1335,6 @@ mod tests {
         } else {
             panic!("Wrong DateKind");
         }
-
         assert_eq!(date.is_uncertain, false);
         assert_eq!(date.is_approximate, false);
 
@@ -1445,7 +1348,6 @@ mod tests {
             panic!("Wrong DateKind");
         }
         assert_eq!(date.range_end.unwrap(), DateKind::Open);
-
         assert_eq!(date.is_uncertain, false);
         assert_eq!(date.is_approximate, false);
 
@@ -1459,7 +1361,6 @@ mod tests {
             panic!("Wrong DateKind");
         }
         assert_eq!(date.value, DateKind::Open);
-
         assert_eq!(date.is_uncertain, true);
         assert_eq!(date.is_approximate, true);
     }
