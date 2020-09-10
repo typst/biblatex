@@ -126,14 +126,29 @@ macro_rules! fields {
                         $(.and_then(|chunks| chunks.parse::<$res>()))?
                 }
 
-                #[doc = "Set a value in the `" $field_name "` field."]
-                pub fn [<set_ $name>](&mut self, item: fields!(@type $($res)?)) -> anyhow::Result<()> {
-                    let chunks = item.to_chunks()?;
-                    self.set($field_name, chunks);
-                    Ok(())
-                }
+                fields!(single_set $name => $field_name, $($res)?);
             }
         )*
+    };
+
+    (single_set $name:ident => $field_name:expr, ) => {
+        paste!{
+            #[doc = "Set a value in the `" $field_name "` field."]
+            pub fn [<set_ $name>](&mut self, item: Vec<Chunk>) -> anyhow::Result<()> {
+                self.set($field_name, item);
+                Ok(())
+            }
+        }
+    };
+    (single_set $name:ident => $field_name:expr, $other_type:ty) => {
+        paste!{
+            #[doc = "Set a value in the `" $field_name "` field."]
+            pub fn [<set_ $name>](&mut self, item: $other_type) -> anyhow::Result<()> {
+                let chunks = item.to_chunks()?;
+                self.set($field_name, chunks);
+                Ok(())
+            }
+        }
     };
 
     (@type) => {&[Chunk]};
@@ -152,12 +167,7 @@ macro_rules! alias_fields {
                         $(.and_then(|chunks| chunks.parse::<$res>()))?
                 }
 
-                #[doc = "Set a value in the `" $field_name "` field."]
-                pub fn [<set_ $name>](&mut self, item: fields!(@type $($res)?)) -> anyhow::Result<()> {
-                    let chunks = item.to_chunks()?;
-                    self.set($field_name, chunks);
-                    Ok(())
-                }
+                fields!(single_set $name => $field_name, $($res)?);
             }
         )*
     };

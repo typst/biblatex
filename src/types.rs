@@ -770,16 +770,6 @@ impl Type for Vec<Vec<Chunk>> {
     }
 }
 
-impl Type for &[Chunk] {
-    fn from_chunks(_chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Err(anyhow!("chunks already are chunks"))
-    }
-
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(self.to_vec())
-    }
-}
-
 impl Type for Vec<Person> {
     fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
         Ok(chunks
