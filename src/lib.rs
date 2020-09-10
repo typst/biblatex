@@ -6,6 +6,7 @@ mod resolve;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use paste::paste;
 
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
@@ -70,6 +71,16 @@ impl Bibliography {
         self.0.iter().find(|entry| entry.cite_key == cite_key)
     }
 
+    // /// Try to find an entry with the given cite key.
+
+    //     if let Some(entry) = self.get(cite_key) {
+    //         entry.fields.insert(field.to_string(), chunks);
+    //         Ok(())
+    //     } else {
+    //         Err(anyhow!("no such field present"))
+    //     }
+    // }
+
     /// An iterator over the bibliography's entries.
     pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
         self.0.iter()
@@ -97,18 +108,30 @@ impl Entry {
             .ok_or_else(|| anyhow!("The {} field is not present", key))
             .and_then(|chunks| chunks.parse::<T>())
     }
+
+    /// Sets a field value as a chunk vector.
+    pub fn set(&mut self, key: &str, chunks: Vec<Chunk>) {
+        self.fields.insert(key.to_lowercase(), chunks);
+    }
 }
 
 macro_rules! fields {
-    ($($getter:ident: $field_name:expr $(=> $res:ty)?),* $(,)*) => {
+    ($($name:ident: $field_name:expr $(=> $res:ty)?),* $(,)*) => {
         $(
-            #[doc = "Get and parse the `"]
-            #[doc = $field_name]
-            #[doc = "` field."]
-            pub fn $getter(&self) -> anyhow::Result<fields!(@type $($res)?)> {
-                self.get($field_name)
-                    .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
-                    $(.and_then(|chunks| chunks.parse::<$res>()))?
+            paste!{
+                #[doc = "Get and parse the `" $field_name "` field."]
+                pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
+                    self.get($field_name)
+                        .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
+                        $(.and_then(|chunks| chunks.parse::<$res>()))?
+                }
+
+                #[doc = "Set a value in the `" $field_name "` field."]
+                pub fn [<set_ $name>](&mut self, item: fields!(@type $($res)?)) -> anyhow::Result<()> {
+                    let chunks = item.to_chunks()?;
+                    self.set($field_name, chunks);
+                    Ok(())
+                }
             }
         )*
     };
@@ -118,20 +141,23 @@ macro_rules! fields {
 }
 
 macro_rules! alias_fields {
-    ($($getter:ident: $field_name:expr, $field_alias:expr $(=> $res:ty)?),* $(,)*) => {
+    ($($name:ident: $field_name:expr, $field_alias:expr $(=> $res:ty)?),* $(,)*) => {
         $(
-            #[doc = "Get and parse the `"]
-            #[doc = $field_name]
-            #[doc = "` field, falling back on `"]
-            #[doc = $field_alias]
-            #[doc = "` if `"]
-            #[doc = $field_name]
-            #[doc = "` is empty."]
-            pub fn $getter(&self) -> anyhow::Result<fields!(@type $($res)?)> {
-                self.get($field_name)
-                    .or_else(|| self.get($field_alias))
-                    .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
-                    $(.and_then(|chunks| chunks.parse::<$res>()))?
+            paste!{
+                #[doc = "Get and parse the `" $field_name "` field, falling back on `" $field_alias "` if `" $field_name "` is empty."]
+                pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
+                    self.get($field_name)
+                        .or_else(|| self.get($field_alias))
+                        .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
+                        $(.and_then(|chunks| chunks.parse::<$res>()))?
+                }
+
+                #[doc = "Set a value in the `" $field_name "` field."]
+                pub fn [<set_ $name>](&mut self, item: fields!(@type $($res)?)) -> anyhow::Result<()> {
+                    let chunks = item.to_chunks()?;
+                    self.set($field_name, chunks);
+                    Ok(())
+                }
             }
         )*
     };
@@ -141,35 +167,27 @@ macro_rules! alias_fields {
 }
 
 macro_rules! date_fields {
-    ($($getter:ident: $field_prefix:expr),* $(,)*) => {
-        $(date_fields!(
-            $getter:
-            concat!($field_prefix, "date"),
-            concat!($field_prefix, "year"),
-            concat!($field_prefix, "month"),
-            concat!($field_prefix, "day")
-        );)*
-    };
-    ($($getter:ident: $date:expr, $year:expr, $month:expr, $day:expr),* $(,)*) => {
+    ($($name:ident: $field_prefix:expr),* $(,)*) => {
         $(
-            #[doc = "Get and parse the `"]
-            #[doc = $date]
-            #[doc = "` field, falling back to the `"]
-            #[doc = $year]
-            #[doc = "`, `"]
-            #[doc = $month]
-            #[doc = "`, and `"]
-            #[doc = $day]
-            #[doc = "` fields when not present."]
-            pub fn $getter(&self) -> anyhow::Result<Date> {
-                if let Some(chunks) = self.get($date) {
-                    chunks.parse::<Date>()
-                } else {
-                    Date::new_from_three_fields(
-                        self.get($year),
-                        self.get($month),
-                        self.get($day),
-                    )
+            paste!{
+                #[doc = "Get and parse the `" $field_prefix "date` field, falling back to the `" $field_prefix "year`, `" $field_prefix "month`, and `" $field_prefix "day` fields when not present."]
+                pub fn [<get_ $name>](&self) -> anyhow::Result<Date> {
+                    if let Some(chunks) = self.get(concat!($field_prefix, "date")) {
+                        chunks.parse::<Date>()
+                    } else {
+                        Date::new_from_three_fields(
+                            self.get(concat!($field_prefix, "year")),
+                            self.get(concat!($field_prefix, "month")),
+                            self.get(concat!($field_prefix, "day")),
+                        )
+                    }
+                }
+
+                #[doc = "Set a value in the `" $field_prefix "date` field."]
+                pub fn [<set_ $name>](&mut self, item: Date) -> anyhow::Result<()> {
+                    let chunks = item.to_chunks()?;
+                    self.set(concat!($field_prefix, "date"), chunks);
+                    Ok(())
                 }
             }
         )*
@@ -214,108 +232,108 @@ impl Entry {
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
         // BibTeX fields.
-        get_author: "author" => Vec<Person>,
-        get_book_title: "booktitle",
-        get_chapter: "chapter",
-        get_edition: "edition" => IntOrChunks,
-        get_how_published: "howpublished",
-        get_note: "note",
-        get_number: "number",
-        get_organization: "organization" => Vec<Vec<Chunk>>,
-        get_pages: "pages" => Vec<std::ops::Range<u32>>,
-        get_publisher: "publisher" => Vec<Vec<Chunk>>,
-        get_series: "series",
-        get_title: "title",
-        get_type: "type" => String,
-        get_volume: "volume" => i64,
+        author: "author" => Vec<Person>,
+        book_title: "booktitle",
+        chapter: "chapter",
+        edition: "edition" => IntOrChunks,
+        how_published: "howpublished",
+        note: "note",
+        number: "number",
+        organization: "organization" => Vec<Vec<Chunk>>,
+        pages: "pages" => Vec<std::ops::Range<u32>>,
+        publisher: "publisher" => Vec<Vec<Chunk>>,
+        series: "series",
+        title: "title",
+        type: "type" => String,
+        volume: "volume" => i64,
     }
 
     date_fields! {
-        get_date: "",
-        get_event_date: "event",
-        get_orig_date: "orig",
-        get_url_date: "url",
+        date: "",
+        event_date: "event",
+        orig_date: "orig",
+        url_date: "url",
     }
 
     alias_fields! {
-        get_address: "address", "location",
-        get_location: "location", "address",
-        get_annotation: "annotation", "annote",
-        get_eprint_type: "eprinttype", "archiveprefix",
-        get_journal: "journal", "journaltitle",
-        get_journal_title: "journaltitle", "journal",
-        get_sort_key: "key", "sortkey" => String,
-        get_file: "file", "pdf" => String,
-        get_school: "school", "institution",
-        get_institution: "institution", "school",
+        address: "address", "location",
+        location: "location", "address",
+        annotation: "annotation", "annote",
+        eprint_type: "eprinttype", "archiveprefix",
+        journal: "journal", "journaltitle",
+        journal_title: "journaltitle", "journal",
+        sort_key: "key", "sortkey" => String,
+        file: "file", "pdf" => String,
+        school: "school", "institution",
+        institution: "institution", "school",
     }
 
     fields! {
         // BibLaTeX supplemental fields.
-        get_abstract: "abstract",
-        get_addendum: "addendum",
-        get_afterword: "afterword" => Vec<Person>,
-        get_annotator: "annotator" => Vec<Person>,
-        get_author_type: "authortype" => String,
-        get_book_author: "bookauthor" => Vec<Person>,
-        get_book_pagination: "bookpagination" => Pagination,
-        get_book_subtitle: "booksubtitle",
-        get_book_title_addon: "booktitleaddon",
-        get_commentator: "commentator" => Vec<Person>,
-        get_doi: "doi" => String,
-        get_eid: "eid",
-        get_entry_subtype: "entrysubtype",
-        get_eprint: "eprint" => String,
-        get_eprint_class: "eprintclass",
-        get_eventtitle: "eventtitle",
-        get_eventtitle_addon: "eventtitleaddon",
-        get_foreword: "foreword" => Vec<Person>,
-        get_holder: "holder" => Vec<Person>,
-        get_index_title: "indextitle",
-        get_introduction: "introduction" => Vec<Person>,
-        get_isan: "isan",
-        get_isbn: "isbn",
-        get_ismn: "ismn",
-        get_isrn: "isrn",
-        get_issn: "issn",
-        get_issue: "issue",
-        get_issue_subtitle: "issuesubtitle",
-        get_issue_title: "issuetitle",
-        get_issue_title_addon: "issuetitleaddon",
-        get_iswc: "iswc",
-        get_journal_subtitle: "journalsubtitle",
-        get_journal_title_addon: "journaltitleaddon",
-        get_keywords: "keywords",
-        get_label: "label",
-        get_language: "language" => String,
-        get_library: "library",
-        get_main_subtitle: "mainsubtitle",
-        get_main_title: "maintitle",
-        get_main_title_addon: "maintitleaddon",
-        get_name_addon: "nameaddon",
-        get_options: "options",
-        get_orig_language: "origlanguage" => String,
-        get_orig_location: "origlocation",
-        get_page_total: "pagetotal",
-        get_pagination: "pagination" => Pagination,
-        get_part: "part",
-        get_pubstate: "pubstate",
-        get_reprint_title: "reprinttitle",
-        get_short_author: "shortauthor" => Vec<Person>,
-        get_short_editor: "shorteditor" => Vec<Person>,
-        get_shorthand: "shorthand",
-        get_shorthand_intro: "shorthandintro",
-        get_short_journal: "shortjournal",
-        get_short_series: "shortseries",
-        get_short_title: "shorttitle",
-        get_subtitle: "subtitle",
-        get_title_addon: "titleaddon",
-        get_translator: "translator" => Vec<Person>,
-        get_url: "url" => String,
-        get_venue: "venue",
-        get_version: "version",
-        get_volumes: "volumes" => i64,
-        get_gender: "gender" => Gender,
+        abstract: "abstract",
+        addendum: "addendum",
+        afterword: "afterword" => Vec<Person>,
+        annotator: "annotator" => Vec<Person>,
+        author_type: "authortype" => String,
+        book_author: "bookauthor" => Vec<Person>,
+        book_pagination: "bookpagination" => Pagination,
+        book_subtitle: "booksubtitle",
+        book_title_addon: "booktitleaddon",
+        commentator: "commentator" => Vec<Person>,
+        doi: "doi" => String,
+        eid: "eid",
+        entry_subtype: "entrysubtype",
+        eprint: "eprint" => String,
+        eprint_class: "eprintclass",
+        eventtitle: "eventtitle",
+        eventtitle_addon: "eventtitleaddon",
+        foreword: "foreword" => Vec<Person>,
+        holder: "holder" => Vec<Person>,
+        index_title: "indextitle",
+        introduction: "introduction" => Vec<Person>,
+        isan: "isan",
+        isbn: "isbn",
+        ismn: "ismn",
+        isrn: "isrn",
+        issn: "issn",
+        issue: "issue",
+        issue_subtitle: "issuesubtitle",
+        issue_title: "issuetitle",
+        issue_title_addon: "issuetitleaddon",
+        iswc: "iswc",
+        journal_subtitle: "journalsubtitle",
+        journal_title_addon: "journaltitleaddon",
+        keywords: "keywords",
+        label: "label",
+        language: "language" => String,
+        library: "library",
+        main_subtitle: "mainsubtitle",
+        main_title: "maintitle",
+        main_title_addon: "maintitleaddon",
+        name_addon: "nameaddon",
+        options: "options",
+        orig_language: "origlanguage" => String,
+        orig_location: "origlocation",
+        page_total: "pagetotal",
+        pagination: "pagination" => Pagination,
+        part: "part",
+        pubstate: "pubstate",
+        reprint_title: "reprinttitle",
+        short_author: "shortauthor" => Vec<Person>,
+        short_editor: "shorteditor" => Vec<Person>,
+        shorthand: "shorthand",
+        shorthand_intro: "shorthandintro",
+        short_journal: "shortjournal",
+        short_series: "shortseries",
+        short_title: "shorttitle",
+        subtitle: "subtitle",
+        title_addon: "titleaddon",
+        translator: "translator" => Vec<Person>,
+        url: "url" => String,
+        venue: "venue",
+        version: "version",
+        volumes: "volumes" => i64,
+        gender: "gender" => Gender,
     }
 }
 

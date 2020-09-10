@@ -755,7 +755,28 @@ impl Type for Vec<Vec<Chunk>> {
     }
 
     fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        todo!()
+        let mut chunks = self.clone().into_iter();
+        let mut res = vec![];
+        if let Some(mut chunk) = chunks.next() {
+            res.append(&mut chunk);
+
+            for mut chunk in chunks {
+                res.push(Chunk::Normal(" and ".to_string()));
+                res.append(&mut chunk);
+            }
+        }
+
+        Ok(res)
+    }
+}
+
+impl Type for &[Chunk] {
+    fn from_chunks(_chunks: &[Chunk]) -> anyhow::Result<Self> {
+        Err(anyhow!("chunks already are chunks"))
+    }
+
+    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        Ok(self.to_vec())
     }
 }
 
@@ -788,20 +809,9 @@ impl Type for Vec<Person> {
                 };
 
                 let name_str = if !p.suffix.is_empty() {
-                    format!(
-                        "{}{}, {}, {}",
-                        prefix.1,
-                        p.name,
-                        p.suffix,
-                        p.given_name
-                    )
+                    format!("{}{}, {}, {}", prefix.1, p.name, p.suffix, p.given_name)
                 } else {
-                    format!(
-                        "{}{}, {}",
-                        prefix.1,
-                        p.name,
-                        p.given_name
-                    )
+                    format!("{}{}, {}", prefix.1, p.name, p.given_name)
                 };
                 let mut res = vec![Chunk::Normal(name_str)];
                 if let Some(pre_chunk) = prefix.0 {
@@ -845,8 +855,14 @@ impl Type for Date {
         };
 
         match self.value {
-            DateValue::Atom(date) => Ok(vec![Chunk::Normal(format!("{}{}", date, uncertainity_symbol))]),
-            DateValue::Range(start, end) => Ok(vec![Chunk::Normal(format!("{}/{}{}", start, end, uncertainity_symbol))])
+            DateValue::Atom(date) => Ok(vec![Chunk::Normal(format!(
+                "{}{}",
+                date, uncertainity_symbol
+            ))]),
+            DateValue::Range(start, end) => Ok(vec![Chunk::Normal(format!(
+                "{}/{}{}",
+                start, end, uncertainity_symbol
+            ))]),
         }
     }
 }
@@ -860,7 +876,8 @@ impl Type for Vec<String> {
     }
 
     fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        let chunks = self.iter().map(|s| Chunk::Normal(s.clone())).collect::<Vec<Chunk>>();
+        let chunks =
+            self.iter().map(|s| Chunk::Normal(s.clone())).collect::<Vec<Chunk>>();
 
         Ok(chunk_list_seperated(&chunks, ","))
     }
@@ -1280,25 +1297,34 @@ mod tests {
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("jean de la fontaine, ")]);
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
+            "jean de la fontaine, "
+        )]);
 
         let p = Person::new(&[N("de la fontaine, Jean")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("de la fontaine, Jean")]);
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
+            "de la fontaine, Jean"
+        )]);
 
         let p = Person::new(&[N("De La Fontaine, Jean")]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("De La Fontaine, Jean")]);
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
+            "De La Fontaine, Jean"
+        )]);
 
         let p = Person::new(&[V("De La"), N(" Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De La");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![V("De La"), N(" Fontaine, Jean")]);
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![
+            V("De La"),
+            N(" Fontaine, Jean")
+        ]);
 
         let p = Person::new(&[N("De la Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
