@@ -199,7 +199,7 @@ impl Person {
             if word_start {
                 last_word_start = index;
 
-                if c.is_lowercase() {
+                if c.is_lowercase() || v {
                     is_lowercase = true;
                 } else {
                     is_lowercase = false;
@@ -297,6 +297,15 @@ pub enum DateBound {
     Open,
     /// The start or end of the range is definite / known.
     Definite(DateAtom),
+}
+
+impl fmt::Display for DateBound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DateBound::Open => write!(f, ".."),
+            DateBound::Definite(atom) => write!(f, "{}", atom),
+        }
+    }
 }
 
 /// A date atom is a timezone-unaware date that must specify a year
@@ -696,6 +705,26 @@ impl PartialOrd for DateAtom {
     }
 }
 
+impl fmt::Display for DateAtom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.year >= 0 {
+            write!(f, "{:04}", self.year)?;
+        } else {
+            write!(f, "{:05}", self.year)?;
+        }
+
+        if let Some(month) = self.month {
+            if let Some(day) = self.day {
+                write!(f, "-{:02}-{:02}", month + 1, day + 1)
+            } else {
+                write!(f, "-{:02}", month + 1)
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
 // *************************** Chunk Type Parsing Adaptors **************************** //
 
 fn chunk_list_seperated(chunks: &[Chunk], sep: &str) -> Vec<Chunk> {
@@ -740,32 +769,65 @@ impl Type for Vec<Person> {
     }
 
     fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        let mut error = false;
         let chunks = self
             .iter()
             .map(|p| {
+                if p.name.is_empty() {
+                    error = true;
+                }
+
+                let prefix = if let Some(c) = p.prefix.chars().next() {
+                    if c.is_uppercase() {
+                        (Some(Chunk::Verbatim(p.prefix.clone())), " ".to_string())
+                    } else {
+                        (None, format!("{} ", p.prefix))
+                    }
+                } else {
+                    (None, String::new())
+                };
+
                 let name_str = if !p.suffix.is_empty() {
                     format!(
-                        "{}{}{}, {}, {}",
-                        p.prefix,
-                        if p.prefix.is_empty() { "" } else { " " },
+                        "{}{}, {}, {}",
+                        prefix.1,
                         p.name,
                         p.suffix,
                         p.given_name
                     )
                 } else {
                     format!(
-                        "{}{}{}, {}",
-                        p.prefix,
-                        if p.prefix.is_empty() { "" } else { " " },
+                        "{}{}, {}",
+                        prefix.1,
                         p.name,
                         p.given_name
                     )
                 };
-                Chunk::Normal(name_str)
-            })
-            .collect::<Vec<Chunk>>();
+                let mut res = vec![Chunk::Normal(name_str)];
+                if let Some(pre_chunk) = prefix.0 {
+                    res.insert(0, pre_chunk);
+                }
 
-        Ok(chunk_list_seperated(&chunks, " and "))
+                res
+            })
+            .collect::<Vec<Vec<Chunk>>>();
+
+        if error {
+            Err(anyhow!("Name cannot be empty"))
+        } else {
+            let mut chunks = chunks.into_iter();
+            let mut res = vec![];
+            if let Some(mut chunk) = chunks.next() {
+                res.append(&mut chunk);
+
+                for mut chunk in chunks {
+                    res.push(Chunk::Normal(" and ".to_string()));
+                    res.append(&mut chunk);
+                }
+            }
+
+            Ok(res)
+        }
     }
 }
 
@@ -775,7 +837,17 @@ impl Type for Date {
     }
 
     fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        todo!()
+        let uncertainity_symbol = match (self.is_approximate, self.is_uncertain) {
+            (true, true) => "%",
+            (true, false) => "~",
+            (false, true) => "?",
+            (false, false) => "",
+        };
+
+        match self.value {
+            DateValue::Atom(date) => Ok(vec![Chunk::Normal(format!("{}{}", date, uncertainity_symbol))]),
+            DateValue::Range(start, end) => Ok(vec![Chunk::Normal(format!("{}/{}{}", start, end, uncertainity_symbol))])
+        }
     }
 }
 
@@ -1208,16 +1280,25 @@ mod tests {
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("jean de la fontaine, ")]);
 
         let p = Person::new(&[N("de la fontaine, Jean")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("de la fontaine, Jean")]);
 
         let p = Person::new(&[N("De La Fontaine, Jean")]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![N("De La Fontaine, Jean")]);
+
+        let p = Person::new(&[V("De La"), N(" Fontaine, Jean")]);
+        assert_eq!(p.name, "Fontaine");
+        assert_eq!(p.prefix, "De La");
+        assert_eq!(p.given_name, "Jean");
+        assert_eq!(vec![p].to_chunks().unwrap(), vec![V("De La"), N(" Fontaine, Jean")]);
 
         let p = Person::new(&[N("De la Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
@@ -1313,18 +1394,21 @@ mod tests {
         assert_eq!(atom1.month, Some(9));
         assert_eq!(atom1.day, Some(24));
         assert_eq!(atom1.time, None);
+        assert_eq!(atom1.to_string(), "2017-10-25");
 
         let atom2 = DateAtom::new("  2019 -- 03 ".to_string()).unwrap();
         assert_eq!(atom2.year, 2019);
         assert_eq!(atom2.month, Some(2));
         assert_eq!(atom2.day, None);
         assert_eq!(atom2.time, None);
+        assert_eq!(atom2.to_string(), "2019-03");
 
         let atom3 = DateAtom::new("  -0006".to_string()).unwrap();
         assert_eq!(atom3.year, -6);
         assert_eq!(atom3.month, None);
         assert_eq!(atom3.day, None);
         assert_eq!(atom3.time, None);
+        assert_eq!(atom3.to_string(), "-0006");
 
         let atom4 = DateAtom::new("2020-09-06T13:39:00".to_string()).unwrap();
         assert_eq!(atom4.year, 2020);
@@ -1349,6 +1433,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
+        assert_eq!(date.to_chunks().unwrap(), vec![N("2017-10-25?")]);
 
         let date = Date::new(&[N("19XX~")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1366,6 +1451,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
+        assert_eq!(date.to_chunks().unwrap(), vec![N("1900/1999~")]);
 
         let date = Date::new(&[N("1948-03-02/1950")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1383,6 +1469,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
+        assert_eq!(date.to_chunks().unwrap(), vec![N("1948-03-02/1950")]);
 
         let date = Date::new(&[N("2020-04-04T18:30:31/")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1395,6 +1482,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
+        assert_eq!(date.to_chunks().unwrap(), vec![N("2020-04-04/..")]);
 
         let date = Date::new(&[N("/-0031-07%")]).unwrap();
         assert_eq!(date.is_uncertain, true);
@@ -1407,6 +1495,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
+        assert_eq!(date.to_chunks().unwrap(), vec![N("../-0031-07%")]);
     }
 
     #[test]
