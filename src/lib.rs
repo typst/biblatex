@@ -41,6 +41,11 @@ pub enum Chunk {
 }
 
 impl Bibliography {
+    /// Get a new, empty Bibliography
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
     /// Parse a bibliography from a source string.
     pub fn from_str(src: &str, allow_bibtex: bool) -> Self {
         Self::from_raw(RawBibliography::from_str(src, allow_bibtex))
@@ -48,8 +53,9 @@ impl Bibliography {
 
     /// Parse a bibliography from a raw bibliography.
     pub fn from_raw(raw: RawBibliography) -> Self {
+        let mut res = Self::new();
         let abbreviations = &raw.abbreviations;
-        let entries = raw
+        let entries: Vec<Entry> = raw
             .entries
             .into_iter()
             .map(|entry| Entry {
@@ -63,7 +69,11 @@ impl Bibliography {
             })
             .collect();
 
-        Self { 0: entries }
+        for e in entries {
+            res.add_entry(e);
+        }
+
+        res
     }
 
     /// Try to find an entry with the given cite key.
@@ -71,19 +81,31 @@ impl Bibliography {
         self.0.iter().find(|entry| entry.cite_key == cite_key)
     }
 
-    // /// Try to find an entry with the given cite key.
-
-    //     if let Some(entry) = self.get(cite_key) {
-    //         entry.fields.insert(field.to_string(), chunks);
-    //         Ok(())
-    //     } else {
-    //         Err(anyhow!("no such field present"))
-    //     }
-    // }
-
     /// An iterator over the bibliography's entries.
     pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
         self.0.iter()
+    }
+
+    /// Add a new entry of that type to the bibliography if the cite key
+    /// is not already in use.
+    pub fn add(&mut self, cite_key: &str, entry_type: &str) -> anyhow::Result<()> {
+        if self.get(cite_key).is_some() {
+            Err(anyhow!("key already present"))
+        } else {
+            self.0.push(Entry::new(cite_key, entry_type));
+            Ok(())
+        }
+    }
+
+    /// Add a new entry of that type to the bibliography if the cite key
+    /// is not already in use.
+    pub fn add_entry(&mut self, entry: Entry) -> anyhow::Result<()> {
+        if self.get(&entry.cite_key).is_some() {
+            Err(anyhow!("key already present"))
+        } else {
+            self.0.push(entry);
+            Ok(())
+        }
     }
 }
 
@@ -112,6 +134,15 @@ impl Entry {
     /// Sets a field value as a chunk vector.
     pub fn set(&mut self, key: &str, chunks: Vec<Chunk>) {
         self.fields.insert(key.to_lowercase(), chunks);
+    }
+
+    /// Construct new, empty entry.
+    pub fn new(cite_key: &str, entry_type: &str) -> Self {
+        Self {
+            cite_key: cite_key.to_string(),
+            entry_type: entry_type.to_string(),
+            fields: HashMap::new(),
+        }
     }
 }
 
