@@ -55,10 +55,9 @@ impl Bibliography {
     pub fn from_raw(raw: RawBibliography) -> Self {
         let mut res = Self::new();
         let abbreviations = &raw.abbreviations;
-        let entries: Vec<Entry> = raw
-            .entries
-            .into_iter()
-            .map(|entry| Entry {
+
+        for entry in raw.entries {
+            res.add(Entry {
                 cite_key: entry.cite_key.to_string(),
                 entry_type: entry.entry_type.to_lowercase().to_string(),
                 fields: entry
@@ -67,10 +66,7 @@ impl Bibliography {
                     .map(|(key, value)| (key.to_string(), resolve(value, abbreviations)))
                     .collect(),
             })
-            .collect();
-
-        for e in entries {
-            res.add_entry(e);
+            .ok();
         }
 
         res
@@ -81,31 +77,46 @@ impl Bibliography {
         self.0.iter().find(|entry| entry.cite_key == cite_key)
     }
 
-    /// An iterator over the bibliography's entries.
-    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
-        self.0.iter()
+    /// Try to find an entry with the given cite key and return a mutable reference.
+    pub fn get_mut(&mut self, cite_key: &str) -> Option<&mut Entry> {
+        self.0.iter_mut().find(|entry| entry.cite_key == cite_key)
     }
 
     /// Add a new entry of that type to the bibliography if the cite key
     /// is not already in use.
-    pub fn add(&mut self, cite_key: &str, entry_type: &str) -> anyhow::Result<()> {
-        if self.get(cite_key).is_some() {
-            Err(anyhow!("key already present"))
-        } else {
-            self.0.push(Entry::new(cite_key, entry_type));
-            Ok(())
-        }
-    }
-
-    /// Add a new entry of that type to the bibliography if the cite key
-    /// is not already in use.
-    pub fn add_entry(&mut self, entry: Entry) -> anyhow::Result<()> {
+    pub fn add(&mut self, entry: Entry) -> anyhow::Result<()> {
         if self.get(&entry.cite_key).is_some() {
             Err(anyhow!("key already present"))
         } else {
             self.0.push(entry);
             Ok(())
         }
+    }
+
+    /// Add a new entry of that type to the bibliography if the cite key
+    /// is not already in use.
+    pub fn add_empty(
+        &mut self,
+        cite_key: &str,
+        entry_type: &str,
+    ) -> anyhow::Result<&mut Entry> {
+        if self.get(cite_key).is_some() {
+            Err(anyhow!("key already present"))
+        } else {
+            self.0.push(Entry::new(cite_key, entry_type));
+            self.get_mut(cite_key)
+                .ok_or_else(|| anyhow!("could not fetch inserted entry"))
+        }
+    }
+
+    ///
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// An iterator over the bibliography's entries.
+    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
+        self.0.iter()
     }
 }
 
@@ -119,6 +130,15 @@ impl IntoIterator for Bibliography {
 }
 
 impl Entry {
+    /// Construct new, empty entry.
+    pub fn new(cite_key: &str, entry_type: &str) -> Self {
+        Self {
+            cite_key: cite_key.to_string(),
+            entry_type: entry_type.to_string(),
+            fields: HashMap::new(),
+        }
+    }
+
     /// Get the chunk slice for a field.
     pub fn get(&self, key: &str) -> Option<&[Chunk]> {
         self.fields.get(&key.to_lowercase()).map(AsRef::as_ref)
@@ -136,20 +156,18 @@ impl Entry {
         self.fields.insert(key.to_lowercase(), chunks);
     }
 
-    /// Construct new, empty entry.
-    pub fn new(cite_key: &str, entry_type: &str) -> Self {
-        Self {
-            cite_key: cite_key.to_string(),
-            entry_type: entry_type.to_string(),
-            fields: HashMap::new(),
-        }
+    /// Sets a field value as a chunk vector as a specific type.
+    pub fn set_as<T: Type>(&mut self, key: &str, value: &T) -> anyhow::Result<()> {
+        let chunks = value.to_chunks()?;
+        self.fields.insert(key.to_lowercase(), chunks);
+        Ok(())
     }
 }
 
 macro_rules! fields {
     ($($name:ident: $field_name:expr $(=> $res:ty)?),* $(,)*) => {
         $(
-            paste!{
+            paste! {
                 #[doc = "Get and parse the `" $field_name "` field."]
                 pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
                     self.get($field_name)
@@ -163,7 +181,7 @@ macro_rules! fields {
     };
 
     (single_set $name:ident => $field_name:expr, ) => {
-        paste!{
+        paste! {
             #[doc = "Set a value in the `" $field_name "` field."]
             pub fn [<set_ $name>](&mut self, item: Vec<Chunk>) -> anyhow::Result<()> {
                 self.set($field_name, item);
@@ -172,7 +190,7 @@ macro_rules! fields {
         }
     };
     (single_set $name:ident => $field_name:expr, $other_type:ty) => {
-        paste!{
+        paste! {
             #[doc = "Set a value in the `" $field_name "` field."]
             pub fn [<set_ $name>](&mut self, item: $other_type) -> anyhow::Result<()> {
                 let chunks = item.to_chunks()?;
@@ -189,7 +207,7 @@ macro_rules! fields {
 macro_rules! alias_fields {
     ($($name:ident: $field_name:expr, $field_alias:expr $(=> $res:ty)?),* $(,)*) => {
         $(
-            paste!{
+            paste! {
                 #[doc = "Get and parse the `" $field_name "` field, falling back on `" $field_alias "` if `" $field_name "` is empty."]
                 pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
                     self.get($field_name)
@@ -210,7 +228,7 @@ macro_rules! alias_fields {
 macro_rules! date_fields {
     ($($name:ident: $field_prefix:expr),* $(,)*) => {
         $(
-            paste!{
+            paste! {
                 #[doc = "Get and parse the `" $field_prefix "date` field, falling back to the `" $field_prefix "year`, `" $field_prefix "month`, and `" $field_prefix "day` fields when not present."]
                 pub fn [<get_ $name>](&self) -> anyhow::Result<Date> {
                     if let Some(chunks) = self.get(concat!($field_prefix, "date")) {
@@ -236,40 +254,6 @@ macro_rules! date_fields {
 }
 
 impl Entry {
-    fn get_editor_with_type(&self, ed_key: &str) -> Option<(Vec<Person>, EditorType)> {
-        self.get(ed_key)
-            .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-            .and_then(|eds| {
-                Some((
-                    eds,
-                    self.get(&format!("{}type", ed_key))
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor),
-                ))
-            })
-    }
-
-    /// Get and parse the `editor` and `editora` through `editorc` fields
-    /// and their respective `editortype` annotation fields.
-    /// If any of the above fields is present, this function will return a
-    /// vector with between one and four entries, one for each editorial role.
-    ///
-    /// The default EditorType `Editor` will be assumed if the type field
-    /// is empty.
-    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
-        let mut editors = vec![];
-
-        for ed in vec!["editor", "editora", "editorb", "editorc"] {
-            self.get_editor_with_type(ed).map(|eds| Some(editors.push(eds)));
-        }
-
-        if editors.is_empty() {
-            return Err(anyhow!("No editor fields present"));
-        }
-
-        Ok(editors)
-    }
-
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
         // BibTeX fields.
@@ -294,6 +278,40 @@ impl Entry {
         event_date: "event",
         orig_date: "orig",
         url_date: "url",
+    }
+
+    /// Get and parse the `editor` and `editora` through `editorc` fields
+    /// and their respective `editortype` annotation fields.
+    /// If any of the above fields is present, this function will return a
+    /// vector with between one and four entries, one for each editorial role.
+    ///
+    /// The default `EditorType::Editor` will be assumed if the type field
+    /// is empty.
+    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
+        let mut editors = vec![];
+
+        let mut parse_editor_field = |name_field: &str, editor_field: &str| {
+            self.get(name_field)
+                .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
+                .map(|persons| {
+                    let editor_type = self
+                        .get(editor_field)
+                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
+                        .unwrap_or(EditorType::Editor);
+                    editors.push((persons, editor_type));
+                });
+        };
+
+        parse_editor_field("editor", "editortype");
+        parse_editor_field("editora", "editoratype");
+        parse_editor_field("editorb", "editorbtype");
+        parse_editor_field("editorc", "editorctype");
+
+        if editors.is_empty() {
+            return Err(anyhow!("No editor fields present"));
+        }
+
+        Ok(editors)
     }
 
     alias_fields! {
