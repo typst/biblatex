@@ -154,7 +154,9 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
                     _ => {
                         esc_cmd_mode = EscCommandMode::OnlyCommand;
                         vals.push(RawChunk::CommandName(c.to_string(), stack.len() > 1));
-                        stack.push(Symbols::Command);
+                        if !matches!(stack.last(), Some(Symbols::Command)) {
+                            stack.push(Symbols::Command);
+                        }
                         if is_single_char_func(c) {
                             esc_cmd_mode = EscCommandMode::Neither;
                             expect_arg = true;
@@ -239,6 +241,8 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
     use std::vec::IntoIter;
 
     let mut res: Vec<RawChunk> = vec![];
+    println!("{:?}", values);
+
     let mut iter = values.into_iter().peekable();
 
     fn modify_args(
@@ -392,7 +396,7 @@ pub fn is_escapable(c: char) -> bool {
 /// that automatically terminates.
 fn is_single_char_func(c: char) -> bool {
     match c {
-        '"' | '´' | '`' | '^' | '~' | '=' | '.' => true,
+        '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' => true,
         _ => false,
     }
 }
