@@ -7,7 +7,7 @@ description = "Parsing, writing, and evaluating BibTeX and BibLaTeX files"
 repository = "https://github.com/typst/biblatex"
 readme = "README.md"
 categories = ["database", "parser-implementations", "text-processing"]
-keywords = [".bib", "bibtex", "biblatex", "biber", "bibliography", "latex"]
+keywords = ["bibtex", "biblatex", "biber", "bibliography", "latex"]
 edition = "2018"
 
 [dependencies]
