@@ -18,3 +18,11 @@ strum_macros = "0.19.2"
 paste = "1.0.0"
 unicode-normalization = "0.1.13"
 unicode-xid = "0.2"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "benchmarks"
+path = "benches/benchmarks.rs"
+harness = false
