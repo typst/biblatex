@@ -381,9 +381,9 @@ fn flatten(s: Vec<RawChunk>) -> Vec<RawChunk> {
 }
 
 /// Characters that can be escaped.
-fn is_escapable(c: char) -> bool {
+pub fn is_escapable(c: char) -> bool {
     match c {
-        '&' | '%' | '{' | '}' | ',' | '$' | '\'' | '_' => true,
+        '&' | '%' | '{' | '}' | '$' | '_' => true,
         _ => false,
     }
 }

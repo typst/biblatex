@@ -10,7 +10,7 @@ use paste::paste;
 
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
-use crate::types::{Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type};
+use crate::types::{chunks_to_string, Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type};
 
 /// A fully parsed bibliography.
 pub struct Bibliography(pub Vec<Entry>);
@@ -109,7 +109,7 @@ impl Bibliography {
         }
     }
 
-    ///
+    /// Get the amount of bibliography items.
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -117,6 +117,17 @@ impl Bibliography {
     /// An iterator over the bibliography's entries.
     pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
         self.0.iter()
+    }
+
+    /// Will output the entry as a BibLaTeX string
+    pub fn as_biblatex_string(&self) -> String {
+        let mut res = String::new();
+        for e in self.0.iter() {
+            res += &e.as_biblatex_string();
+            res.push('\n')
+        }
+
+        res
     }
 }
 
@@ -161,6 +172,23 @@ impl Entry {
         let chunks = value.to_chunks()?;
         self.fields.insert(key.to_lowercase(), chunks);
         Ok(())
+    }
+
+    /// Deletes a field from the entry.
+    pub fn delete(&mut self, key: &str) {
+        self.fields.remove(key);
+    }
+
+    /// Will output the entry as a BibLaTeX string
+    pub fn as_biblatex_string(&self) -> String {
+        let mut res = format!("@{}{{{},\n", self.entry_type, self.cite_key);
+        for (key, value) in self.fields.iter() {
+            res.push_str(&format!("{} = {}\n", key, chunks_to_string(value)))
+        }
+
+        res.push('}');
+
+        res
     }
 }
 
@@ -246,6 +274,10 @@ macro_rules! date_fields {
                 pub fn [<set_ $name>](&mut self, item: Date) -> anyhow::Result<()> {
                     let chunks = item.to_chunks()?;
                     self.set(concat!($field_prefix, "date"), chunks);
+                    self.delete(concat!($field_prefix, "year"));
+                    self.delete(concat!($field_prefix, "month"));
+                    self.delete(concat!($field_prefix, "day"));
+
                     Ok(())
                 }
             }
@@ -485,6 +517,7 @@ mod tests {
         let contents = fs::read_to_string(file).unwrap();
         let bibliography = Bibliography::from_str(&contents, true);
 
+        println!("{}", bibliography.as_biblatex_string());
         for x in bibliography {
             let authors = x.get_author().unwrap_or_default();
             for a in authors {

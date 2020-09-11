@@ -13,6 +13,7 @@ use numerals::roman::Roman;
 use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumString};
 
+use crate::resolve::is_escapable;
 use super::{Chunk, ChunksExt};
 
 #[rustfmt::skip]
@@ -1241,6 +1242,36 @@ fn chunk_chars<'a>(chunks: &'a [Chunk]) -> impl Iterator<Item = (char, bool)> + 
 
         s.chars().map(move |c| (c, verbatim))
     })
+}
+
+/// Create a BibLaTeX string for a chunk stream
+pub(crate) fn chunks_to_string<'a>(chunks: &'a [Chunk]) -> String {
+    let iter = chunk_chars(chunks);
+    let mut res = String::new();
+    res.push('{');
+    let mut braces = 1;
+
+    for (c, v) in iter {
+        if v && braces <= 1 {
+            res.push('{');
+            braces += 1;
+        } else if !v && braces > 1 {
+            res.push('}');
+            braces -= 1;
+        }
+
+        if is_escapable(c) || c == '\\' {
+            res.push('\\');
+        }
+
+        res.push(c);
+    }
+
+    for _ in 0..braces {
+        res.push('}');
+    }
+
+    res
 }
 
 #[cfg(test)]
