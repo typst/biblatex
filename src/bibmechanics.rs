@@ -1,0 +1,598 @@
+use std::str::FromStr;
+
+use strum_macros::EnumString;
+
+#[derive(Clone, Debug, EnumString)]
+#[strum(serialize_all = "lowercase")]
+pub enum EntryType {
+    // BibTeX
+    Article,
+    Book,
+    Booklet,
+    InBook,
+    InCollection,
+    InProceedings,
+    Manual,
+    MastersThesis,
+    PhdThesis,
+    Misc,
+    Proceedings,
+    TechReport,
+    Unpublished,
+
+    // BibLaTeX
+    MvBook,
+    BookInBook,
+    SuppBook,
+    Periodical,
+    SuppPeriodical,
+    Collection,
+    MvCollection,
+    SuppCollection,
+    Reference,
+    MvReference,
+    InReference,
+    MvProceedings,
+    Report,
+    Patent,
+    Thesis,
+    Online,
+    Software,
+    Dataset,
+    Set,
+    XData,
+
+    Unknown(String),
+}
+
+/// Describes the optionality mode of the `author` and `editor` fields.
+#[derive(Clone, Debug)]
+pub enum AuthorMode {
+    /// The `author` field must be present.
+    AuthorRequired,
+    /// The `author` field might be present,
+    /// there is no specification for the `editor` field.
+    AuthorOptional,
+    /// Either one or both fields must be present.
+    AuthorEditorRequired,
+    /// The `editor` field must be present.
+    EditorRequired,
+    /// The `editor` field must be set
+    /// while the `author` field must not be set.
+    EditorRequiredAuthorForbidden,
+    /// Both fields must be set.
+    BothRequired,
+    /// Neither of the fields are required to be set.
+    NoneRequired,
+}
+
+impl Default for AuthorMode {
+    fn default() -> Self {
+        Self::AuthorRequired
+    }
+}
+
+/// Describes the optionality mode of the `pages` and `chapter` field
+#[derive(Clone, Debug)]
+pub enum PagesChapterMode {
+    /// The `pages` field must be present.
+    PagesRequired,
+    /// The `pages` field might be present,
+    /// there is no specification for the `chapter` field.
+    PagesOptional,
+    /// Either one or both fields must be present.
+    PagesChapterRequired,
+    /// Both fields are optional.
+    BothOptional,
+    /// Neither field may appear.
+    BothForbidden,
+    /// No specification for the `page` and `chapter` field is given.
+    NoSpec,
+}
+
+impl Default for PagesChapterMode {
+    fn default() -> Self {
+        Self::NoSpec
+    }
+}
+
+/// Specifies what kinds of fields an entry might have to hold.
+#[derive(Clone, Debug, Default)]
+pub struct FieldRequirements<'s> {
+    /// Fields that have to be present for the entry to be valid.
+    required: Vec<&'s str>,
+    /// Fields that might be present and are often used by bibliography styles.
+    ///
+    /// These fields, together with the required fields, will be taken into
+    /// consideration for `crossref` and `xdata` transfers.
+    optional: Vec<&'s str>,
+    // forbidden: Vec<&'s str>,
+    /// Specifies the relation of author and editor field compulsiveness.
+    author_eds_field: AuthorMode,
+    /// Specifies the relation of page and chapter field compulsiveness.
+    page_chapter_field: PagesChapterMode,
+    /// Shows whether a `date` or `year` field has to be present.
+    needs_date: bool,
+}
+
+impl EntryType {
+    /// Get a `EntryType` for a `&str`.
+    ///
+    /// Use instead of `from_str` when constructing from `.bib` files because
+    /// aliases are handled here.
+    pub fn robust_from_str(name: &str) -> Self {
+        let name = name.to_lowercase();
+        if let Ok(trial) = EntryType::from_str(&name) {
+            return trial;
+        }
+
+        match name.as_str() {
+            "conference" => EntryType::InProceedings,
+            "electronic" => EntryType::Online,
+            "www" => EntryType::Online,
+            _ => EntryType::Unknown(name),
+        }
+    }
+
+    /// Convert the type to a type supported by BibTeX.
+    pub fn to_bibtex(&self) -> Self {
+        match self {
+            Self::MvBook => Self::Book,
+            Self::BookInBook => Self::InBook,
+            Self::SuppBook => Self::InBook,
+            Self::Periodical => Self::Misc,
+            Self::SuppPeriodical => Self::Article,
+            Self::Collection => Self::Proceedings,
+            Self::MvCollection => Self::Proceedings,
+            Self::SuppCollection => Self::InCollection,
+            Self::Reference => Self::Misc,
+            Self::MvReference => Self::Misc,
+            Self::InReference => Self::InCollection,
+            Self::MvProceedings => Self::Proceedings,
+            Self::Report => Self::TechReport,
+            Self::Patent => Self::Misc,
+            Self::Thesis => Self::PhdThesis,
+            Self::Online => Self::Misc,
+            Self::Software => Self::Misc,
+            Self::Dataset => Self::Misc,
+            Self::Set => Self::Misc,
+            Self::XData => Self::Misc,
+            Self::Unknown(_) => Self::Misc,
+            _ => self.clone(),
+        }
+    }
+
+    /// Convert the type to a type native to BibLaTeX.
+    pub fn to_biblatex(&self) -> Self {
+        match self {
+            Self::MastersThesis => Self::Thesis,
+            Self::PhdThesis => Self::Thesis,
+            Self::TechReport => Self::Report,
+            Self::Unknown(_) => Self::Misc,
+            _ => self.clone(),
+        }
+    }
+
+    /// Is the `EntryType` a multi-volume work?
+    pub fn is_multi_volume(&self) -> bool {
+        match self {
+            Self::MvBook => true,
+            Self::MvCollection => true,
+            Self::MvReference => true,
+            Self::MvProceedings => true,
+            _ => false,
+        }
+    }
+
+    /// Is the `EntryType` a single-volume composite work?
+    pub fn is_collection(&self) -> bool {
+        match self {
+            Self::Book => true,
+            Self::Collection => true,
+            Self::Periodical => true,
+            Self::Reference => true,
+            Self::Proceedings => true,
+            _ => false,
+        }
+    }
+
+    /// Get the required fields for the `EntryType`.
+    pub fn get_requirements(&self) -> FieldRequirements {
+        let mut reqs = FieldRequirements::default();
+        reqs.needs_date = true;
+        reqs.required.push("title");
+
+        reqs.optional.push("note");
+        reqs.optional.push("location");
+        reqs.optional.push("titleadddon");
+        reqs.optional.push("subtitle");
+        reqs.optional.push("url");
+        reqs.optional.push("urldate");
+        reqs.optional.push("doi");
+        reqs.optional.push("eprint");
+        reqs.optional.push("eprintclass");
+        reqs.optional.push("eprinttype");
+        reqs.optional.push("pubstate");
+        reqs.optional.push("language");
+        reqs.optional.push("addendum");
+
+        match self {
+            Self::Article => {
+                reqs.required.push("journaltitle");
+
+                reqs.optional.remove(1);
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("version");
+                reqs.optional.push("volume");
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("journalsubtitle");
+                reqs.optional.push("issue");
+                reqs.optional.push("issuetitle");
+                reqs.optional.push("issuesubtitle");
+                reqs.optional.push("eid");
+                reqs.optional.push("issn");
+
+                reqs.page_chapter_field = PagesChapterMode::PagesOptional;
+            }
+            Self::Book => {
+                reqs.required.push("publisher");
+
+                reqs.optional.push("edition");
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("part");
+                reqs.optional.push("volume");
+                reqs.optional.push("volumes");
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("isbn");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::Booklet => {
+                reqs.optional.push("howpublished");
+                reqs.optional.push("type");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+                reqs.needs_date = false;
+            }
+            Self::InBook => {
+                reqs.required.push("publisher");
+                reqs.required.push("booktitle");
+
+                reqs.optional.push("bookauthor");
+                reqs.optional.push("volume");
+                reqs.optional.push("volumes");
+                reqs.optional.push("part");
+                reqs.optional.push("type");
+                reqs.optional.push("series");
+                reqs.optional.push("number");
+                reqs.optional.push("edition");
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("booksubtitle");
+                reqs.optional.push("booktitleaddon");
+                reqs.optional.push("isbn");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.page_chapter_field = PagesChapterMode::PagesChapterRequired;
+            }
+            Self::InCollection => {
+                reqs.required.push("publisher");
+                reqs.required.push("booktitle");
+
+                reqs.optional.push("volume");
+                reqs.optional.push("type");
+                reqs.optional.push("series");
+                reqs.optional.push("number");
+                reqs.optional.push("edition");
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("booksubtitle");
+                reqs.optional.push("booktitleaddon");
+                reqs.optional.push("part");
+                reqs.optional.push("volumes");
+                reqs.optional.push("isbn");
+
+                reqs.author_eds_field = AuthorMode::BothRequired;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::InProceedings => {
+                reqs.required.push("booktitle");
+
+                reqs.optional.push("number");
+                reqs.optional.push("organization");
+                reqs.optional.push("series");
+                reqs.optional.push("volume");
+                reqs.optional.push("volumes");
+                reqs.optional.push("part");
+                reqs.optional.push("publisher");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("booksubtitle");
+                reqs.optional.push("booktitleaddon");
+                reqs.optional.push("eventtitle");
+                reqs.optional.push("eventsubtitle");
+                reqs.optional.push("eventtitleaddon");
+                reqs.optional.push("venue");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+                reqs.author_eds_field = AuthorMode::BothRequired;
+            }
+            Self::Manual => {
+                reqs.optional.push("edition");
+                reqs.optional.push("organization");
+                reqs.optional.push("series");
+                reqs.optional.push("version");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+                reqs.optional.push("type");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+                reqs.needs_date = false;
+            }
+            Self::MastersThesis => {
+                reqs.required.push("school");
+
+                reqs.optional.push("type");
+            }
+            Self::Misc => {
+                reqs.optional.remove(1);
+                reqs.optional.push("howpublished");
+                reqs.optional.push("organization");
+                reqs.optional.push("type");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                // reqs.page_chapter_field = PagesChapterMode::BothOptional;
+                reqs.needs_date = false;
+            }
+            Self::Proceedings => {
+                reqs.optional.push("number");
+                reqs.optional.push("organization");
+                reqs.optional.push("series");
+                reqs.optional.push("volume");
+                reqs.optional.push("volumes");
+                reqs.optional.push("part");
+                reqs.optional.push("publisher");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::EditorRequiredAuthorForbidden;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::TechReport => {
+                reqs.required.push("institution");
+
+                reqs.optional.push("number");
+                reqs.optional.push("type");
+            }
+            Self::Unpublished => {
+                reqs.required.push("note");
+
+                reqs.optional.remove(1);
+                reqs.optional.remove(0);
+                reqs.optional.push("isbn");
+                reqs.optional.push("howpublished");
+
+                reqs.needs_date = false;
+            }
+            Self::MvBook => {
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("edition");
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("volumes");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+                reqs.optional.push("pagetotal");
+
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::Periodical => {
+                reqs.optional.push("issue");
+                reqs.optional.push("issuetitle");
+                reqs.optional.push("issuesubtitle");
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("volume");
+                reqs.optional.push("issn");
+
+                reqs.author_eds_field = AuthorMode::EditorRequiredAuthorForbidden;
+            }
+            Self::Collection => {
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("maintitle");
+                reqs.optional.push("mainsubtitle");
+                reqs.optional.push("maintitleaddon");
+                reqs.optional.push("edition");
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("part");
+                reqs.optional.push("volume");
+                reqs.optional.push("volumes");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::EditorRequiredAuthorForbidden;
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::MvCollection => {
+                reqs.optional.push("annotator");
+                reqs.optional.push("commentator");
+                reqs.optional.push("translator");
+                reqs.optional.push("origlanguage");
+                reqs.optional.push("afterword");
+                reqs.optional.push("foreword");
+                reqs.optional.push("introduction");
+                reqs.optional.push("edition");
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("volumes");
+                reqs.optional.push("isbn");
+                reqs.optional.push("publisher");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::EditorRequiredAuthorForbidden;
+                reqs.page_chapter_field = PagesChapterMode::BothForbidden;
+            }
+            Self::MvProceedings => {
+                reqs.optional.push("number");
+                reqs.optional.push("series");
+                reqs.optional.push("volumes");
+                reqs.optional.push("publisher");
+                reqs.optional.push("organization");
+                reqs.optional.push("pagetotal");
+
+                reqs.author_eds_field = AuthorMode::EditorRequiredAuthorForbidden;
+                reqs.page_chapter_field = PagesChapterMode::BothForbidden;
+            }
+            Self::Report => {
+                reqs.required.push("institution");
+                reqs.required.push("type");
+
+                reqs.optional.push("number");
+                reqs.optional.push("version");
+                reqs.optional.push("isrn");
+                reqs.optional.push("pagetotal");
+
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::Patent => {
+                reqs.required.push("number");
+
+                reqs.optional.push("holder");
+                reqs.optional.push("type");
+            }
+            Self::Thesis => {
+                reqs.optional.push("isbn");
+                reqs.required.push("institution");
+                reqs.required.push("type");
+                reqs.optional.push("pagetotal");
+
+                reqs.page_chapter_field = PagesChapterMode::BothOptional;
+            }
+            Self::Online => {
+                reqs.required.push("url");
+
+                reqs.optional.remove(9);
+                reqs.optional.remove(8);
+                reqs.optional.remove(7);
+                reqs.optional.remove(6);
+                reqs.optional.remove(4);
+                reqs.optional.remove(1);
+                reqs.optional.push("organization");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+            }
+            Self::Dataset => {
+                reqs.optional.push("edition");
+                reqs.optional.push("type");
+                reqs.optional.push("series");
+                reqs.optional.push("number");
+                reqs.optional.push("version");
+                reqs.optional.push("organization");
+                reqs.optional.push("publisher");
+
+                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+            }
+            Self::PhdThesis => {
+                reqs = Self::MastersThesis.get_requirements();
+            }
+            Self::SuppPeriodical => {
+                reqs = Self::Article.get_requirements();
+            }
+            Self::BookInBook => {
+                reqs = Self::InBook.get_requirements();
+            }
+            Self::SuppBook => {
+                reqs = Self::InBook.get_requirements();
+            }
+            Self::SuppCollection => {
+                reqs = Self::InCollection.get_requirements();
+            }
+            Self::Reference => {
+                reqs = Self::Collection.get_requirements();
+            }
+            Self::MvReference => {
+                reqs = Self::MvCollection.get_requirements();
+            }
+            Self::InReference => {
+                reqs = Self::InCollection.get_requirements();
+            }
+            Self::Software => {
+                reqs = Self::Misc.get_requirements();
+            }
+            Self::Set => {
+                reqs.optional.clear();
+                reqs.required = vec!["entryset"];
+                reqs.author_eds_field = AuthorMode::NoneRequired;
+                reqs.needs_date = false;
+            }
+            Self::XData => {
+                reqs.optional.clear();
+                reqs.required.clear();
+                reqs.author_eds_field = AuthorMode::NoneRequired;
+                reqs.needs_date = false;
+            }
+            Self::Unknown(_) => {
+                reqs = Self::MvCollection.get_requirements();
+            }
+        }
+
+        reqs
+    }
+}

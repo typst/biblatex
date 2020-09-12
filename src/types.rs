@@ -13,8 +13,8 @@ use numerals::roman::Roman;
 use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumString};
 
-use crate::resolve::is_escapable;
 use super::{Chunk, ChunksExt};
+use crate::resolve::is_escapable;
 
 #[rustfmt::skip]
 lazy_static! {
@@ -1267,7 +1267,7 @@ pub(crate) fn chunks_to_string<'a>(chunks: &'a [Chunk]) -> String {
         res.push(c);
     }
 
-    for _ in 0..braces {
+    for _ in 0 .. braces {
         res.push('}');
     }
 

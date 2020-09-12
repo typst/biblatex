@@ -1,5 +1,6 @@
 pub mod raw;
 pub mod types;
+pub mod bibmechanics;
 
 mod resolve;
 
@@ -10,7 +11,9 @@ use paste::paste;
 
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
-use crate::types::{chunks_to_string, Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type};
+use crate::types::{
+    chunks_to_string, Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type,
+};
 
 /// A fully parsed bibliography.
 pub struct Bibliography(pub Vec<Entry>);
