@@ -13,8 +13,11 @@ for downstream consumption.
 
 ## Install
 
-This crate is to be published on Crates.io.
-In the meantime, the user may clone this repository and use it as a dependency locally.
+Install the crate by copying the following line into your `Cargo.toml`'s
+dependencies section:
+```toml
+biblatex = "0.2.0"
+```
 
 ## Usage
 
@@ -52,9 +55,6 @@ However, the crate currently has some limitations:
 - Nested TeX commands are not supported
 - Math mode formatting is not being processed, instead, the output strings will
   contain the dollar-delimited math syntax as it is found in the input string.
-- Secondary cite keys (`ids` field) are not yet supported
-- `Crossref` (as well as `xref` and `xdata`) citing is not yet supported (i.e.
-  inheriting an items properties to a child)
 - There is no explicit support for entry sets, although it is easy to account
   for them by manually getting the `entryset` field and calling
   `parse::<Vec<String>>()` on it

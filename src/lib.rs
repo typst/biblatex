@@ -17,7 +17,11 @@ use crate::types::{
 };
 
 /// A fully parsed bibliography.
-pub struct Bibliography(pub Vec<Entry>);
+#[derive(Clone, Debug)]
+pub struct Bibliography{
+    items: Vec<Entry>,
+    dict: HashMap<String, usize>,
+}
 
 /// A bibliography entry that is parsed into chunks, which can be
 /// parsed into more specific types on demand on field accesses.
@@ -47,7 +51,10 @@ pub enum Chunk {
 impl Bibliography {
     /// Get a new, empty Bibliography
     pub fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            items: Vec::new(),
+            dict: HashMap::new(),
+        }
     }
 
     /// Parse a bibliography from a source string.
@@ -78,24 +85,31 @@ impl Bibliography {
 
     /// Try to find an entry with the given cite key.
     pub fn get(&self, cite_key: &str) -> Option<&Entry> {
-        self.0.iter().find(|entry| entry.cite_key == cite_key)
+        let index = self.dict.get(cite_key);
+        if let Some(&index) = index {
+            self.items.get(index)
+        } else {
+            None
+        }
     }
 
     /// Try to find an entry with the given cite key and return a mutable reference.
     pub fn get_mut(&mut self, cite_key: &str) -> Option<&mut Entry> {
-        self.0.iter_mut().find(|entry| entry.cite_key == cite_key)
+        let index = self.dict.get(cite_key);
+        if let Some(&index) = index {
+            self.items.get_mut(index)
+        } else {
+            None
+        }
     }
 
     /// Try to find an entry with the given cite key and return an Entry
     /// with all `crossref` and `xdata` dependencies resolved.
     pub fn get_resolved(&mut self, cite_key: &str) -> Option<Entry> {
-        self.0
-            .iter_mut()
-            .find(|entry| entry.cite_key == cite_key)
+        self.get_mut(cite_key)
             .cloned()
-            .map(|mut e| {
-                e.resolve_crossrefs(self);
-                e
+            .and_then(|mut e| {
+                e.resolve_crossrefs(self).map(|_| e).ok()
             })
     }
 
@@ -105,7 +119,15 @@ impl Bibliography {
         if self.get(&entry.cite_key).is_some() {
             Err(anyhow!("key already present"))
         } else {
-            self.0.push(entry);
+            self.dict.insert(entry.cite_key.clone(), self.items.len());
+            self.items.push(entry);
+            let ids = self.items.last().unwrap().get_as::<Vec<String>>("ids");
+            let key = self.items.last().unwrap().cite_key.clone();
+            if let Ok(ids) = ids {
+                for i in ids {
+                    self.add_alias(&key, &i)?;
+                }
+            }
             Ok(())
         }
     }
@@ -120,26 +142,54 @@ impl Bibliography {
         if self.get(cite_key).is_some() {
             Err(anyhow!("key already present"))
         } else {
-            self.0.push(Entry::new(cite_key, entry_type));
+            self.dict.insert(cite_key.to_string(), self.items.len());
+            self.items.push(Entry::new(cite_key, entry_type));
             self.get_mut(cite_key)
                 .ok_or_else(|| anyhow!("could not fetch inserted entry"))
         }
     }
 
+    /// Will add an alias for a cite key if that alias is not yet in use
+    pub fn add_alias(&mut self, cite_key: &str, alias: &str) -> anyhow::Result<()> {
+        let &index = self.dict.get(cite_key).ok_or_else(|| anyhow!("item for alias not found"))?;
+        if self.dict.contains_key(alias) {
+            Err(anyhow!("alias name already in use"))
+        } else {
+            self.dict.insert(alias.to_string(), index);
+            Ok(())
+        }
+    }
+
+    pub fn remove_item(&mut self, cite_key: &str) -> anyhow::Result<Entry> {
+        let &index = self.dict.get(cite_key).ok_or_else(|| anyhow!("item for alias not found"))?;
+        let entry = self.items.remove(index);
+
+        self.dict.retain(|_, &mut v| v != index);
+        self.dict = self.dict.clone().into_iter().map(|(k, mut v)| {
+            if v > index {
+                v -= 1;
+            }
+
+            (k, v)
+        }).collect();
+
+        Ok(entry)
+    }
+
     /// Get the amount of bibliography items.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.items.len()
     }
 
     /// An iterator over the bibliography's entries.
     pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
-        self.0.iter()
+        self.items.iter()
     }
 
     /// Will output the entry as a BibLaTeX string
     pub fn as_biblatex_string(&self) -> String {
         let mut res = String::new();
-        for e in self.0.iter() {
+        for e in self.items.iter() {
             res += &e.as_biblatex_string();
             res.push('\n')
         }
@@ -153,7 +203,7 @@ impl IntoIterator for Bibliography {
     type IntoIter = std::vec::IntoIter<Entry>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.items.into_iter()
     }
 }
 
@@ -331,8 +381,8 @@ impl Entry {
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &mut Bibliography) {
-        let crossref = self.get_as::<String>("crossref").and_then(|s| {
+    fn resolve_crossrefs(&mut self, bib: &mut Bibliography) -> anyhow::Result<()> {
+        let crossref = self.get_as::<String>("crossref").map(|s| {
             bib.get_mut(&s)
                 .map(|e| e.clone())
                 .ok_or_else(|| anyhow!("crossref'd item not found"))
@@ -350,24 +400,24 @@ impl Entry {
         let mut refs = vec![];
 
         if let Ok(crossref) = crossref {
-            refs.push(crossref);
+            refs.push(crossref?);
         }
 
         if let Ok(references) = references {
             for r in references {
-                if let Ok(r) = r {
-                    refs.push(r);
-                }
+                refs.push(r?);
             }
         }
 
         for mut crossref in refs {
-            crossref.resolve_crossrefs(bib);
+            crossref.resolve_crossrefs(bib)?;
             self.resolve_single_crossref(crossref);
         }
 
         self.delete("crossref");
         self.delete("xdata");
+
+        Ok(())
     }
 }
 
@@ -687,6 +737,20 @@ mod tests {
     }
 
     #[test]
+    fn test_alias() {
+        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let mut bibliography = Bibliography::from_str(&contents, true);
+
+        assert_eq!(bibliography.get("issue201"), bibliography.get("github"));
+        bibliography.add_alias("issue201", "crap").expect("this must work");
+        assert_eq!(bibliography.get("crap"), bibliography.get("unstable"));
+        bibliography.remove_item("crap").expect("removal must work");
+        let cf = bibliography.get("cannonfodder").unwrap();
+        assert_eq!(cf.entry_type, EntryType::Misc);
+        assert_eq!(cf.cite_key, "cannonfodder");
+    }
+
+    #[test]
     fn test_crossref() {
         let contents = fs::read_to_string("test/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
@@ -731,7 +795,7 @@ mod tests {
     fn dump_debug(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
         let bibliography = Bibliography::from_str(&contents, true);
-        println!("{:#?}", bibliography.0);
+        println!("{:#?}", bibliography);
     }
 
     fn dump_author_title(file: &str) {
