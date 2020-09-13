@@ -25,7 +25,9 @@ Parsing a bibliography and getting the author of an item is as simple as:
 
 ```rust
 let bibliography = Bibliography::from_str(bib_file_str, true);
-let author = bibliography.get("some_cite_key").unwrap().get_author(); // Returns an Result<Person, anyhow::Error>
+let author = bibliography.get("some_cite_key")
+                .unwrap()
+                .get_author(); // Returns an Result<Person, anyhow::Error>
 ```
 
 This library operates on the Bibliography struct, which is a vector of entries

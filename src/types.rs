@@ -378,6 +378,7 @@ impl Date {
         Ok(Self { is_approximate, is_uncertain, value })
     }
 
+    /// Create a new date from the `year`, `month`, and `day` fields.
     pub fn new_from_three_fields(
         year: Option<&[Chunk]>,
         month: Option<&[Chunk]>,
@@ -544,6 +545,80 @@ impl Date {
         } else {
             Err(anyhow!("Date does not match any known format"))
         }
+    }
+
+    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
+        let mut res = vec![];
+        match self.value {
+            DateValue::Atom(date) => {
+                let year = if date.year >= 0 {
+                    format!("{:04}", date.year)
+                } else {
+                    format!("{:05}", date.year)
+                };
+
+                res.push(("year".to_string(), year));
+
+                if let Some(month) = date.month {
+                    res.push(("month".to_string(), format!("{:02}", month + 1)));
+
+                    if let Some(day) = date.day {
+                        res.push(("day".to_string(), format!("{:02}", day + 1)));
+                    }
+                }
+            }
+
+            DateValue::Range(start, end) => {
+                let mut open = 0;
+
+                if matches!(start, DateBound::Open) {
+                    open += 1;
+                }
+                if matches!(end, DateBound::Open) {
+                    open += 1;
+                }
+
+                match open {
+                    0 => {}
+                    1 => {
+                        let date = if let DateBound::Definite(date) = start {
+                            date
+                        } else if let DateBound::Definite(date) = end {
+                            date
+                        } else {
+                            panic!("One DateBound should be definite")
+                        };
+
+                        res = Date::new_from_date_atom(date).to_fieldset();
+                    }
+                    2 => {
+                        let start = if let DateBound::Definite(date) = start {
+                            date
+                        } else {
+                            panic!("Start has to be definite at this point")
+                        };
+
+                        let end = if let DateBound::Definite(date) = end {
+                            date
+                        } else {
+                            panic!("End has to be definite at this point")
+                        };
+
+                        res = Date::new_from_date_atom(start).to_fieldset();
+                        let mut end_fieldset =
+                            Date::new_from_date_atom(end).to_fieldset();
+                        end_fieldset = end_fieldset
+                            .into_iter()
+                            .map(|(k, v)| (format!("end{}", k), v))
+                            .collect();
+                        res.append(&mut end_fieldset);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        res
     }
 }
 

@@ -1,7 +1,14 @@
+//! Defines the different bibliographical items and which
+//! fields should be attached to each of them.
+
 use std::str::FromStr;
 
 use strum_macros::{Display, EnumString};
 
+/// Describes the type of bibliographical item being cited.
+///
+/// Each type comes with a different set of required fields
+/// as per the spec that can be extracted using `EntryType::get_requirements`.
 #[derive(Clone, Display, Debug, EnumString, Eq, PartialEq)]
 #[strum(serialize_all = "lowercase")]
 pub enum EntryType {
@@ -133,7 +140,8 @@ pub struct FieldRequirements<'s> {
     /// These fields, together with the required fields, will be taken into
     /// consideration for `crossref` and `xdata` transfers.
     pub optional: Vec<&'s str>,
-    // forbidden: Vec<&'s str>,
+    /// These fields must not appear for the entry to be valid.
+    forbidden: Vec<&'s str>,
     /// Specifies the relation of author and editor field compulsiveness.
     pub author_eds_field: AuthorMode,
     /// Specifies the relation of page and chapter field compulsiveness.
@@ -243,6 +251,14 @@ impl EntryType {
         reqs.optional.push("language");
         reqs.optional.push("addendum");
 
+        if self.is_multi_volume() {
+            reqs.forbidden.push("maintitle");
+            reqs.forbidden.push("mainsubtitle");
+            reqs.forbidden.push("maintitleaddon");
+            reqs.forbidden.push("part");
+            reqs.forbidden.push("volume");
+        }
+
         match self {
             Self::Article => {
                 reqs.required.push("journaltitle");
@@ -326,6 +342,8 @@ impl EntryType {
                 reqs.optional.push("booktitleaddon");
                 reqs.optional.push("isbn");
 
+                reqs.forbidden.push("pagetotal");
+
                 reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
                 reqs.page_chapter_field = PagesChapterMode::PagesChapterRequired;
             }
@@ -354,6 +372,8 @@ impl EntryType {
                 reqs.optional.push("volumes");
                 reqs.optional.push("isbn");
 
+                reqs.forbidden.push("pagetotal");
+
                 reqs.author_eds_field = AuthorMode::BothRequired;
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
             }
@@ -378,6 +398,8 @@ impl EntryType {
                 reqs.optional.push("venue");
                 reqs.optional.push("isbn");
                 reqs.optional.push("publisher");
+
+                reqs.forbidden.push("pagetotal");
 
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
                 reqs.author_eds_field = AuthorMode::BothRequired;

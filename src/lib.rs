@@ -18,7 +18,7 @@ use crate::types::{
 
 /// A fully parsed bibliography.
 #[derive(Clone, Debug)]
-pub struct Bibliography{
+pub struct Bibliography {
     items: Vec<Entry>,
     dict: HashMap<String, usize>,
 }
@@ -51,10 +51,7 @@ pub enum Chunk {
 impl Bibliography {
     /// Get a new, empty Bibliography
     pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            dict: HashMap::new(),
-        }
+        Self { items: Vec::new(), dict: HashMap::new() }
     }
 
     /// Parse a bibliography from a source string.
@@ -108,9 +105,7 @@ impl Bibliography {
     pub fn get_resolved(&mut self, cite_key: &str) -> Option<Entry> {
         self.get_mut(cite_key)
             .cloned()
-            .and_then(|mut e| {
-                e.resolve_crossrefs(self).map(|_| e).ok()
-            })
+            .and_then(|mut e| e.resolve_crossrefs(self).map(|_| e).ok())
     }
 
     /// Add a new entry of that type to the bibliography if the cite key
@@ -151,7 +146,10 @@ impl Bibliography {
 
     /// Will add an alias for a cite key if that alias is not yet in use
     pub fn add_alias(&mut self, cite_key: &str, alias: &str) -> anyhow::Result<()> {
-        let &index = self.dict.get(cite_key).ok_or_else(|| anyhow!("item for alias not found"))?;
+        let &index = self
+            .dict
+            .get(cite_key)
+            .ok_or_else(|| anyhow!("item for alias not found"))?;
         if self.dict.contains_key(alias) {
             Err(anyhow!("alias name already in use"))
         } else {
@@ -161,17 +159,25 @@ impl Bibliography {
     }
 
     pub fn remove_item(&mut self, cite_key: &str) -> anyhow::Result<Entry> {
-        let &index = self.dict.get(cite_key).ok_or_else(|| anyhow!("item for alias not found"))?;
+        let &index = self
+            .dict
+            .get(cite_key)
+            .ok_or_else(|| anyhow!("item for alias not found"))?;
         let entry = self.items.remove(index);
 
         self.dict.retain(|_, &mut v| v != index);
-        self.dict = self.dict.clone().into_iter().map(|(k, mut v)| {
-            if v > index {
-                v -= 1;
-            }
+        self.dict = self
+            .dict
+            .clone()
+            .into_iter()
+            .map(|(k, mut v)| {
+                if v > index {
+                    v -= 1;
+                }
 
-            (k, v)
-        }).collect();
+                (k, v)
+            })
+            .collect();
 
         Ok(entry)
     }
@@ -187,9 +193,9 @@ impl Bibliography {
     }
 
     /// Will output the entry as a BibLaTeX string
-    pub fn as_biblatex_string(&self) -> String {
+    pub fn as_biblatex_string(&mut self) -> String {
         let mut res = String::new();
-        for e in self.items.iter() {
+        for e in self.items.iter_mut() {
             res += &e.as_biblatex_string();
             res.push('\n')
         }
@@ -242,15 +248,54 @@ impl Entry {
     }
 
     /// Deletes a field from the entry.
-    pub fn delete(&mut self, key: &str) {
-        self.fields.remove(key);
+    pub fn delete(&mut self, key: &str) -> Option<Vec<Chunk>> {
+        self.fields.remove(key)
     }
 
-    /// Will output the entry as a BibLaTeX string
-    pub fn as_biblatex_string(&self) -> String {
-        let mut res = format!("@{}{{{},\n", self.entry_type, self.cite_key);
+    /// Renames a field if present.
+    fn rename(&mut self, old_key: &str, new_key: &str) {
+        if let Some(chunks) = self.delete(old_key) {
+            self.set(new_key, chunks);
+        }
+    }
+
+    /// Will output the entry as a BibLaTeX string.
+    pub fn as_biblatex_string(&mut self) -> String {
+        self.rename("journal", "journaltitle");
+        self.rename("address", "location");
+        self.rename("school", "institution");
+        let mut res = format!("@{}{{{},\n", self.entry_type.to_biblatex(), self.cite_key);
         for (key, value) in self.fields.iter() {
-            res.push_str(&format!("{} = {}\n", key, chunks_to_string(value)))
+            res.push_str(&format!("{} = {},\n", key, chunks_to_string(value)))
+        }
+
+        res.push('}');
+
+        res
+    }
+
+    /// Will output the entry as a BibTeX string.
+    pub fn as_bibtex_string(&mut self) -> String {
+        let bibtex_type = self.entry_type.to_bibtex();
+        self.rename("journaltitle", "journal");
+        self.rename("location", "address");
+        if bibtex_type == EntryType::PhdThesis || bibtex_type == EntryType::MastersThesis
+        {
+            self.rename("institution", "school");
+        }
+        if let Ok(date) = self.get_date() {
+            for (key, value) in date.to_fieldset() {
+                self.set(&key, vec![Chunk::Normal(value)]);
+            }
+        }
+
+        let mut res = format!("@{}{{{},\n", bibtex_type, self.cite_key);
+        for (key, value) in self.fields.iter() {
+            if key == "date" {
+                continue;
+            }
+
+            res.push_str(&format!("{} = {},\n", key, chunks_to_string(value)))
         }
 
         res.push('}');
@@ -751,6 +796,22 @@ mod tests {
     }
 
     #[test]
+    fn test_bibtex_conversion() {
+        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let mut bibliography = Bibliography::from_str(&contents, true);
+
+        let biblatex = bibliography.get_mut("haug2019").unwrap().as_biblatex_string();
+        assert!(biblatex.contains("institution = {Technische Universität Berlin},"));
+
+        let bibtex = bibliography.get_mut("haug2019").unwrap().as_bibtex_string();
+        assert!(bibtex.contains("school = {Technische Universität Berlin},"));
+        assert!(bibtex.contains("year = {2019},"));
+        assert!(bibtex.contains("month = {10},"));
+        assert!(!bibtex.contains("institution"));
+        assert!(!bibtex.contains("date"));
+    }
+
+    #[test]
     fn test_crossref() {
         let contents = fs::read_to_string("test/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
@@ -776,7 +837,9 @@ mod tests {
             "Recursive shennenigans and other important stuff"
         );
 
-        assert_eq!(bibliography.get("arrgh").unwrap().get_parents(), vec!["polecon".to_string()]);
+        assert_eq!(bibliography.get("arrgh").unwrap().get_parents(), vec![
+            "polecon".to_string()
+        ]);
         let arrgh = bibliography.get_resolved("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
         assert_eq!(arrgh.get_volume().unwrap(), 115);
@@ -800,7 +863,7 @@ mod tests {
 
     fn dump_author_title(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let bibliography = Bibliography::from_str(&contents, true);
+        let mut bibliography = Bibliography::from_str(&contents, true);
 
         println!("{}", bibliography.as_biblatex_string());
         for x in bibliography {
