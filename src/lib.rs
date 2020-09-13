@@ -1,6 +1,6 @@
+pub mod bibmechanics;
 pub mod raw;
 pub mod types;
-pub mod bibmechanics;
 
 mod resolve;
 
@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use paste::paste;
 
+use crate::bibmechanics::EntryType;
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
 use crate::types::{
@@ -25,7 +26,7 @@ pub struct Entry {
     /// The citation key.
     pub cite_key: String,
     /// Denotes the type of bibliography item (e.g. `article`).
-    pub entry_type: String,
+    pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
     pub fields: HashMap<String, Vec<Chunk>>,
 }
@@ -62,7 +63,7 @@ impl Bibliography {
         for entry in raw.entries {
             res.add(Entry {
                 cite_key: entry.cite_key.to_string(),
-                entry_type: entry.entry_type.to_lowercase().to_string(),
+                entry_type: EntryType::robust_from_str(entry.entry_type),
                 fields: entry
                     .fields
                     .into_iter()
@@ -85,6 +86,19 @@ impl Bibliography {
         self.0.iter_mut().find(|entry| entry.cite_key == cite_key)
     }
 
+    /// Try to find an entry with the given cite key and return an Entry
+    /// with all `crossref` and `xdata` dependencies resolved.
+    pub fn get_resolved(&mut self, cite_key: &str) -> Option<Entry> {
+        self.0
+            .iter_mut()
+            .find(|entry| entry.cite_key == cite_key)
+            .cloned()
+            .map(|mut e| {
+                e.resolve_crossrefs(self);
+                e
+            })
+    }
+
     /// Add a new entry of that type to the bibliography if the cite key
     /// is not already in use.
     pub fn add(&mut self, entry: Entry) -> anyhow::Result<()> {
@@ -101,7 +115,7 @@ impl Bibliography {
     pub fn add_empty(
         &mut self,
         cite_key: &str,
-        entry_type: &str,
+        entry_type: EntryType,
     ) -> anyhow::Result<&mut Entry> {
         if self.get(cite_key).is_some() {
             Err(anyhow!("key already present"))
@@ -145,10 +159,10 @@ impl IntoIterator for Bibliography {
 
 impl Entry {
     /// Construct new, empty entry.
-    pub fn new(cite_key: &str, entry_type: &str) -> Self {
+    pub fn new(cite_key: &str, entry_type: EntryType) -> Self {
         Self {
             cite_key: cite_key.to_string(),
-            entry_type: entry_type.to_string(),
+            entry_type,
             fields: HashMap::new(),
         }
     }
@@ -192,6 +206,168 @@ impl Entry {
         res.push('}');
 
         res
+    }
+
+    /// Gets the parents of an entry in a semantic sense (`crossref` and `xref`).
+    pub fn get_parents(&self) -> Vec<String> {
+        let mut res = vec![];
+
+        if let Ok(crossref) = self.get_as::<String>("crossref") {
+            res.push(crossref);
+        }
+
+        if let Ok(mut xrefs) = self.get_as::<Vec<String>>("xref") {
+            res.append(&mut xrefs);
+        }
+
+        res
+    }
+
+    /// Resolve data dependencies using another entry.
+    fn resolve_single_crossref(&mut self, crossref: Entry) {
+        let typ = self.entry_type.clone();
+        let mut requirements = typ.get_requirements();
+        let mut active_fields = requirements.required.clone();
+        active_fields.append(&mut requirements.optional);
+        active_fields.append(&mut requirements.page_chapter_field.get_all_possible());
+        active_fields.append(&mut requirements.author_eds_field.get_all_possible());
+
+        if self.entry_type == EntryType::XData {
+            for f in crossref.fields.keys() {
+                active_fields.push(f);
+            }
+        }
+
+        for f in active_fields {
+            if self.get(f).is_some() {
+                continue;
+            }
+
+            match f {
+                "journaltitle" | "journalsubtitle"
+                    if crossref.entry_type == EntryType::Periodical =>
+                {
+                    let key = if f.contains('s') { "subtitle" } else { "title" };
+
+                    if let Some(item) = crossref.get(key) {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "booktitle" | "booksubtitle" | "booktitleaddon"
+                    if crossref.entry_type.is_collection() =>
+                {
+                    let key = if f.contains('s') {
+                        "subtitle"
+                    } else if f.contains('a') {
+                        "titleaddon"
+                    } else {
+                        "title"
+                    };
+
+                    if let Some(item) = crossref.get(key) {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "maintitle" | "mainsubtitle" | "maintitleaddon"
+                    if crossref.entry_type.is_multi_volume() =>
+                {
+                    let key = if f.contains('s') {
+                        "subtitle"
+                    } else if f.contains('a') {
+                        "titleaddon"
+                    } else {
+                        "title"
+                    };
+
+                    if let Some(item) = crossref.get(key) {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "address" => {
+                    if let Some(item) =
+                        crossref.get(f).or_else(|| crossref.get("location"))
+                    {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "institution" => {
+                    if let Some(item) = crossref.get(f).or_else(|| crossref.get("school"))
+                    {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "school" => {
+                    if let Some(item) =
+                        crossref.get(f).or_else(|| crossref.get("institution"))
+                    {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "journaltitle" => {
+                    if let Some(item) =
+                        crossref.get(f).or_else(|| crossref.get("journal"))
+                    {
+                        self.set(f, item.to_vec())
+                    }
+                }
+                "title" | "addendum" | "note" => {}
+                _ => {
+                    if let Some(item) = crossref.get(f) {
+                        self.set(f, item.to_vec())
+                    }
+                }
+            }
+        }
+
+        if self.entry_type == EntryType::XData {
+            return;
+        }
+
+        if requirements.needs_date {
+            if let Ok(date) = crossref.get_date() {
+                self.set_date(date).expect("date set failure");
+            }
+        }
+    }
+
+    /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
+    fn resolve_crossrefs(&mut self, bib: &mut Bibliography) {
+        let crossref = self.get_as::<String>("crossref").and_then(|s| {
+            bib.get_mut(&s)
+                .map(|e| e.clone())
+                .ok_or_else(|| anyhow!("crossref'd item not found"))
+        });
+        let references = self.get_as::<Vec<String>>("xdata").map(|keys| {
+            keys.iter()
+                .map(|s| {
+                    bib.get_mut(&s)
+                        .map(|e| e.clone())
+                        .ok_or_else(|| anyhow!("crossref'd item not found"))
+                })
+                .collect::<Vec<anyhow::Result<Entry>>>()
+        });
+
+        let mut refs = vec![];
+
+        if let Ok(crossref) = crossref {
+            refs.push(crossref);
+        }
+
+        if let Ok(references) = references {
+            for r in references {
+                if let Ok(r) = r {
+                    refs.push(r);
+                }
+            }
+        }
+
+        for mut crossref in refs {
+            crossref.resolve_crossrefs(bib);
+            self.resolve_single_crossref(crossref);
+        }
+
+        self.delete("crossref");
+        self.delete("xdata");
     }
 }
 
@@ -508,6 +684,48 @@ mod tests {
     #[test]
     fn test_rass_report() {
         dump_author_title("test/rass.bib");
+    }
+
+    #[test]
+    fn test_crossref() {
+        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let mut bibliography = Bibliography::from_str(&contents, true);
+
+        let e = bibliography.get_resolved("macmillan").unwrap();
+        assert_eq!(e.get_publisher().unwrap()[0].format_verbatim(), "Macmillan");
+        assert_eq!(
+            e.get_location().unwrap().format_verbatim(),
+            "New York and London"
+        );
+
+        let book = bibliography.get_resolved("recursive").unwrap();
+        assert_eq!(
+            book.get_publisher().unwrap()[0].format_verbatim(),
+            "Macmillan"
+        );
+        assert_eq!(
+            book.get_location().unwrap().format_verbatim(),
+            "New York and London"
+        );
+        assert_eq!(
+            book.get_title().unwrap().format_verbatim(),
+            "Recursive shennenigans and other important stuff"
+        );
+
+        assert_eq!(bibliography.get("arrgh").unwrap().get_parents(), vec!["polecon".to_string()]);
+        let arrgh = bibliography.get_resolved("arrgh").unwrap();
+        assert_eq!(arrgh.entry_type, EntryType::Article);
+        assert_eq!(arrgh.get_volume().unwrap(), 115);
+        assert_eq!(arrgh.get_editors().unwrap()[0].0[0].name, "Uhlig");
+        assert_eq!(arrgh.get_number().unwrap().format_verbatim(), "6");
+        assert_eq!(
+            arrgh.get_journal().unwrap().format_verbatim(),
+            "Journal of Political Economy"
+        );
+        assert_eq!(
+            arrgh.get_title().unwrap().format_verbatim(),
+            "An‐arrgh‐chy: The Law and Economics of Pirate Organization"
+        );
     }
 
     fn dump_debug(file: &str) {

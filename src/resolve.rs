@@ -241,7 +241,6 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
     use std::vec::IntoIter;
 
     let mut res: Vec<RawChunk> = vec![];
-    println!("{:?}", values);
 
     let mut iter = values.into_iter().peekable();
 

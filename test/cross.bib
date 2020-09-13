@@ -1,0 +1,32 @@
+@XData{macmillan:name,
+	publisher = {Macmillan},
+}
+
+@XData{macmillan:place,
+	location = {New York and London},
+}
+
+@XData{macmillan,
+	xdata = {macmillan:name,macmillan:place}
+}
+
+@Book{recursive,
+	author= {Wemheuer, Moritz},
+	title= {Recursive shennenigans and other important stuff},
+	date= {2016-04-03},
+	xdata= {macmillan},
+}
+
+@periodical{polecon,
+	title={Journal of Political Economy},
+	date={2007-12},
+	volume={115},
+	number={6},
+	editor={Uhlig, Harald and Heckman, James J. and Kamencia, Emir},
+}
+
+@article{arrgh,
+	title={An‐arrgh‐chy: The Law and Economics of Pirate Organization},
+	author={Leeson, Peter T.},
+	crossref={polecon}
+}

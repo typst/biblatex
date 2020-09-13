@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use strum_macros::EnumString;
+use strum_macros::{Display, EnumString};
 
-#[derive(Clone, Debug, EnumString)]
+#[derive(Clone, Display, Debug, EnumString, Eq, PartialEq)]
 #[strum(serialize_all = "lowercase")]
 pub enum EntryType {
     // BibTeX
@@ -50,6 +50,8 @@ pub enum EntryType {
 pub enum AuthorMode {
     /// The `author` field must be present.
     AuthorRequired,
+    /// The `author` field must be present, the `editor` field is optional.
+    AuthorRequiredEditorOptional,
     /// The `author` field might be present,
     /// there is no specification for the `editor` field.
     AuthorOptional,
@@ -69,6 +71,20 @@ pub enum AuthorMode {
 impl Default for AuthorMode {
     fn default() -> Self {
         Self::AuthorRequired
+    }
+}
+
+impl AuthorMode {
+    pub fn get_all_possible(&self) -> Vec<&str> {
+        match self {
+            Self::AuthorRequired | Self::AuthorOptional => vec!["author"],
+            Self::AuthorEditorRequired
+            | Self::BothRequired
+            | Self::AuthorRequiredEditorOptional => vec!["author", "editor"],
+            Self::EditorRequired | Self::EditorRequiredAuthorForbidden => vec!["editor"],
+
+            _ => vec![],
+        }
     }
 }
 
@@ -96,23 +112,34 @@ impl Default for PagesChapterMode {
     }
 }
 
+impl PagesChapterMode {
+    pub fn get_all_possible(&self) -> Vec<&str> {
+        match self {
+            Self::PagesRequired | Self::PagesOptional => vec!["pages"],
+            Self::PagesChapterRequired | Self::BothOptional => vec!["pages", "chapter"],
+
+            _ => vec![],
+        }
+    }
+}
+
 /// Specifies what kinds of fields an entry might have to hold.
 #[derive(Clone, Debug, Default)]
 pub struct FieldRequirements<'s> {
     /// Fields that have to be present for the entry to be valid.
-    required: Vec<&'s str>,
+    pub required: Vec<&'s str>,
     /// Fields that might be present and are often used by bibliography styles.
     ///
     /// These fields, together with the required fields, will be taken into
     /// consideration for `crossref` and `xdata` transfers.
-    optional: Vec<&'s str>,
+    pub optional: Vec<&'s str>,
     // forbidden: Vec<&'s str>,
     /// Specifies the relation of author and editor field compulsiveness.
-    author_eds_field: AuthorMode,
+    pub author_eds_field: AuthorMode,
     /// Specifies the relation of page and chapter field compulsiveness.
-    page_chapter_field: PagesChapterMode,
+    pub page_chapter_field: PagesChapterMode,
     /// Shows whether a `date` or `year` field has to be present.
-    needs_date: bool,
+    pub needs_date: bool,
 }
 
 impl EntryType {
@@ -237,6 +264,7 @@ impl EntryType {
                 reqs.optional.push("issn");
 
                 reqs.page_chapter_field = PagesChapterMode::PagesOptional;
+                reqs.author_eds_field = AuthorMode::AuthorRequiredEditorOptional;
             }
             Self::Book => {
                 reqs.required.push("publisher");
@@ -372,6 +400,7 @@ impl EntryType {
                 reqs.required.push("school");
 
                 reqs.optional.push("type");
+                reqs.author_eds_field = AuthorMode::AuthorRequired;
             }
             Self::Misc => {
                 reqs.optional.remove(1);
@@ -434,6 +463,7 @@ impl EntryType {
                 reqs.optional.push("pagetotal");
 
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
+                reqs.author_eds_field = AuthorMode::AuthorRequiredEditorOptional;
             }
             Self::Periodical => {
                 reqs.optional.push("issue");
