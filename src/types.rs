@@ -848,11 +848,17 @@ impl Type for Vec<Vec<Chunk>> {
 
 impl Type for Vec<Person> {
     fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(chunks
+        let persons: Vec<Person> = chunks
             .parse::<Vec<Vec<Chunk>>>()?
             .into_iter()
             .map(|subchunks| Person::new(&subchunks))
-            .collect())
+            .collect();
+
+        if persons.is_empty() {
+            Err(anyhow!("no persons found in field"))
+        } else {
+            Ok(persons)
+        }
     }
 
     fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {

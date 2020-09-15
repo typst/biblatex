@@ -16,7 +16,7 @@ for downstream consumption.
 Install the crate by copying the following line into your `Cargo.toml`'s
 dependencies section:
 ```toml
-biblatex = "0.2.0"
+biblatex = "0.3.0"
 ```
 
 ## Usage

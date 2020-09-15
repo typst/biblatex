@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use paste::paste;
 
-use crate::bibmechanics::EntryType;
+use crate::bibmechanics::{AuthorMode, EntryType, PagesChapterMode};
 use crate::raw::RawBibliography;
 use crate::resolve::resolve;
 use crate::types::{
@@ -233,6 +233,11 @@ impl Entry {
         self.get(key)
             .ok_or_else(|| anyhow!("The {} field is not present", key))
             .and_then(|chunks| chunks.parse::<T>())
+    }
+
+    /// Get an entry but return None for empty chunk slices.
+    fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
+        self.get(key).and_then(|f| if f.is_empty() { None } else { Some(f) })
     }
 
     /// Sets a field value as a chunk vector.
@@ -463,6 +468,150 @@ impl Entry {
         self.delete("xdata");
 
         Ok(())
+    }
+
+    /// Verify if the entry has all fields required for its `EntryType`.
+    ///
+    /// This function will return `Ok(())` upon successful validation.
+    /// The Err variant of the Result will contain a pair carrying two vectors
+    /// of keys: The first indicating fields that should have been present
+    /// but were not, the second indicating fields that were set but are forbidden
+    /// by the `EntryType`.
+    ///
+    /// **NOTE:** This function will not resolve the Entry.
+    /// If you want to support / expect files using `crossref` and `xdata`,
+    /// you will want to call this method only on entries obtained through the
+    /// `Bibliography::get_resolved` call.
+    pub fn verify(&self) -> Result<(), (Vec<&str>, Vec<&str>)> {
+        let reqs = self.entry_type.get_requirements();
+        let mut expected = vec![];
+        let mut outlawed = vec![];
+
+        for field in reqs.required {
+            match field {
+                "journaltitle" => {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("journal"))
+                        .is_none()
+                    {
+                        expected.push(field);
+                    }
+                }
+                "location" => {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("address"))
+                        .is_none()
+                    {
+                        expected.push(field);
+                    }
+                }
+                "school"
+                    if self.entry_type == EntryType::Thesis
+                        || self.entry_type == EntryType::MastersThesis
+                        || self.entry_type == EntryType::PhdThesis =>
+                {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("institution"))
+                        .is_none()
+                    {
+                        expected.push(field);
+                    }
+                }
+                _ => {
+                    if self.get_non_empty(field).is_none() {
+                        expected.push(field);
+                    }
+                }
+            }
+        }
+
+        for field in reqs.forbidden {
+            if self.get_non_empty(field).is_some() {
+                outlawed.push(field);
+            }
+        }
+
+        if reqs.needs_date {
+            if self.get_date().is_err() {
+                expected.push("year");
+            }
+        }
+
+        match reqs.page_chapter_field {
+            PagesChapterMode::PagesRequired => {
+                if self.get_pages().is_err() {
+                    expected.push("pages");
+                }
+            }
+            PagesChapterMode::PagesChapterRequired => {
+                if self
+                    .get_pages()
+                    .map(|_| true)
+                    .or_else(|_| self.get_chapter().map(|_| true))
+                    .is_err()
+                {
+                    expected.push("pages");
+                }
+            }
+            PagesChapterMode::BothForbidden => {
+                if self.get_pages().is_ok() {
+                    outlawed.push("pages");
+                }
+                if self.get_chapter().is_ok() {
+                    outlawed.push("chapter");
+                }
+            }
+            _ => {}
+        }
+
+        match reqs.author_eds_field {
+            AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
+                if self.get_author().is_err() {
+                    expected.push("author");
+                }
+            }
+            AuthorMode::AuthorEditorRequired => {
+                if self
+                    .get_author()
+                    .map(|_| true)
+                    .or_else(|_| self.get_editors().map(|_| true))
+                    .is_err()
+                {
+                    expected.push("author");
+                }
+            }
+            AuthorMode::EditorRequired => {
+                if self.get_editors().is_err() {
+                    expected.push("editor");
+                }
+            }
+            AuthorMode::EditorRequiredAuthorForbidden => {
+                if self.get_editors().is_err() {
+                    expected.push("editor");
+                }
+                if self.get_author().is_ok() {
+                    outlawed.push("author");
+                }
+            }
+            AuthorMode::BothRequired => {
+                if self.get_editors().is_err() {
+                    expected.push("editor");
+                }
+                if self.get_author().is_err() {
+                    expected.push("author");
+                }
+            }
+            _ => {}
+        }
+
+        if expected.is_empty() && outlawed.is_empty() {
+            Ok(())
+        } else {
+            Err((expected, outlawed))
+        }
     }
 }
 
@@ -712,6 +861,9 @@ pub trait ChunksExt {
 
     /// Format the chunks verbatim.
     fn format_verbatim(&self) -> String;
+
+    /// True when the chunk slice contains no non-empty chunk.
+    fn is_empty(&self) -> bool;
 }
 
 impl ChunksExt for [Chunk] {
@@ -752,6 +904,13 @@ impl ChunksExt for [Chunk] {
         }
 
         out
+    }
+
+    fn is_empty(&self) -> bool {
+        self.iter().any(|c| match c {
+            Chunk::Normal(s) => !s.is_empty(),
+            Chunk::Verbatim(s) => !s.is_empty(),
+        })
     }
 }
 
@@ -809,6 +968,29 @@ mod tests {
         assert!(bibtex.contains("month = {10},"));
         assert!(!bibtex.contains("institution"));
         assert!(!bibtex.contains("date"));
+    }
+
+    #[test]
+    fn test_verify() {
+        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let mut bibliography = Bibliography::from_str(&contents, true);
+
+        assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
+        assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
+
+        let ill = bibliography.get("ill-defined").unwrap();
+        if let Err((exp, forb)) = ill.verify() {
+            assert!(exp.contains(&"title"));
+            assert!(exp.contains(&"year"));
+            assert!(exp.contains(&"editor"));
+            assert!(forb.contains(&"maintitle"));
+            assert!(forb.contains(&"author"));
+            assert!(forb.contains(&"chapter"));
+            assert_eq!(exp.len(), 3);
+            assert_eq!(forb.len(), 3);
+        } else {
+            panic!("Should not have passed test");
+        }
     }
 
     #[test]

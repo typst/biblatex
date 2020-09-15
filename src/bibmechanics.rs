@@ -141,7 +141,7 @@ pub struct FieldRequirements<'s> {
     /// consideration for `crossref` and `xdata` transfers.
     pub optional: Vec<&'s str>,
     /// These fields must not appear for the entry to be valid.
-    forbidden: Vec<&'s str>,
+    pub forbidden: Vec<&'s str>,
     /// Specifies the relation of author and editor field compulsiveness.
     pub author_eds_field: AuthorMode,
     /// Specifies the relation of page and chapter field compulsiveness.
