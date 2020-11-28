@@ -922,27 +922,27 @@ mod tests {
 
     #[test]
     fn test_gral_paper() {
-        dump_debug("test/gral.bib");
+        dump_debug("tests/gral.bib");
     }
 
     #[test]
     fn test_ds_report() {
-        dump_debug("test/ds.bib");
+        dump_debug("tests/ds.bib");
     }
 
     #[test]
     fn test_libra_paper() {
-        dump_author_title("test/libra.bib");
+        dump_author_title("tests/libra.bib");
     }
 
     #[test]
     fn test_rass_report() {
-        dump_author_title("test/rass.bib");
+        dump_author_title("tests/rass.bib");
     }
 
     #[test]
     fn test_alias() {
-        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
 
         assert_eq!(bibliography.get("issue201"), bibliography.get("github"));
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn test_bibtex_conversion() {
-        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
 
         let biblatex = bibliography.get_mut("haug2019").unwrap().as_biblatex_string();
@@ -972,7 +972,7 @@ mod tests {
 
     #[test]
     fn test_verify() {
-        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
 
         assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
@@ -995,7 +995,7 @@ mod tests {
 
     #[test]
     fn test_crossref() {
-        let contents = fs::read_to_string("test/cross.bib").unwrap();
+        let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::from_str(&contents, true);
 
         let e = bibliography.get_resolved("macmillan").unwrap();
