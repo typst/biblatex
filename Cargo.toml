@@ -12,7 +12,6 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.32"
-chinese-number = "0.6.0"
 chrono = { version = "0.4.15", default-features = false }
 lazy_static = "1.4.0"
 numerals = "0.1.4"
