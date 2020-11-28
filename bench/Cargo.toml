@@ -1,0 +1,15 @@
+[package]
+name = "biblatex-bench"
+version = "0.0.1"
+authors = ["Martin Haug <mhaug@live.de>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+biblatex = { path = ".." }
+criterion = "0.3"
+
+[[bench]]
+name = "biblatex"
+path = "src/bench.rs"
+harness = false

@@ -10,6 +10,9 @@ categories = ["database", "parser-implementations", "text-processing"]
 keywords = ["bibtex", "biblatex", "biber", "bibliography", "latex"]
 edition = "2018"
 
+[workspace]
+members = ["bench"]
+
 [dependencies]
 anyhow = "1.0.32"
 chrono = { version = "0.4.15", default-features = false }
@@ -21,11 +24,3 @@ strum_macros = "0.19.2"
 paste = "1.0.0"
 unicode-normalization = "0.1.13"
 unicode-xid = "0.2"
-
-[dev-dependencies]
-criterion = "0.3"
-
-[[bench]]
-name = "benchmarks"
-path = "benches/benchmarks.rs"
-harness = false
