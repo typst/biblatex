@@ -6,7 +6,6 @@ use std::ops::Range;
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use chinese_number::{ChineseNumberCountMethod, ChineseNumberToNumber};
 use chrono::{Datelike, NaiveDate, NaiveTime};
 use lazy_static::lazy_static;
 use numerals::roman::Roman;
@@ -1101,8 +1100,6 @@ fn parse_integers(source: &[Chunk]) -> anyhow::Result<i64> {
         Ok(n)
     } else if let Some(roman) = Roman::parse(s) {
         Ok(roman.value() as i64)
-    } else if let Ok(n) = s.parse_chinese_number(ChineseNumberCountMethod::TenThousand) {
-        Ok(n)
     } else {
         Err(anyhow!("Could not parse integer"))
     }
