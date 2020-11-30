@@ -5,14 +5,13 @@ use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
 
-use anyhow::anyhow;
 use chrono::{Datelike, NaiveDate, NaiveTime};
 use lazy_static::lazy_static;
 use numerals::roman::Roman;
 use regex::Regex;
-use strum_macros::{AsRefStr, Display, EnumString};
+use strum::{AsRefStr, Display, EnumString};
 
-use super::{Chunk, ChunksExt};
+use super::{Chunk, Chunks, ChunksExt};
 use crate::resolve::is_escapable;
 
 #[rustfmt::skip]
@@ -328,11 +327,11 @@ pub struct DateAtom {
 }
 
 impl Date {
-    /// Create a new date from a chunk vector.
-    pub fn new(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    /// Parse a date from a chunk vector.
+    pub fn new(chunks: &[Chunk]) -> Option<Self> {
         let mut date_str = chunks.format_verbatim().trim_end().to_string();
 
-        let last_char = date_str.chars().last().ok_or(anyhow!("Date string is empty"))?;
+        let last_char = date_str.chars().last()?;
         let (is_uncertain, is_approximate) = match last_char {
             '?' => (true, false),
             '~' => (false, true),
@@ -374,22 +373,19 @@ impl Date {
             }
         };
 
-        Ok(Self { is_approximate, is_uncertain, value })
+        Some(Self { is_approximate, is_uncertain, value })
     }
 
     /// Create a new date from the `year`, `month`, and `day` fields.
     pub fn new_from_three_fields(
-        year: Option<&[Chunk]>,
+        year: &[Chunk],
         month: Option<&[Chunk]>,
         day: Option<&[Chunk]>,
-    ) -> Result<Self, anyhow::Error> {
-        let mut year = year
-            .ok_or_else(|| anyhow!("Year field must be set"))?
-            .format_verbatim();
-
+    ) -> Option<Self> {
+        let mut year = year.format_verbatim();
         year.retain(|c| !c.is_whitespace());
 
-        let capt = YEAR_REGEX.captures(&year).ok_or(anyhow!("Invalid year data"))?;
+        let capt = YEAR_REGEX.captures(&year)?;
         let year: i32 = capt.name("y").unwrap().as_str().parse().unwrap();
         let mut date_atom = DateAtom { year, month: None, day: None, time: None };
 
@@ -398,10 +394,9 @@ impl Date {
             if let Some(day) = day {
                 let mut day = day.format_verbatim();
                 day.retain(|c| !c.is_whitespace());
-                let day: u8 = day.parse()?;
-
+                let day: u8 = day.parse().ok()?;
                 if day > 31 || day < 1 {
-                    return Err(anyhow!("Day not within range"));
+                    return None;
                 }
                 date_atom.day = Some(day - 1);
 
@@ -419,7 +414,7 @@ impl Date {
                     let day: u8 = capt.name("d").unwrap().as_str().parse().unwrap();
 
                     if day > 31 || day < 1 {
-                        return Err(anyhow!("Day not within range"));
+                        return None;
                     }
                     date_atom.day = Some(day - 1);
                 }
@@ -430,7 +425,7 @@ impl Date {
             }
         }
 
-        Ok(Date::new_from_date_atom(date_atom))
+        Some(Date::new_from_date_atom(date_atom))
     }
 
     fn new_from_date_atom(atom: DateAtom) -> Self {
@@ -446,12 +441,12 @@ impl Date {
         if s.is_empty() || s == ".." { true } else { false }
     }
 
-    fn range_dates(mut source: String) -> anyhow::Result<(DateAtom, DateAtom)> {
+    fn range_dates(mut source: String) -> Option<(DateAtom, DateAtom)> {
         source.retain(|c| !c.is_whitespace());
 
-        if let Some(captures) = CENTURY_REGEX.captures(&source) {
+        Some(if let Some(captures) = CENTURY_REGEX.captures(&source) {
             let century: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
-            Ok((
+            (
                 DateAtom {
                     year: century * 100,
                     month: None,
@@ -464,10 +459,10 @@ impl Date {
                     day: None,
                     time: None,
                 },
-            ))
+            )
         } else if let Some(captures) = DECADE_REGEX.captures(&source) {
             let decade: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
-            Ok((
+            (
                 DateAtom {
                     year: decade * 10,
                     month: None,
@@ -480,11 +475,11 @@ impl Date {
                     day: None,
                     time: None,
                 },
-            ))
+            )
         } else if let Some(captures) = MONTH_UNSURE_REGEX.captures(&source) {
             let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
 
-            Ok((
+            (
                 DateAtom {
                     year,
                     month: Some(0),
@@ -497,11 +492,11 @@ impl Date {
                     day: None,
                     time: None,
                 },
-            ))
+            )
         } else if let Some(captures) = DAY_MONTH_UNSURE_REGEX.captures(&source) {
             let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
 
-            Ok((
+            (
                 DateAtom {
                     year,
                     month: Some(0),
@@ -514,7 +509,7 @@ impl Date {
                     day: Some(30),
                     time: None,
                 },
-            ))
+            )
         } else if let Some(captures) = DAY_UNSURE_REGEX.captures(&source) {
             let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
             let month = (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap();
@@ -527,7 +522,7 @@ impl Date {
             .signed_duration_since(NaiveDate::from_ymd(year, month as u32, 1))
             .num_days();
 
-            Ok((
+            (
                 DateAtom {
                     year,
                     month: Some(month - 1),
@@ -540,10 +535,10 @@ impl Date {
                     day: Some(days as u8 - 1),
                     time: None,
                 },
-            ))
+            )
         } else {
-            Err(anyhow!("Date does not match any known format"))
-        }
+            return None;
+        })
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -697,7 +692,7 @@ fn get_month_for_name(month: &str) -> Option<u8> {
 
 impl DateAtom {
     /// Parse a date atom from a string.
-    pub fn new(mut source: String) -> anyhow::Result<Self> {
+    pub fn new(mut source: String) -> Option<Self> {
         source.retain(|f| !f.is_whitespace());
 
         let time = if let Some(pos) = source.find('T') {
@@ -714,32 +709,32 @@ impl DateAtom {
 
         let full_date = source.parse::<NaiveDate>();
 
-        if let Ok(ndate) = full_date {
-            Ok(DateAtom {
+        Some(if let Ok(ndate) = full_date {
+            DateAtom {
                 year: ndate.year(),
                 month: Some(ndate.month0() as u8),
                 day: Some(ndate.day0() as u8),
                 time,
-            })
+            }
         } else if let Some(captures) = MONTH_REGEX.captures(&source) {
-            Ok(DateAtom {
+            DateAtom {
                 year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
                 month: Some(
                     (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap() - 1,
                 ),
                 day: None,
                 time,
-            })
+            }
         } else if let Some(captures) = YEAR_REGEX.captures(&source) {
-            Ok(DateAtom {
+            DateAtom {
                 year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
                 month: None,
                 day: None,
                 time,
-            })
+            }
         } else {
-            Err(anyhow!("Date does not match any known format"))
-        }
+            return None;
+        })
     }
 }
 
@@ -802,7 +797,7 @@ impl fmt::Display for DateAtom {
 
 // *************************** Chunk Type Parsing Adaptors **************************** //
 
-fn chunk_list_seperated(chunks: &[Chunk], sep: &str) -> Vec<Chunk> {
+fn chunk_list_seperated(chunks: &[Chunk], sep: &str) -> Chunks {
     let mut res = vec![];
     let mut chunks = chunks.to_vec().into_iter();
     if let Some(chunk) = chunks.next() {
@@ -816,51 +811,49 @@ fn chunk_list_seperated(chunks: &[Chunk], sep: &str) -> Vec<Chunk> {
     res
 }
 
-/// Trait for deserializing Bib(La)TeX data types from chunk slices.
+/// Convert Bib(La)TeX data types from and to chunk slices.
 pub trait Type: Sized {
-    /// Allows to interpret data from a resolved chunk slices as a type.
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self>;
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>>;
+    /// Parse the type from chunks.
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self>;
+
+    /// Serialize the type into chunks.
+    fn to_chunks(&self) -> Chunks;
 }
 
-impl Type for Vec<Vec<Chunk>> {
+impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(split_token_lists(chunks, "and"))
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(split_token_lists(chunks, "and"))
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        let mut chunks = self.clone().into_iter();
-        let mut res = vec![];
-        if let Some(mut chunk) = chunks.next() {
-            res.append(&mut chunk);
+    fn to_chunks(&self) -> Chunks {
+        let mut merged = vec![];
 
-            for mut chunk in chunks {
-                res.push(Chunk::Normal(" and ".to_string()));
-                res.append(&mut chunk);
+        let mut chunks = self.iter();
+        if let Some(chunk) = chunks.next() {
+            merged.extend(chunk.iter().cloned());
+
+            for chunk in chunks {
+                merged.push(Chunk::Normal(" and ".to_string()));
+                merged.extend(chunk.iter().cloned());
             }
         }
 
-        Ok(res)
+        merged
     }
 }
 
 impl Type for Vec<Person> {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        let persons: Vec<Person> = chunks
-            .parse::<Vec<Vec<Chunk>>>()?
-            .into_iter()
-            .map(|subchunks| Person::new(&subchunks))
-            .collect();
-
-        if persons.is_empty() {
-            Err(anyhow!("no persons found in field"))
-        } else {
-            Ok(persons)
-        }
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(
+            split_token_lists(chunks, "and")
+                .into_iter()
+                .map(|subchunks| Person::new(&subchunks))
+                .collect(),
+        )
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+    fn to_chunks(&self) -> Chunks {
         let mut error = false;
         let chunks = self
             .iter()
@@ -891,33 +884,29 @@ impl Type for Vec<Person> {
 
                 res
             })
-            .collect::<Vec<Vec<Chunk>>>();
+            .collect::<Vec<Chunks>>();
 
-        if error {
-            Err(anyhow!("Name cannot be empty"))
-        } else {
-            let mut chunks = chunks.into_iter();
-            let mut res = vec![];
-            if let Some(mut chunk) = chunks.next() {
+        let mut chunks = chunks.into_iter();
+        let mut res = vec![];
+        if let Some(mut chunk) = chunks.next() {
+            res.append(&mut chunk);
+
+            for mut chunk in chunks {
+                res.push(Chunk::Normal(" and ".to_string()));
                 res.append(&mut chunk);
-
-                for mut chunk in chunks {
-                    res.push(Chunk::Normal(" and ".to_string()));
-                    res.append(&mut chunk);
-                }
             }
-
-            Ok(res)
         }
+
+        res
     }
 }
 
 impl Type for Date {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
         Date::new(chunks)
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+    fn to_chunks(&self) -> Chunks {
         let uncertainity_symbol = match (self.is_approximate, self.is_uncertain) {
             (true, true) => "%",
             (true, false) => "~",
@@ -925,135 +914,120 @@ impl Type for Date {
             (false, false) => "",
         };
 
-        match self.value {
-            DateValue::Atom(date) => Ok(vec![Chunk::Normal(format!(
-                "{}{}",
-                date, uncertainity_symbol
-            ))]),
-            DateValue::Range(start, end) => Ok(vec![Chunk::Normal(format!(
-                "{}/{}{}",
-                start, end, uncertainity_symbol
-            ))]),
-        }
+        vec![Chunk::Normal(match self.value {
+            DateValue::Atom(date) => format!("{}{}", date, uncertainity_symbol),
+            DateValue::Range(start, end) => {
+                format!("{}/{}{}", start, end, uncertainity_symbol)
+            }
+        })]
     }
 }
 
 impl Type for Vec<String> {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(split_token_lists(chunks, ",")
-            .into_iter()
-            .map(|chunks| chunks.format_verbatim())
-            .collect::<Vec<String>>())
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(
+            split_token_lists(chunks, ",")
+                .into_iter()
+                .map(|chunks| chunks.format_verbatim())
+                .collect::<Vec<String>>(),
+        )
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        let chunks =
-            self.iter().map(|s| Chunk::Normal(s.clone())).collect::<Vec<Chunk>>();
-
-        Ok(chunk_list_seperated(&chunks, ","))
+    fn to_chunks(&self) -> Chunks {
+        let chunks: Vec<_> = self.iter().map(|s| Chunk::Normal(s.clone())).collect();
+        chunk_list_seperated(&chunks, ",")
     }
 }
 
 impl Type for String {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(chunks.format_verbatim())
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(chunks.format_verbatim())
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Verbatim(self.clone())])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Verbatim(self.clone())]
     }
 }
 
 impl Type for i64 {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        parse_integers(chunks)
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        parse_int(chunks)
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Normal(self.to_string())])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(self.to_string())]
     }
 }
 
 impl Type for IntOrChunks {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        if let Ok(int) = parse_integers(chunks) {
-            Ok(IntOrChunks::Int(int))
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(if let Some(int) = parse_int(chunks) {
+            IntOrChunks::Int(int)
         } else {
-            Ok(IntOrChunks::Chunks(chunks.to_vec()))
-        }
+            IntOrChunks::Chunks(chunks.to_vec())
+        })
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        if let IntOrChunks::Int(int) = self {
-            Ok(vec![Chunk::Normal(int.to_string())])
-        } else if let IntOrChunks::Chunks(chunks) = self {
-            Ok(chunks.clone())
-        } else {
-            unreachable!()
+    fn to_chunks(&self) -> Chunks {
+        match self {
+            IntOrChunks::Int(int) => vec![Chunk::Normal(int.to_string())],
+            IntOrChunks::Chunks(chunks) => chunks.clone(),
         }
     }
 }
 
 impl Type for Range<u32> {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        if let Some(range) = parse_ranges(chunks).into_iter().next() {
-            Ok(range)
-        } else {
-            Err(anyhow!("No range specified"))
-        }
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        parse_ranges(chunks).into_iter().next()
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Normal(format!("{}-{}", self.start, self.end))])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(format!("{}-{}", self.start, self.end))]
     }
 }
 
 impl Type for Vec<Range<u32>> {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(parse_ranges(chunks))
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(parse_ranges(chunks))
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+    fn to_chunks(&self) -> Chunks {
         let chunks = self
             .iter()
             .map(|range| Chunk::Normal(format!("{}-{}", range.start, range.end)))
-            .collect::<Vec<Chunk>>();
+            .collect::<Chunks>();
 
-        Ok(chunk_list_seperated(&chunks, ","))
+        chunk_list_seperated(&chunks, ",")
     }
 }
 
 impl Type for Pagination {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(Pagination::from_str(
-            &chunks.format_verbatim().to_lowercase(),
-        )?)
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Pagination::from_str(&chunks.format_verbatim().to_lowercase()).ok()
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Normal(self.to_string())])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(self.to_string())]
     }
 }
 
 impl Type for EditorType {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Ok(EditorType::from_str(
-            &chunks.format_verbatim().to_lowercase(),
-        )?)
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        EditorType::from_str(&chunks.format_verbatim().to_lowercase()).ok()
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Normal(self.to_string())])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(self.to_string())]
     }
 }
 
 impl Type for Gender {
-    fn from_chunks(chunks: &[Chunk]) -> anyhow::Result<Self> {
-        Gender::from_str(&chunks.format_verbatim().to_lowercase())
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Gender::from_str(&chunks.format_verbatim().to_lowercase()).ok()
     }
 
-    fn to_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        Ok(vec![Chunk::Normal(self.to_string())])
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(self.to_string())]
     }
 }
 
@@ -1088,20 +1062,20 @@ fn parse_ranges(source: &[Chunk]) -> Vec<Range<u32>> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum IntOrChunks {
     Int(i64),
-    Chunks(Vec<Chunk>),
+    Chunks(Chunks),
 }
 
-/// Parse integers. This method will accept arabic, roman, and chinese numerals.
-fn parse_integers(source: &[Chunk]) -> anyhow::Result<i64> {
+/// Parse an integer in either arabic or roman format.
+fn parse_int(source: &[Chunk]) -> Option<i64> {
     let s = source.format_verbatim();
     let s = s.trim();
 
-    if let Ok(n) = str::parse::<i64>(s) {
-        Ok(n)
+    if let Ok(n) = s.parse::<i64>() {
+        Some(n)
     } else if let Some(roman) = Roman::parse(s) {
-        Ok(roman.value() as i64)
+        Some(roman.value() as i64)
     } else {
-        Err(anyhow!("Could not parse integer"))
+        None
     }
 }
 
@@ -1145,7 +1119,7 @@ pub enum Gender {
 }
 
 impl FromStr for Gender {
-    type Err = anyhow::Error;
+    type Err = &'static str;
 
     /// Two-letter gender serialization in accordance with the BibLaTeX standard.
     fn from_str(s: &str) -> Result<Gender, Self::Err> {
@@ -1156,7 +1130,7 @@ impl FromStr for Gender {
             "pf" => Ok(Gender::PluralFemale),
             "pm" => Ok(Gender::PluralMale),
             "pn" => Ok(Gender::PluralNeuter),
-            _ => Err(anyhow!("Unknown gender identifier")),
+            _ => Err("unknown gender identifier"),
         }
     }
 }
@@ -1220,7 +1194,7 @@ impl Gender {
 /// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
 ///
 /// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
-fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Vec<Chunk>> {
+fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Chunks> {
     let mut out = vec![];
     let mut latest = vec![];
 
@@ -1248,7 +1222,7 @@ fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Vec<Chunk>> {
 
 /// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
-fn split_at_normal_char(src: &[Chunk], c: char, omit: bool) -> (Vec<Chunk>, Vec<Chunk>) {
+fn split_at_normal_char(src: &[Chunk], c: char, omit: bool) -> (Chunks, Chunks) {
     let mut found = false;
     let mut len = src.len();
     let mut si = 0;
@@ -1280,7 +1254,7 @@ fn split_at_normal_char(src: &[Chunk], c: char, omit: bool) -> (Vec<Chunk>, Vec<
 
 /// Returns two chunk vectors with `src` split at chunk index `vi` and
 /// char index `si` within that chunk.
-fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Vec<Chunk>, Vec<Chunk>) {
+fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Chunks, Chunks) {
     let mut src = src.to_vec();
     if vi >= src.len() {
         return (vec![], src);
@@ -1396,34 +1370,25 @@ mod tests {
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
-            "jean de la fontaine, "
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![N("jean de la fontaine, ")]);
 
         let p = Person::new(&[N("de la fontaine, Jean")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
-            "de la fontaine, Jean"
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![N("de la fontaine, Jean")]);
 
         let p = Person::new(&[N("De La Fontaine, Jean")]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![N(
-            "De La Fontaine, Jean"
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![N("De La Fontaine, Jean")]);
 
         let p = Person::new(&[V("De La"), N(" Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De La");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks().unwrap(), vec![
-            V("De La"),
-            N(" Fontaine, Jean")
-        ]);
+        assert_eq!(vec![p].to_chunks(), vec![V("De La"), N(" Fontaine, Jean")]);
 
         let p = Person::new(&[N("De la Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
@@ -1558,7 +1523,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
-        assert_eq!(date.to_chunks().unwrap(), vec![N("2017-10-25?")]);
+        assert_eq!(date.to_chunks(), vec![N("2017-10-25?")]);
 
         let date = Date::new(&[N("19XX~")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1576,7 +1541,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
-        assert_eq!(date.to_chunks().unwrap(), vec![N("1900/1999~")]);
+        assert_eq!(date.to_chunks(), vec![N("1900/1999~")]);
 
         let date = Date::new(&[N("1948-03-02/1950")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1594,7 +1559,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
-        assert_eq!(date.to_chunks().unwrap(), vec![N("1948-03-02/1950")]);
+        assert_eq!(date.to_chunks(), vec![N("1948-03-02/1950")]);
 
         let date = Date::new(&[N("2020-04-04T18:30:31/")]).unwrap();
         assert_eq!(date.is_uncertain, false);
@@ -1607,7 +1572,7 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
-        assert_eq!(date.to_chunks().unwrap(), vec![N("2020-04-04/..")]);
+        assert_eq!(date.to_chunks(), vec![N("2020-04-04/..")]);
 
         let date = Date::new(&[N("/-0031-07%")]).unwrap();
         assert_eq!(date.is_uncertain, true);
@@ -1620,14 +1585,14 @@ mod tests {
         } else {
             panic!("wrong date kind");
         }
-        assert_eq!(date.to_chunks().unwrap(), vec![N("../-0031-07%")]);
+        assert_eq!(date.to_chunks(), vec![N("../-0031-07%")]);
     }
 
     #[test]
     fn test_new_date_from_three_fields() {
         let year = &[N("2020")];
         let month = &[N("January\u{A0}12th")];
-        let date = Date::new_from_three_fields(Some(year), Some(month), None).unwrap();
+        let date = Date::new_from_three_fields(year, Some(month), None).unwrap();
         if let DateValue::Atom(val) = date.value {
             assert_eq!(val.year, 2020);
             assert_eq!(val.month, Some(0));
@@ -1640,8 +1605,7 @@ mod tests {
         let year = &[N("-0004")];
         let month = &[N("aug")];
         let day = &[N("28")];
-        let date =
-            Date::new_from_three_fields(Some(year), Some(month), Some(day)).unwrap();
+        let date = Date::new_from_three_fields(year, Some(month), Some(day)).unwrap();
         if let DateValue::Atom(val) = date.value {
             assert_eq!(val.year, -4);
             assert_eq!(val.month, Some(7));

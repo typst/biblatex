@@ -11,32 +11,27 @@ As opposed to other available crates, this crate attempts to parse the data
 within the fields into easily usable structs and enums like `Person` and `Date`
 for downstream consumption.
 
-## Install
-
-Install the crate by copying the following line into your `Cargo.toml`'s
-dependencies section:
+## Usage
+Add this to your `Cargo.toml`:
 ```toml
+[dependencies]
 biblatex = "0.3.0"
 ```
-
-## Usage
 
 Parsing a bibliography and getting the author of an item is as simple as:
 
 ```rust
-let bibliography = Bibliography::from_str(bib_file_str, true);
-let author = bibliography.get("some_cite_key")
-                .unwrap()
-                .get_author(); // Returns an Result<Person, anyhow::Error>
+let bibliography = Bibliography::parse(bib_src, true);
+let entry = bibliography.get("cite_key")?;
+let author = entry.author()?;
+println!("{}", author[0].name);
 ```
 
-This library operates on the Bibliography struct, which is a vector of entries
-(the items in your `.bib` file that start with an `@` and are wrapped in curly
-braces).
-The entries may hold multiple fields.
-Each entry has getter methods corresponding to each of the possible fields in
-a Bib(La)TeX file which handle possible field aliases, composition and type
-conversion automatically.
+This library operates on a `Bibliography` struct, which is a collection of
+_entries_ (the items in your `.bib` file that start with an `@` and are wrapped
+in curly braces). The entries may hold multiple fields. Entries have getter
+methods for each of the possible fields in a Bib(La)TeX file which handle
+possible field aliases, composition and type conversion automatically.
 
 Refer to the [WikiBook section on LaTeX bibliography management](https://en.wikibooks.org/wiki/LaTeX/Bibliography_Management)
 and the [BibLaTeX package manual](http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf)
@@ -44,8 +39,8 @@ to learn more about the intended meaning of each of the fields.
 
 The generated documentation more specifically describes the selection and
 behavior of the getters but generally, they follow the convention of being the
-snake-case name of the corresponding field with 'get' prepended
-(such that the getter for `booktitleaddon` is named `get_book_title_addon`).
+snake-case name of the corresponding field
+(such that the getter for `booktitleaddon` is named `book_title_addon`).
 
 ## Limitations
 

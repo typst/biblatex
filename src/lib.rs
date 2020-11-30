@@ -1,41 +1,42 @@
-pub mod bibmechanics;
-pub mod raw;
-pub mod types;
-
+mod bibmechanics;
+mod raw;
 mod resolve;
+mod types;
+
+pub use bibmechanics::*;
+pub use raw::*;
+pub use types::*;
 
 use std::collections::HashMap;
+use std::io::{self, Write};
 
-use anyhow::anyhow;
 use paste::paste;
 
-use crate::bibmechanics::{AuthorMode, EntryType, PagesChapterMode};
-use crate::raw::RawBibliography;
-use crate::resolve::resolve;
-use crate::types::{
-    chunks_to_string, Date, EditorType, Gender, IntOrChunks, Pagination, Person, Type,
-};
-
 /// A fully parsed bibliography.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Bibliography {
-    items: Vec<Entry>,
-    dict: HashMap<String, usize>,
+    /// The bibliography entries.
+    entries: Vec<Entry>,
+    /// Maps from citation keys to indices in `items`.
+    keys: HashMap<String, usize>,
 }
 
-/// A bibliography entry that is parsed into chunks, which can be
-/// parsed into more specific types on demand on field accesses.
+/// A bibliography entry containing chunk fields, which can be parsed into more
+/// specific types on demand.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Entry {
     /// The citation key.
-    pub cite_key: String,
+    pub key: String,
     /// Denotes the type of bibliography item (e.g. `article`).
     pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
-    pub fields: HashMap<String, Vec<Chunk>>,
+    pub fields: HashMap<String, Chunks>,
 }
 
-/// A chunk represents one part of a field value.
+/// A sequence of chunks.
+pub type Chunks = Vec<Chunk>;
+
+/// Represents one part of a field value.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Chunk {
     /// Normal values within quotes or single braces subject to
@@ -49,125 +50,94 @@ pub enum Chunk {
 }
 
 impl Bibliography {
-    /// Get a new, empty Bibliography
+    /// Create a new, empty bibliography.
     pub fn new() -> Self {
-        Self { items: Vec::new(), dict: HashMap::new() }
+        Self {
+            entries: Vec::new(),
+            keys: HashMap::new(),
+        }
     }
 
     /// Parse a bibliography from a source string.
-    pub fn from_str(src: &str, allow_bibtex: bool) -> Self {
-        Self::from_raw(RawBibliography::from_str(src, allow_bibtex))
+    pub fn parse(src: &str) -> Self {
+        Self::from_raw(RawBibliography::parse(src))
     }
 
-    /// Parse a bibliography from a raw bibliography.
+    /// Construct a bibliography from a raw bibliography.
     pub fn from_raw(raw: RawBibliography) -> Self {
         let mut res = Self::new();
         let abbreviations = &raw.abbreviations;
 
         for entry in raw.entries {
-            res.add(Entry {
-                cite_key: entry.cite_key.to_string(),
+            res.insert(Entry {
+                key: entry.key.to_string(),
                 entry_type: EntryType::robust_from_str(entry.entry_type),
                 fields: entry
                     .fields
                     .into_iter()
-                    .map(|(key, value)| (key.to_string(), resolve(value, abbreviations)))
+                    .map(|(key, value)| {
+                        (key.to_string(), resolve::resolve(value, abbreviations))
+                    })
                     .collect(),
-            })
-            .ok();
+            });
         }
 
         res
     }
 
-    /// Try to find an entry with the given cite key.
-    pub fn get(&self, cite_key: &str) -> Option<&Entry> {
-        let index = self.dict.get(cite_key);
-        if let Some(&index) = index {
-            self.items.get(index)
-        } else {
-            None
-        }
+    /// The number of bibliography entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
-    /// Try to find an entry with the given cite key and return a mutable reference.
-    pub fn get_mut(&mut self, cite_key: &str) -> Option<&mut Entry> {
-        let index = self.dict.get(cite_key);
-        if let Some(&index) = index {
-            self.items.get_mut(index)
-        } else {
-            None
-        }
+    /// Returns the entry with the given cite key.
+    pub fn get(&self, key: &str) -> Option<&Entry> {
+        let index = *self.keys.get(key)?;
+        self.entries.get(index)
     }
 
-    /// Try to find an entry with the given cite key and return an Entry
-    /// with all `crossref` and `xdata` dependencies resolved.
-    pub fn get_resolved(&mut self, cite_key: &str) -> Option<Entry> {
-        self.get_mut(cite_key)
-            .cloned()
-            .and_then(|mut e| e.resolve_crossrefs(self).map(|_| e).ok())
+    /// Returns a mutable reference to the entry with the given cite key.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Entry> {
+        let index = *self.keys.get(key)?;
+        self.entries.get_mut(index)
     }
 
-    /// Add a new entry of that type to the bibliography if the cite key
-    /// is not already in use.
-    pub fn add(&mut self, entry: Entry) -> anyhow::Result<()> {
-        if self.get(&entry.cite_key).is_some() {
-            Err(anyhow!("key already present"))
+    /// Try to find an entry with the given cite key and return a copy of that
+    /// entry with all `crossref` and `xdata` dependencies resolved.
+    pub fn get_resolved(&self, key: &str) -> Option<Entry> {
+        let mut entry = self.get(key)?.clone();
+        entry.resolve_crossrefs(self);
+        Some(entry)
+    }
+
+    /// Insert an entry into the bibliography.
+    ///
+    /// If an entry with the same cite key is already present, the entry is
+    /// updated and the old entry is returned.
+    pub fn insert(&mut self, entry: Entry) -> Option<Entry> {
+        if let Some(prev) = self.get_mut(&entry.key) {
+            Some(std::mem::replace(prev, entry))
         } else {
-            self.dict.insert(entry.cite_key.clone(), self.items.len());
-            self.items.push(entry);
-            let ids = self.items.last().unwrap().get_as::<Vec<String>>("ids");
-            let key = self.items.last().unwrap().cite_key.clone();
-            if let Ok(ids) = ids {
-                for i in ids {
-                    self.add_alias(&key, &i)?;
+            let index = self.entries.len();
+            self.keys.insert(entry.key.clone(), index);
+            if let Some(ids) = entry.get_as::<Vec<String>>("ids") {
+                for alias in ids {
+                    self.keys.insert(alias, index);
                 }
             }
-            Ok(())
+            self.entries.push(entry);
+            None
         }
     }
 
-    /// Add a new entry of that type to the bibliography if the cite key
-    /// is not already in use.
-    pub fn add_empty(
-        &mut self,
-        cite_key: &str,
-        entry_type: EntryType,
-    ) -> anyhow::Result<&mut Entry> {
-        if self.get(cite_key).is_some() {
-            Err(anyhow!("key already present"))
-        } else {
-            self.dict.insert(cite_key.to_string(), self.items.len());
-            self.items.push(Entry::new(cite_key, entry_type));
-            self.get_mut(cite_key)
-                .ok_or_else(|| anyhow!("could not fetch inserted entry"))
-        }
-    }
+    /// Remove the entry with the given cite key.
+    pub fn remove(&mut self, key: &str) -> Option<Entry> {
+        let index = *self.keys.get(key)?;
+        let entry = self.entries.remove(index);
 
-    /// Will add an alias for a cite key if that alias is not yet in use
-    pub fn add_alias(&mut self, cite_key: &str, alias: &str) -> anyhow::Result<()> {
-        let &index = self
-            .dict
-            .get(cite_key)
-            .ok_or_else(|| anyhow!("item for alias not found"))?;
-        if self.dict.contains_key(alias) {
-            Err(anyhow!("alias name already in use"))
-        } else {
-            self.dict.insert(alias.to_string(), index);
-            Ok(())
-        }
-    }
-
-    pub fn remove_item(&mut self, cite_key: &str) -> anyhow::Result<Entry> {
-        let &index = self
-            .dict
-            .get(cite_key)
-            .ok_or_else(|| anyhow!("item for alias not found"))?;
-        let entry = self.items.remove(index);
-
-        self.dict.retain(|_, &mut v| v != index);
-        self.dict = self
-            .dict
+        self.keys.retain(|_, &mut v| v != index);
+        self.keys = self
+            .keys
             .clone()
             .into_iter()
             .map(|(k, mut v)| {
@@ -179,28 +149,39 @@ impl Bibliography {
             })
             .collect();
 
-        Ok(entry)
+        Some(entry)
     }
 
-    /// Get the amount of bibliography items.
-    pub fn len(&self) -> usize {
-        self.items.len()
+    /// Add an alias for a cite key.
+    ///
+    /// Does nothing if no entry with the given cite key exists.
+    pub fn alias(&mut self, key: &str, alias: impl Into<String>) {
+        if let Some(&index) = self.keys.get(key) {
+            self.keys.insert(alias.into(), index);
+        }
     }
 
     /// An iterator over the bibliography's entries.
-    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, Entry> {
-        self.items.iter()
+    pub fn iter(&self) -> std::slice::Iter<Entry> {
+        self.entries.iter()
     }
 
-    /// Will output the entry as a BibLaTeX string
-    pub fn as_biblatex_string(&mut self) -> String {
-        let mut res = String::new();
-        for e in self.items.iter_mut() {
-            res += &e.as_biblatex_string();
-            res.push('\n')
+    /// Serialize this bibliography into a BibLaTeX string.
+    pub fn to_biblatex(&mut self) -> String {
+        let mut biblatex = String::new();
+        for entry in self.entries.iter_mut() {
+            biblatex.push_str(&entry.to_biblatex());
+            biblatex.push('\n');
         }
+        biblatex
+    }
 
-        res
+    /// Write the entry into a writer in the BibLaTeX format.
+    pub fn write_biblatex(&mut self, mut sink: impl Write) -> io::Result<()> {
+        for entry in self.entries.iter_mut() {
+            writeln!(sink, "{}", entry.to_biblatex())?;
+        }
+        Ok(())
     }
 }
 
@@ -209,67 +190,63 @@ impl IntoIterator for Bibliography {
     type IntoIter = std::vec::IntoIter<Entry>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter()
+        self.entries.into_iter()
     }
 }
 
 impl Entry {
     /// Construct new, empty entry.
-    pub fn new(cite_key: &str, entry_type: EntryType) -> Self {
-        Self {
-            cite_key: cite_key.to_string(),
-            entry_type,
-            fields: HashMap::new(),
-        }
+    pub fn new(key: String, entry_type: EntryType) -> Self {
+        Self { key, entry_type, fields: HashMap::new() }
     }
 
     /// Get the chunk slice for a field.
+    ///
+    /// The field key must be lowercase.
     pub fn get(&self, key: &str) -> Option<&[Chunk]> {
-        self.fields.get(&key.to_lowercase()).map(AsRef::as_ref)
+        self.fields.get(key).map(AsRef::as_ref)
     }
 
-    /// Get the chunk slice for a field and parse it as a specific type.
-    pub fn get_as<T: Type>(&self, key: &str) -> anyhow::Result<T> {
-        self.get(key)
-            .ok_or_else(|| anyhow!("The {} field is not present", key))
-            .and_then(|chunks| chunks.parse::<T>())
+    /// Parse the chunk slice for a field as a specific type.
+    pub fn get_as<T: Type>(&self, key: &str) -> Option<T> {
+        self.get(key)?.parse::<T>()
     }
 
     /// Get an entry but return None for empty chunk slices.
     fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
-        self.get(key).and_then(|f| if f.is_empty() { None } else { Some(f) })
+        let entry = self.get(key)?;
+        if !entry.is_empty() { Some(entry) } else { None }
     }
 
     /// Sets a field value as a chunk vector.
-    pub fn set(&mut self, key: &str, chunks: Vec<Chunk>) {
+    pub fn set(&mut self, key: &str, chunks: Chunks) {
         self.fields.insert(key.to_lowercase(), chunks);
     }
 
     /// Sets a field value as a chunk vector as a specific type.
-    pub fn set_as<T: Type>(&mut self, key: &str, value: &T) -> anyhow::Result<()> {
-        let chunks = value.to_chunks()?;
-        self.fields.insert(key.to_lowercase(), chunks);
-        Ok(())
+    pub fn set_as<T: Type>(&mut self, key: &str, value: &T) {
+        self.fields.insert(key.to_lowercase(), value.to_chunks());
     }
 
-    /// Deletes a field from the entry.
-    pub fn delete(&mut self, key: &str) -> Option<Vec<Chunk>> {
+    /// Removes a field from the entry.
+    pub fn remove(&mut self, key: &str) -> Option<Chunks> {
         self.fields.remove(key)
     }
 
     /// Renames a field if present.
     fn rename(&mut self, old_key: &str, new_key: &str) {
-        if let Some(chunks) = self.delete(old_key) {
+        if let Some(chunks) = self.remove(old_key) {
             self.set(new_key, chunks);
         }
     }
 
-    /// Will output the entry as a BibLaTeX string.
-    pub fn as_biblatex_string(&mut self) -> String {
+    /// Serialize this entry into a BibLaTeX string.
+    pub fn to_biblatex(&mut self) -> String {
         self.rename("journal", "journaltitle");
         self.rename("address", "location");
         self.rename("school", "institution");
-        let mut res = format!("@{}{{{},\n", self.entry_type.to_biblatex(), self.cite_key);
+
+        let mut res = format!("@{}{{{},\n", self.entry_type.to_biblatex(), self.key);
         for (key, value) in self.fields.iter() {
             res.push_str(&format!("{} = {},\n", key, chunks_to_string(value)))
         }
@@ -279,8 +256,8 @@ impl Entry {
         res
     }
 
-    /// Will output the entry as a BibTeX string.
-    pub fn as_bibtex_string(&mut self) -> String {
+    /// Serialize this entry into a BibTeX string.
+    pub fn to_bibtex(&mut self) -> String {
         let bibtex_type = self.entry_type.to_bibtex();
         self.rename("journaltitle", "journal");
         self.rename("location", "address");
@@ -288,13 +265,14 @@ impl Entry {
         {
             self.rename("institution", "school");
         }
-        if let Ok(date) = self.get_date() {
+
+        if let Some(date) = self.date() {
             for (key, value) in date.to_fieldset() {
                 self.set(&key, vec![Chunk::Normal(value)]);
             }
         }
 
-        let mut res = format!("@{}{{{},\n", bibtex_type, self.cite_key);
+        let mut res = format!("@{}{{{},\n", bibtex_type, self.key);
         for (key, value) in self.fields.iter() {
             if key == "date" {
                 continue;
@@ -312,11 +290,11 @@ impl Entry {
     pub fn get_parents(&self) -> Vec<String> {
         let mut res = vec![];
 
-        if let Ok(crossref) = self.get_as::<String>("crossref") {
+        if let Some(crossref) = self.get_as::<String>("crossref") {
             res.push(crossref);
         }
 
-        if let Ok(mut xrefs) = self.get_as::<Vec<String>>("xref") {
+        if let Some(mut xrefs) = self.get_as::<Vec<String>>("xref") {
             res.append(&mut xrefs);
         }
 
@@ -424,64 +402,47 @@ impl Entry {
         }
 
         if requirements.needs_date {
-            if let Ok(date) = crossref.get_date() {
-                self.set_date(date).expect("date set failure");
+            if let Some(date) = crossref.date() {
+                self.set_date(date);
             }
         }
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &mut Bibliography) -> anyhow::Result<()> {
-        let crossref = self.get_as::<String>("crossref").map(|s| {
-            bib.get_mut(&s)
-                .map(|e| e.clone())
-                .ok_or_else(|| anyhow!("crossref'd item not found"))
-        });
-        let references = self.get_as::<Vec<String>>("xdata").map(|keys| {
-            keys.iter()
-                .map(|s| {
-                    bib.get_mut(&s)
-                        .map(|e| e.clone())
-                        .ok_or_else(|| anyhow!("crossref'd item not found"))
-                })
-                .collect::<Vec<anyhow::Result<Entry>>>()
-        });
-
+    fn resolve_crossrefs(&mut self, bib: &Bibliography) {
         let mut refs = vec![];
 
-        if let Ok(crossref) = crossref {
-            refs.push(crossref?);
+        if let Some(crossref) = self.get_as::<String>("crossref") {
+            refs.extend(bib.get(&crossref).cloned());
         }
 
-        if let Ok(references) = references {
-            for r in references {
-                refs.push(r?);
+        if let Some(keys) = self.get_as::<Vec<String>>("xdata") {
+            for key in keys {
+                refs.extend(bib.get(&key).cloned());
             }
         }
 
         for mut crossref in refs {
-            crossref.resolve_crossrefs(bib)?;
+            crossref.resolve_crossrefs(bib);
             self.resolve_single_crossref(crossref);
         }
 
-        self.delete("crossref");
-        self.delete("xdata");
-
-        Ok(())
+        self.remove("crossref");
+        self.remove("xdata");
     }
 
-    /// Verify if the entry has all fields required for its `EntryType`.
+    /// Verify if the entry has all fields required for its [`EntryType`].
     ///
-    /// This function will return `Ok(())` upon successful validation.
-    /// The Err variant of the Result will contain a pair carrying two vectors
-    /// of keys: The first indicating fields that should have been present
-    /// but were not, the second indicating fields that were set but are forbidden
-    /// by the `EntryType`.
+    /// This function returns `Ok(())` upon successful validation. The `Err`
+    /// variant of the result contains a pair carrying two vectors of keys: The
+    /// first indicating fields that should have been present but were not, the
+    /// second indicating fields that were set but are forbidden by the
+    /// [`EntryType`].
     ///
-    /// **NOTE:** This function will not resolve the Entry.
-    /// If you want to support / expect files using `crossref` and `xdata`,
-    /// you will want to call this method only on entries obtained through the
-    /// `Bibliography::get_resolved` call.
+    /// _Note:_ This function will not resolve the entry. If you want to support
+    /// / expect files using `crossref` and `xdata`, you will want to call this
+    /// method only on entries obtained through the `Bibliography::get_resolved`
+    /// call.
     pub fn verify(&self) -> Result<(), (Vec<&str>, Vec<&str>)> {
         let reqs = self.entry_type.get_requirements();
         let mut expected = vec![];
@@ -535,32 +496,27 @@ impl Entry {
         }
 
         if reqs.needs_date {
-            if self.get_date().is_err() {
+            if self.date().is_none() {
                 expected.push("year");
             }
         }
 
         match reqs.page_chapter_field {
             PagesChapterMode::PagesRequired => {
-                if self.get_pages().is_err() {
+                if self.pages().is_none() {
                     expected.push("pages");
                 }
             }
             PagesChapterMode::PagesChapterRequired => {
-                if self
-                    .get_pages()
-                    .map(|_| true)
-                    .or_else(|_| self.get_chapter().map(|_| true))
-                    .is_err()
-                {
+                if self.pages().is_none() && self.chapter().is_none() {
                     expected.push("pages");
                 }
             }
             PagesChapterMode::BothForbidden => {
-                if self.get_pages().is_ok() {
+                if self.pages().is_some() {
                     outlawed.push("pages");
                 }
-                if self.get_chapter().is_ok() {
+                if self.chapter().is_some() {
                     outlawed.push("chapter");
                 }
             }
@@ -569,38 +525,33 @@ impl Entry {
 
         match reqs.author_eds_field {
             AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
-                if self.get_author().is_err() {
+                if self.author().is_none() {
                     expected.push("author");
                 }
             }
             AuthorMode::AuthorEditorRequired => {
-                if self
-                    .get_author()
-                    .map(|_| true)
-                    .or_else(|_| self.get_editors().map(|_| true))
-                    .is_err()
-                {
+                if self.author().is_none() && self.editors().is_empty() {
                     expected.push("author");
                 }
             }
             AuthorMode::EditorRequired => {
-                if self.get_editors().is_err() {
+                if self.editors().is_empty() {
                     expected.push("editor");
                 }
             }
             AuthorMode::EditorRequiredAuthorForbidden => {
-                if self.get_editors().is_err() {
+                if self.editors().is_empty() {
                     expected.push("editor");
                 }
-                if self.get_author().is_ok() {
+                if self.author().is_some() {
                     outlawed.push("author");
                 }
             }
             AuthorMode::BothRequired => {
-                if self.get_editors().is_err() {
+                if self.editors().is_empty() {
                     expected.push("editor");
                 }
-                if self.get_author().is_err() {
+                if self.author().is_none() {
                     expected.push("author");
                 }
             }
@@ -617,36 +568,29 @@ impl Entry {
 
 macro_rules! fields {
     ($($name:ident: $field_name:expr $(=> $res:ty)?),* $(,)*) => {
-        $(
-            paste! {
-                #[doc = "Get and parse the `" $field_name "` field."]
-                pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
-                    self.get($field_name)
-                        .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
-                        $(.and_then(|chunks| chunks.parse::<$res>()))?
-                }
-
-                fields!(single_set $name => $field_name, $($res)?);
+        $(paste! {
+            #[doc = "Get and parse the `" $field_name "` field."]
+            pub fn $name(&self) -> Option<fields!(@type $($res)?)> {
+                self.get($field_name)$(?.parse::<$res>())?
             }
-        )*
+
+            fields!(single_set $name => $field_name, $($res)?);
+        })*
     };
 
     (single_set $name:ident => $field_name:expr, ) => {
         paste! {
-            #[doc = "Set a value in the `" $field_name "` field."]
-            pub fn [<set_ $name>](&mut self, item: Vec<Chunk>) -> anyhow::Result<()> {
+            #[doc = "Set the value of the `" $field_name "` field."]
+            pub fn [<set_ $name>](&mut self, item: Chunks) {
                 self.set($field_name, item);
-                Ok(())
             }
         }
     };
     (single_set $name:ident => $field_name:expr, $other_type:ty) => {
         paste! {
-            #[doc = "Set a value in the `" $field_name "` field."]
-            pub fn [<set_ $name>](&mut self, item: $other_type) -> anyhow::Result<()> {
-                let chunks = item.to_chunks()?;
-                self.set($field_name, chunks);
-                Ok(())
+            #[doc = "Set the value of the `" $field_name "` field."]
+            pub fn [<set_ $name>](&mut self, item: $other_type) {
+                self.set($field_name, item.to_chunks());
             }
         }
     };
@@ -657,19 +601,16 @@ macro_rules! fields {
 
 macro_rules! alias_fields {
     ($($name:ident: $field_name:expr, $field_alias:expr $(=> $res:ty)?),* $(,)*) => {
-        $(
-            paste! {
-                #[doc = "Get and parse the `" $field_name "` field, falling back on `" $field_alias "` if `" $field_name "` is empty."]
-                pub fn [<get_ $name>](&self) -> anyhow::Result<fields!(@type $($res)?)> {
-                    self.get($field_name)
-                        .or_else(|| self.get($field_alias))
-                        .ok_or_else(|| anyhow!("The {} field is not present", $field_name))
-                        $(.and_then(|chunks| chunks.parse::<$res>()))?
-                }
-
-                fields!(single_set $name => $field_name, $($res)?);
+        $(paste! {
+            #[doc = "Get and parse the `" $field_name "` field, falling back on `" $field_alias "` if `" $field_name "` is empty."]
+            pub fn $name(&self) -> Option<fields!(@type $($res)?)> {
+                self.get($field_name)
+                    .or_else(|| self.get($field_alias))
+                    $(?.parse::<$res>())?
             }
-        )*
+
+            fields!(single_set $name => $field_name, $($res)?);
+        })*
     };
 
     (@type) => {&[Chunk]};
@@ -678,40 +619,35 @@ macro_rules! alias_fields {
 
 macro_rules! date_fields {
     ($($name:ident: $field_prefix:expr),* $(,)*) => {
-        $(
-            paste! {
-                #[doc = "Get and parse the `" $field_prefix "date` field, falling back to the `" $field_prefix "year`, `" $field_prefix "month`, and `" $field_prefix "day` fields when not present."]
-                pub fn [<get_ $name>](&self) -> anyhow::Result<Date> {
-                    if let Some(chunks) = self.get(concat!($field_prefix, "date")) {
-                        chunks.parse::<Date>()
-                    } else {
-                        Date::new_from_three_fields(
-                            self.get(concat!($field_prefix, "year")),
-                            self.get(concat!($field_prefix, "month")),
-                            self.get(concat!($field_prefix, "day")),
-                        )
-                    }
-                }
-
-                #[doc = "Set a value in the `" $field_prefix "date` field."]
-                pub fn [<set_ $name>](&mut self, item: Date) -> anyhow::Result<()> {
-                    let chunks = item.to_chunks()?;
-                    self.set(concat!($field_prefix, "date"), chunks);
-                    self.delete(concat!($field_prefix, "year"));
-                    self.delete(concat!($field_prefix, "month"));
-                    self.delete(concat!($field_prefix, "day"));
-
-                    Ok(())
+        $(paste! {
+            #[doc = "Get and parse the `" $field_prefix "date` field, falling back to the `" $field_prefix "year`, `" $field_prefix "month`, and `" $field_prefix "day` fields when not present."]
+            pub fn $name(&self) -> Option<Date> {
+                if let Some(chunks) = self.get(concat!($field_prefix, "date")) {
+                    chunks.parse::<Date>()
+                } else {
+                    Date::new_from_three_fields(
+                        self.get(concat!($field_prefix, "year"))?,
+                        self.get(concat!($field_prefix, "month")),
+                        self.get(concat!($field_prefix, "day")),
+                    )
                 }
             }
-        )*
+
+            #[doc = "Set the value of the `" $field_prefix "date` field."]
+            pub fn [<set_ $name>](&mut self, item: Date) {
+                self.set(concat!($field_prefix, "date"), item.to_chunks());
+                self.remove(concat!($field_prefix, "year"));
+                self.remove(concat!($field_prefix, "month"));
+                self.remove(concat!($field_prefix, "day"));
+            }
+        })*
     };
 }
 
 impl Entry {
     fields! {
-        // Fields without a specified return type simply return `&[Chunk]`.
         // BibTeX fields.
+        // Fields without a specified return type simply return `&[Chunk]`.
         author: "author" => Vec<Person>,
         book_title: "booktitle",
         chapter: "chapter",
@@ -719,12 +655,12 @@ impl Entry {
         how_published: "howpublished",
         note: "note",
         number: "number",
-        organization: "organization" => Vec<Vec<Chunk>>,
+        organization: "organization" => Vec<Chunks>,
         pages: "pages" => Vec<std::ops::Range<u32>>,
-        publisher: "publisher" => Vec<Vec<Chunk>>,
+        publisher: "publisher" => Vec<Chunks>,
         series: "series",
         title: "title",
-        type: "type" => String,
+        type_: "type" => String,
         volume: "volume" => i64,
     }
 
@@ -742,31 +678,25 @@ impl Entry {
     ///
     /// The default `EditorType::Editor` will be assumed if the type field
     /// is empty.
-    pub fn get_editors(&self) -> anyhow::Result<Vec<(Vec<Person>, EditorType)>> {
+    pub fn editors(&self) -> Vec<(Vec<Person>, EditorType)> {
         let mut editors = vec![];
 
-        let mut parse_editor_field = |name_field: &str, editor_field: &str| {
-            self.get(name_field)
-                .and_then(|chunks| chunks.parse::<Vec<Person>>().ok())
-                .map(|persons| {
-                    let editor_type = self
-                        .get(editor_field)
-                        .and_then(|chunks| chunks.parse::<EditorType>().ok())
-                        .unwrap_or(EditorType::Editor);
-                    editors.push((persons, editor_type));
-                });
+        let mut parse = |name_field: &str, editor_field: &str| {
+            if let Some(persons) = self.get_as::<Vec<Person>>(name_field) {
+                let editor_type = self
+                    .get(editor_field)
+                    .and_then(|chunks| chunks.parse::<EditorType>())
+                    .unwrap_or(EditorType::Editor);
+                editors.push((persons, editor_type));
+            }
         };
 
-        parse_editor_field("editor", "editortype");
-        parse_editor_field("editora", "editoratype");
-        parse_editor_field("editorb", "editorbtype");
-        parse_editor_field("editorc", "editorctype");
+        parse("editor", "editortype");
+        parse("editora", "editoratype");
+        parse("editorb", "editorbtype");
+        parse("editorc", "editorctype");
 
-        if editors.is_empty() {
-            return Err(anyhow!("No editor fields present"));
-        }
-
-        Ok(editors)
+        editors
     }
 
     alias_fields! {
@@ -784,7 +714,7 @@ impl Entry {
 
     fields! {
         // BibLaTeX supplemental fields.
-        abstract: "abstract",
+        abstract_: "abstract",
         addendum: "addendum",
         afterword: "afterword" => Vec<Person>,
         annotator: "annotator" => Vec<Person>,
@@ -854,7 +784,7 @@ impl Entry {
 /// Additional methods for chunk slices.
 pub trait ChunksExt {
     /// Parse the chunks into a type.
-    fn parse<T: Type>(&self) -> anyhow::Result<T>;
+    fn parse<T: Type>(&self) -> Option<T>;
 
     /// Format the chunks in sentence case.
     fn format_sentence(&self) -> String;
@@ -867,7 +797,7 @@ pub trait ChunksExt {
 }
 
 impl ChunksExt for [Chunk] {
-    fn parse<T: Type>(&self) -> anyhow::Result<T> {
+    fn parse<T: Type>(&self) -> Option<T> {
         T::from_chunks(self)
     }
 
@@ -943,26 +873,26 @@ mod tests {
     #[test]
     fn test_alias() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::from_str(&contents, true);
+        let mut bibliography = Bibliography::parse(&contents);
 
         assert_eq!(bibliography.get("issue201"), bibliography.get("github"));
-        bibliography.add_alias("issue201", "crap").expect("this must work");
+        bibliography.alias("issue201", "crap");
         assert_eq!(bibliography.get("crap"), bibliography.get("unstable"));
-        bibliography.remove_item("crap").expect("removal must work");
+        bibliography.remove("crap").unwrap();
         let cf = bibliography.get("cannonfodder").unwrap();
         assert_eq!(cf.entry_type, EntryType::Misc);
-        assert_eq!(cf.cite_key, "cannonfodder");
+        assert_eq!(cf.key, "cannonfodder");
     }
 
     #[test]
     fn test_bibtex_conversion() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::from_str(&contents, true);
+        let mut bibliography = Bibliography::parse(&contents);
 
-        let biblatex = bibliography.get_mut("haug2019").unwrap().as_biblatex_string();
+        let biblatex = bibliography.get_mut("haug2019").unwrap().to_biblatex();
         assert!(biblatex.contains("institution = {Technische Universität Berlin},"));
 
-        let bibtex = bibliography.get_mut("haug2019").unwrap().as_bibtex_string();
+        let bibtex = bibliography.get_mut("haug2019").unwrap().to_bibtex();
         assert!(bibtex.contains("school = {Technische Universität Berlin},"));
         assert!(bibtex.contains("year = {2019},"));
         assert!(bibtex.contains("month = {10},"));
@@ -973,7 +903,7 @@ mod tests {
     #[test]
     fn test_verify() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::from_str(&contents, true);
+        let mut bibliography = Bibliography::parse(&contents);
 
         assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
         assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
@@ -996,26 +926,23 @@ mod tests {
     #[test]
     fn test_crossref() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::from_str(&contents, true);
+        let bibliography = Bibliography::parse(&contents);
 
         let e = bibliography.get_resolved("macmillan").unwrap();
-        assert_eq!(e.get_publisher().unwrap()[0].format_verbatim(), "Macmillan");
+        assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
-            e.get_location().unwrap().format_verbatim(),
+            e.location().unwrap().format_verbatim(),
             "New York and London"
         );
 
         let book = bibliography.get_resolved("recursive").unwrap();
+        assert_eq!(book.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
-            book.get_publisher().unwrap()[0].format_verbatim(),
-            "Macmillan"
-        );
-        assert_eq!(
-            book.get_location().unwrap().format_verbatim(),
+            book.location().unwrap().format_verbatim(),
             "New York and London"
         );
         assert_eq!(
-            book.get_title().unwrap().format_verbatim(),
+            book.title().unwrap().format_verbatim(),
             "Recursive shennenigans and other important stuff"
         );
 
@@ -1024,36 +951,37 @@ mod tests {
         ]);
         let arrgh = bibliography.get_resolved("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
-        assert_eq!(arrgh.get_volume().unwrap(), 115);
-        assert_eq!(arrgh.get_editors().unwrap()[0].0[0].name, "Uhlig");
-        assert_eq!(arrgh.get_number().unwrap().format_verbatim(), "6");
+        assert_eq!(arrgh.volume().unwrap(), 115);
+        assert_eq!(arrgh.editors()[0].0[0].name, "Uhlig");
+        assert_eq!(arrgh.number().unwrap().format_verbatim(), "6");
         assert_eq!(
-            arrgh.get_journal().unwrap().format_verbatim(),
+            arrgh.journal().unwrap().format_verbatim(),
             "Journal of Political Economy"
         );
         assert_eq!(
-            arrgh.get_title().unwrap().format_verbatim(),
+            arrgh.title().unwrap().format_verbatim(),
             "An‐arrgh‐chy: The Law and Economics of Pirate Organization"
         );
     }
 
     fn dump_debug(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let bibliography = Bibliography::from_str(&contents, true);
+        let bibliography = Bibliography::parse(&contents);
         println!("{:#?}", bibliography);
     }
 
     fn dump_author_title(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let mut bibliography = Bibliography::from_str(&contents, true);
+        let mut bibliography = Bibliography::parse(&contents);
 
-        println!("{}", bibliography.as_biblatex_string());
+        println!("{}", bibliography.to_biblatex());
+
         for x in bibliography {
-            let authors = x.get_author().unwrap_or_default();
+            let authors = x.author().unwrap_or_default();
             for a in authors {
                 print!("{}, ", a);
             }
-            println!("\"{}\".", x.get_title().unwrap().format_sentence());
+            println!("\"{}\".", x.title().unwrap().format_sentence());
         }
     }
 }

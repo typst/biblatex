@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use strum_macros::{Display, EnumString};
+use strum::{Display, EnumString};
 
 /// Describes the type of bibliographical item being cited.
 ///
