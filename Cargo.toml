@@ -14,13 +14,11 @@ edition = "2018"
 members = ["bench"]
 
 [dependencies]
-anyhow = "1.0.32"
 chrono = { version = "0.4.15", default-features = false }
 lazy_static = "1.4.0"
 numerals = "0.1.4"
 regex = "1.3.9"
-strum = "0.20.0"
-strum_macros = "0.20.1"
+strum = { version = "0.20.0", features = ["derive"] }
 paste = "1.0.0"
 unicode-normalization = "0.1.13"
 unicode-xid = "0.2"

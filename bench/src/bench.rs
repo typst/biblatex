@@ -11,12 +11,12 @@ fn benchmarks(c: &mut Criterion) {
         };
     }
 
-    let bib = Bibliography::from_str(GRAL, true);
+    let bib = Bibliography::parse(GRAL);
     let entry = bib.get("kim2009").unwrap();
 
-    bench!("parse-gral": Bibliography::from_str(GRAL, true));
+    bench!("parse-gral": Bibliography::parse(GRAL));
     bench!("get-last-gral": bib.get("adedeji2017"));
-    bench!("get-author-gral": entry.get_author());
+    bench!("get-author-gral": entry.author());
 }
 
 criterion_group!(benches, benchmarks);

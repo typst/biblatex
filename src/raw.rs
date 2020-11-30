@@ -13,15 +13,15 @@ pub struct RawBibliography<'s> {
     pub preamble: String,
     /// The collection of citation keys and bibliography entries.
     pub entries: Vec<RawEntry<'s>>,
-    /// Map of reusable abbreviations, only supported by BibTeX.
+    /// A map of reusable abbreviations, only supported by BibTeX.
     pub abbreviations: HashMap<&'s str, &'s str>,
 }
 
-/// A directly extracted entry, with abbreviations not yet resolved.
+/// A raw extracted entry, with abbreviations not yet resolved.
 #[derive(Debug, Clone)]
 pub struct RawEntry<'s> {
     /// The citation key.
-    pub cite_key: &'s str,
+    pub key: &'s str,
     /// Denotes the type of bibliography item (e.g. `article`).
     pub entry_type: &'s str,
     /// Maps from field names to their associated values.
@@ -30,15 +30,13 @@ pub struct RawEntry<'s> {
 
 impl<'s> RawBibliography<'s> {
     /// Parse a raw bibliography from a source string.
-    pub fn from_str(src: &'s str, allow_bibtex: bool) -> Self {
-        BiblatexParser::new(src, allow_bibtex).parse()
+    pub fn parse(src: &'s str) -> Self {
+        BiblatexParser::new(src).parse()
     }
 }
 
-/// Backing struct for parsing a Bib(La)TeX file into a `BiblatexFile` struct.
+/// Backing struct for parsing a Bib(La)TeX file into a [`RawBibliography`].
 struct BiblatexParser<'s> {
-    #[allow(unused)]
-    allow_bibtex: bool,
     src: &'s str,
     mode: ParseMode,
     index: usize,
@@ -65,9 +63,8 @@ enum ParseMode {
 
 impl<'s> BiblatexParser<'s> {
     /// Constructs a new parser.
-    pub fn new(src: &'s str, allow_bibtex: bool) -> Self {
+    pub fn new(src: &'s str) -> Self {
         Self {
-            allow_bibtex,
             src,
             mode: ParseMode::Outside,
             index: 0,
@@ -195,7 +192,7 @@ impl<'s> BiblatexParser<'s> {
 
         if !is_string {
             self.res.entries.push(RawEntry {
-                cite_key: &self.src[key_start .. key_end],
+                key: &self.src[key_start .. key_end],
                 entry_type: entry_type.unwrap_or_default(),
                 fields,
             });
@@ -323,13 +320,9 @@ fn is_ident(c: char, first: bool) -> bool {
 mod tests {
     use super::*;
 
-    fn parse(src: &str, allow_bibtex: bool) -> RawBibliography<'_> {
-        BiblatexParser::new(src, allow_bibtex).parse()
-    }
-
     fn test_prop(key: &str, value: &str) -> String {
         let test = format!("@article{{test, {}={}}}", key, value);
-        let bt = parse(&test, true);
+        let bt = RawBibliography::parse(&test);
         let article = &bt.entries[0];
         article.fields.get(key).expect("fail").to_string()
     }
@@ -341,7 +334,7 @@ mod tests {
             year=2002,
             author={Haug, {Martin} and Haug, Gregor}}";
 
-        let bt = parse(file, true);
+        let bt = RawBibliography::parse(file);
         let article = &bt.entries[0];
 
         assert_eq!(article.entry_type, "article");
@@ -352,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_resolve_string() {
-        let bt = parse("@string{BT = \"bibtex\"}", true);
+        let bt = RawBibliography::parse("@string{BT = \"bibtex\"}");
         assert_eq!(bt.abbreviations.get("BT"), Some(&"\"bibtex\""));
     }
 
