@@ -135,26 +135,28 @@ impl Type for Vec<Range<u32>> {
     }
 }
 
-/// An integer or a chunk vector.
+/// The edition of a printed publication.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum IntOrChunks {
+pub enum Edition {
+    /// An integer edition.
     Int(i64),
+    /// A literal edition, for example `"Reprinted, and revised edition"`.
     Chunks(Chunks),
 }
 
-impl Type for IntOrChunks {
+impl Type for Edition {
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
         Some(if let Some(int) = chunks.parse() {
-            IntOrChunks::Int(int)
+            Edition::Int(int)
         } else {
-            IntOrChunks::Chunks(chunks.to_vec())
+            Edition::Chunks(chunks.to_vec())
         })
     }
 
     fn to_chunks(&self) -> Chunks {
         match self {
-            IntOrChunks::Int(int) => vec![Chunk::Normal(int.to_string())],
-            IntOrChunks::Chunks(chunks) => chunks.clone(),
+            Edition::Int(int) => vec![Chunk::Normal(int.to_string())],
+            Edition::Chunks(chunks) => chunks.clone(),
         }
     }
 }
@@ -218,7 +220,7 @@ pub enum Gender {
 
 impl Gender {
     /// Puts the gender into plural.
-    pub fn pluralize(self) -> Self {
+    pub fn plural(self) -> Self {
         match self {
             Gender::SingularFemale => Gender::PluralFemale,
             Gender::SingularMale => Gender::PluralMale,
@@ -228,7 +230,7 @@ impl Gender {
     }
 
     /// Puts the gender into the singular.
-    pub fn singularize(self) -> Self {
+    pub fn singular(self) -> Self {
         match self {
             Gender::PluralFemale => Gender::SingularFemale,
             Gender::PluralMale => Gender::SingularMale,
@@ -237,7 +239,7 @@ impl Gender {
         }
     }
 
-    /// Finds a gender to summarize a list of genders.
+    /// Finds a gender that summarizes a list of genders.
     pub fn coalesce(list: &[Self]) -> Option<Self> {
         if list.is_empty() {
             return None;
@@ -269,26 +271,18 @@ impl Gender {
     }
 }
 
-impl FromStr for Gender {
-    type Err = &'static str;
-
-    /// Two-letter gender serialization in accordance with the BibLaTeX standard.
-    fn from_str(s: &str) -> Result<Gender, Self::Err> {
-        match s {
-            "sf" => Ok(Gender::SingularFemale),
-            "sm" => Ok(Gender::SingularMale),
-            "sn" => Ok(Gender::SingularNeuter),
-            "pf" => Ok(Gender::PluralFemale),
-            "pm" => Ok(Gender::PluralMale),
-            "pn" => Ok(Gender::PluralNeuter),
-            _ => Err("unknown gender identifier"),
-        }
-    }
-}
-
 impl Type for Gender {
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        Gender::from_str(&chunks.format_verbatim().to_lowercase()).ok()
+        // Two-letter gender serialization in accordance with the BibLaTeX standard.
+        match chunks.format_verbatim().to_lowercase().as_ref() {
+            "sf" => Some(Gender::SingularFemale),
+            "sm" => Some(Gender::SingularMale),
+            "sn" => Some(Gender::SingularNeuter),
+            "pf" => Some(Gender::PluralFemale),
+            "pm" => Some(Gender::PluralMale),
+            "pn" => Some(Gender::PluralNeuter),
+            _ => None,
+        }
     }
 
     fn to_chunks(&self) -> Chunks {

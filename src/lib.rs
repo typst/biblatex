@@ -1,3 +1,7 @@
+//!  A crate for parsing Bib(La)TeX files.
+//!
+//! The API entrypoint is [`Bibliography`].
+
 mod chunk;
 mod mechanics;
 mod raw;
@@ -53,7 +57,7 @@ impl Bibliography {
     /// Construct a bibliography from a raw bibliography.
     pub fn from_raw(raw: RawBibliography) -> Self {
         let mut res = Self::new();
-        let abbreviations = &raw.abbreviations;
+        let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
             res.insert(Entry {
@@ -62,9 +66,7 @@ impl Bibliography {
                 fields: entry
                     .fields
                     .into_iter()
-                    .map(|(key, value)| {
-                        (key.to_string(), resolve::resolve(value, abbreviations))
-                    })
+                    .map(|(key, value)| (key.to_string(), resolve::resolve(value, abbr)))
                     .collect(),
             });
         }
@@ -615,7 +617,7 @@ macro_rules! date_fields {
                 if let Some(chunks) = self.get(concat!($prefix, "date")) {
                     chunks.parse::<Date>()
                 } else {
-                    Date::new_from_three_fields(
+                    Date::parse_three_fields(
                         self.get(concat!($prefix, "year"))?,
                         self.get(concat!($prefix, "month")),
                         self.get(concat!($prefix, "day")),
@@ -643,7 +645,7 @@ impl Entry {
         author: "author" => Vec<Person>,
         book_title: "booktitle",
         chapter: "chapter",
-        edition: "edition" => IntOrChunks,
+        edition: "edition" => Edition,
         how_published: "howpublished",
         note: "note",
         number: "number",
