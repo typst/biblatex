@@ -4,7 +4,9 @@ use crate::chunk::*;
 use crate::Type;
 
 /// An author, editor, or some other person affiliated with the cited work.
-/// When obtained through the constructor `Person::new`, the fields are trimmed.
+///
+/// When parsed through [`Person::parse`], the whitespace is trimmed from the
+/// fields.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Person {
     /// The surname / family name / last name.
@@ -19,12 +21,12 @@ pub struct Person {
 }
 
 impl Person {
-    /// Constructs a new Person from a chunk vector according to the specs of
+    /// Constructs a new person from a chunk vector according to the specs of
     /// [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
-    pub fn new(source: &[Chunk]) -> Self {
-        let num_commas: usize = source
+    pub fn parse(chunks: &[Chunk]) -> Self {
+        let num_commas: usize = chunks
             .iter()
             .map(|val| {
                 if let Chunk::Normal(s) = val {
@@ -36,27 +38,26 @@ impl Person {
             .sum();
 
         match num_commas {
-            0 => Self::from_unified(&source),
+            0 => Self::parse_unified(&chunks),
             1 => {
-                let (v1, v2) = split_at_normal_char(source, ',', true);
-                Self::from_single_comma(&v1, &v2)
+                let (v1, v2) = split_at_normal_char(chunks, ',', true);
+                Self::parse_single_comma(&v1, &v2)
             }
             _ => {
-                let (v1, v2) = split_at_normal_char(source, ',', true);
+                let (v1, v2) = split_at_normal_char(chunks, ',', true);
                 let (v2, v3) = split_at_normal_char(&v2, ',', true);
-                Self::from_two_commas(&v1, &v2, &v3)
+                Self::parse_two_commas(&v1, &v2, &v3)
             }
         }
     }
 
     /// Constructs new person from a chunk slice if in the
     /// form `<First> <Prefix> <Last>`.
-    fn from_unified(source: &[Chunk]) -> Self {
+    fn parse_unified(chunks: &[Chunk]) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
         // lowercase word), start of last capitalized seqence.
         // If there is no subsequent capitalized word, take last one.
         // Treat verbatim as capital letters
-
         let mut word_start = true;
         let mut capital = false;
         let mut seen_lowercase = false;
@@ -67,7 +68,7 @@ impl Person {
         let mut last_word_start = 0;
         let mut last_lowercase_start = 0;
 
-        for (index, (c, v)) in chunk_chars(&source).enumerate() {
+        for (index, (c, v)) in chunk_chars(&chunks).enumerate() {
             if c.is_whitespace() && !v {
                 word_start = true;
                 continue;
@@ -100,7 +101,7 @@ impl Person {
         let mut given_name = String::new();
         let mut prefix = String::new();
 
-        for (index, (c, _)) in chunk_chars(&source).enumerate() {
+        for (index, (c, _)) in chunk_chars(&chunks).enumerate() {
             if (index <= cap_word_end
                 && seen_lowercase
                 && seen_uppercase
@@ -134,7 +135,7 @@ impl Person {
     /// - `s2` to the part behind it.
     ///
     /// The arguments should not contain the comma.
-    fn from_single_comma(s1: &[Chunk], s2: &[Chunk]) -> Self {
+    fn parse_single_comma(s1: &[Chunk], s2: &[Chunk]) -> Self {
         if s2.is_empty() || (s2.len() == 1 && s2.format_verbatim().is_empty()) {
             let formatted = s1.format_verbatim();
             let last_space = formatted.rfind(' ').unwrap_or(0);
@@ -206,8 +207,8 @@ impl Person {
     /// value respectively.
     ///
     /// The arguments should not contain the comma.
-    fn from_two_commas(s1: &[Chunk], s2: &[Chunk], s3: &[Chunk]) -> Self {
-        let mut p = Self::from_single_comma(s1, s3);
+    fn parse_two_commas(s1: &[Chunk], s2: &[Chunk], s3: &[Chunk]) -> Self {
+        let mut p = Self::parse_single_comma(s1, s3);
         p.suffix = s2.format_verbatim();
         p
     }
@@ -218,20 +219,14 @@ impl Type for Vec<Person> {
         Some(
             split_token_lists(chunks, "and")
                 .into_iter()
-                .map(|subchunks| Person::new(&subchunks))
+                .map(|subchunks| Person::parse(&subchunks))
                 .collect(),
         )
     }
 
     fn to_chunks(&self) -> Chunks {
-        let mut error = false;
-        let chunks = self
-            .iter()
+        self.iter()
             .map(|p| {
-                if p.name.is_empty() {
-                    error = true;
-                }
-
                 let prefix = if let Some(c) = p.prefix.chars().next() {
                     if c.is_uppercase() {
                         (Some(Chunk::Verbatim(p.prefix.clone())), " ".to_string())
@@ -254,20 +249,8 @@ impl Type for Vec<Person> {
 
                 res
             })
-            .collect::<Vec<Chunks>>();
-
-        let mut chunks = chunks.into_iter();
-        let mut res = vec![];
-        if let Some(mut chunk) = chunks.next() {
-            res.append(&mut chunk);
-
-            for mut chunk in chunks {
-                res.push(Chunk::Normal(" and ".to_string()));
-                res.append(&mut chunk);
-            }
-        }
-
-        res
+            .collect::<Vec<Chunks>>()
+            .to_chunks()
     }
 }
 
@@ -298,36 +281,36 @@ mod tests {
 
     #[test]
     fn test_person_comma() {
-        let p = Person::new(&[N("jean de la fontaine,")]);
+        let p = Person::parse(&[N("jean de la fontaine,")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
         assert_eq!(vec![p].to_chunks(), vec![N("jean de la fontaine, ")]);
 
-        let p = Person::new(&[N("de la fontaine, Jean")]);
+        let p = Person::parse(&[N("de la fontaine, Jean")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
         assert_eq!(vec![p].to_chunks(), vec![N("de la fontaine, Jean")]);
 
-        let p = Person::new(&[N("De La Fontaine, Jean")]);
+        let p = Person::parse(&[N("De La Fontaine, Jean")]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
         assert_eq!(vec![p].to_chunks(), vec![N("De La Fontaine, Jean")]);
 
-        let p = Person::new(&[V("De La"), N(" Fontaine, Jean")]);
+        let p = Person::parse(&[V("De La"), N(" Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De La");
         assert_eq!(p.given_name, "Jean");
         assert_eq!(vec![p].to_chunks(), vec![V("De La"), N(" Fontaine, Jean")]);
 
-        let p = Person::new(&[N("De la Fontaine, Jean")]);
+        let p = Person::parse(&[N("De la Fontaine, Jean")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De la");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(&[N("de La Fontaine, Jean")]);
+        let p = Person::parse(&[N("de La Fontaine, Jean")]);
         assert_eq!(p.name, "La Fontaine");
         assert_eq!(p.prefix, "de");
         assert_eq!(p.given_name, "Jean");
@@ -335,55 +318,55 @@ mod tests {
 
     #[test]
     fn test_person_no_comma() {
-        let p = Person::new(&[N("jean de la fontaine")]);
+        let p = Person::parse(&[N("")]);
+        assert_eq!(p.name, "");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.given_name, "");
+
+        let p = Person::parse(&[N("jean de la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(&[N("Jean de la fontaine")]);
+        let p = Person::parse(&[N("Jean de la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
 
-        let p = Person::new(&[N("Jean "), V("de"), N(" la fontaine")]);
+        let p = Person::parse(&[N("Jean "), V("de"), N(" la fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "la");
         assert_eq!(p.given_name, "Jean de");
 
-        let p = Person::new(&[N("Jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        let p = Person::parse(&[N("Jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean de la");
 
-        let p = Person::new(&[N("jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
+        let p = Person::parse(&[N("jean "), V("de"), N(" "), V("la"), N(" fontaine")]);
         assert_eq!(p.name, "de la fontaine");
         assert_eq!(p.prefix, "jean");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(&[N("Jean De La Fontaine")]);
+        let p = Person::parse(&[N("Jean De La Fontaine")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean De La");
 
-        let p = Person::new(&[N("jean De la Fontaine")]);
+        let p = Person::parse(&[N("jean De la Fontaine")]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "jean De la");
         assert_eq!(p.given_name, "");
 
-        let p = Person::new(&[N("Jean de La Fontaine")]);
+        let p = Person::parse(&[N("Jean de La Fontaine")]);
         assert_eq!(p.name, "La Fontaine");
         assert_eq!(p.prefix, "de");
         assert_eq!(p.given_name, "Jean");
-
-        let p = Person::new(&[N("")]);
-        assert_eq!(p.name, "");
-        assert_eq!(p.prefix, "");
-        assert_eq!(p.given_name, "");
     }
 
     #[test]
     fn test_person_two_comma() {
-        let p = Person::new(&[N("Mudd, Sr., Harcourt Fenton")]);
+        let p = Person::parse(&[N("Mudd, Sr., Harcourt Fenton")]);
         assert_eq!(p.name, "Mudd");
         assert_eq!(p.prefix, "");
         assert_eq!(p.suffix, "Sr.");

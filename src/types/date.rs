@@ -31,32 +31,29 @@ pub struct Date {
     /// The date or the date range.
     pub value: DateValue,
     /// Indicates whether the sources are sure about the date.
-    pub is_uncertain: bool,
+    pub uncertain: bool,
     /// Indicates the specificity of the date value.
-    pub is_approximate: bool,
+    pub approximate: bool,
 }
 
 /// Represents a atomic date or a range of dates.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DateValue {
     /// A single date.
-    Atom(Datetime),
-    /// A range of dates that may be open or definite at both start and end.
-    Range(DateBound, DateBound),
-}
-
-/// Indicates whether the start or end of a date interval is open or definite.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum DateBound {
-    /// The start or end of the range is open / unknown.
-    Open,
-    /// The start or end of the range is definite / known.
-    Definite(Datetime),
+    At(Datetime),
+    /// A range of dates with known start, but open end.
+    After(Datetime),
+    /// A range of dates with open start, but known end.
+    Before(Datetime),
+    /// A range of dates with known start and end.
+    Between(Datetime, Datetime),
 }
 
 /// A timezone-unaware date that must specify a year and may specify month, day,
-/// and time. Flags about uncertainity / precision are stored within the parent
-/// `Date` struct.
+/// and time.
+///
+/// Flags about uncertainity / precision are stored within the parent [`Date`]
+/// struct.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Datetime {
     /// The year.
@@ -74,8 +71,8 @@ pub struct Datetime {
 }
 
 impl Date {
-    /// Parse a date from a chunk vector.
-    pub fn new(chunks: &[Chunk]) -> Option<Self> {
+    /// Parse a date from chunks.
+    pub fn parse(chunks: &[Chunk]) -> Option<Self> {
         let mut date_str = chunks.format_verbatim().trim_end().to_string();
 
         let last_char = date_str.chars().last()?;
@@ -88,43 +85,45 @@ impl Date {
 
         let value = if date_str.to_uppercase().contains('X') {
             let (d1, d2) = Self::range_dates(date_str)?;
-            DateValue::Range(DateBound::Definite(d1), DateBound::Definite(d2))
+            DateValue::Between(d1, d2)
         } else {
             if date_str.contains('/') {
                 let (s1, s2) = split_at_normal_char(chunks, '/', true);
                 let (s1, mut s2) = (s1.format_verbatim(), s2.format_verbatim());
-
                 if is_uncertain || is_approximate {
                     s2.pop();
                 }
 
-                let start = if Self::is_open_range(&s1) {
-                    DateBound::Open
-                } else {
-                    DateBound::Definite(Datetime::new(s1)?)
-                };
+                fn is_open_range(s: &str) -> bool {
+                    s.trim().is_empty() || s == ".."
+                }
 
-                let end = if Self::is_open_range(&s2) {
-                    DateBound::Open
-                } else {
-                    DateBound::Definite(Datetime::new(s2)?)
-                };
-
-                DateValue::Range(start, end)
+                match (is_open_range(&s1), is_open_range(&s2)) {
+                    (false, false) => {
+                        DateValue::Between(Datetime::parse(s1)?, Datetime::parse(s2)?)
+                    }
+                    (false, true) => DateValue::After(Datetime::parse(s1)?),
+                    (true, false) => DateValue::Before(Datetime::parse(s2)?),
+                    (true, true) => return None,
+                }
             } else {
                 if is_uncertain || is_approximate {
                     date_str.pop();
                 }
 
-                DateValue::Atom(Datetime::new(date_str)?)
+                DateValue::At(Datetime::parse(date_str)?)
             }
         };
 
-        Some(Self { is_approximate, is_uncertain, value })
+        Some(Self {
+            approximate: is_approximate,
+            uncertain: is_uncertain,
+            value,
+        })
     }
 
-    /// Create a new date from the `year`, `month`, and `day` fields.
-    pub fn new_from_three_fields(
+    /// Create a new date from `year`, `month`, and `day` chunks.
+    pub fn parse_three_fields(
         year: &[Chunk],
         month: Option<&[Chunk]>,
         day: Option<&[Chunk]>,
@@ -172,27 +171,22 @@ impl Date {
             }
         }
 
-        Some(Date::new_from_date_atom(date_atom))
+        Some(Date::from_datetime(date_atom))
     }
 
-    fn new_from_date_atom(atom: Datetime) -> Self {
+    fn from_datetime(atom: Datetime) -> Self {
         Date {
-            is_approximate: false,
-            is_uncertain: false,
-            value: DateValue::Atom(atom),
+            approximate: false,
+            uncertain: false,
+            value: DateValue::At(atom),
         }
-    }
-
-    fn is_open_range(s: &str) -> bool {
-        let s = s.trim();
-        if s.is_empty() || s == ".." { true } else { false }
     }
 
     fn range_dates(mut source: String) -> Option<(Datetime, Datetime)> {
         source.retain(|c| !c.is_whitespace());
 
         Some(if let Some(captures) = CENTURY_REGEX.captures(&source) {
-            let century: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            let century: i32 = captures.name("y").unwrap().as_str().parse().unwrap();
             (
                 Datetime {
                     year: century * 100,
@@ -208,7 +202,7 @@ impl Date {
                 },
             )
         } else if let Some(captures) = DECADE_REGEX.captures(&source) {
-            let decade: i32 = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            let decade: i32 = captures.name("y").unwrap().as_str().parse().unwrap();
             (
                 Datetime {
                     year: decade * 10,
@@ -224,7 +218,7 @@ impl Date {
                 },
             )
         } else if let Some(captures) = MONTH_UNSURE_REGEX.captures(&source) {
-            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
+            let year = captures.name("y").unwrap().as_str().parse().unwrap();
 
             (
                 Datetime {
@@ -241,8 +235,7 @@ impl Date {
                 },
             )
         } else if let Some(captures) = DAY_MONTH_UNSURE_REGEX.captures(&source) {
-            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
-
+            let year = captures.name("y").unwrap().as_str().parse().unwrap();
             (
                 Datetime {
                     year,
@@ -258,16 +251,18 @@ impl Date {
                 },
             )
         } else if let Some(captures) = DAY_UNSURE_REGEX.captures(&source) {
-            let year = (captures.name("y").unwrap()).as_str().parse().unwrap();
-            let month = (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap();
+            let year = captures.name("y").unwrap().as_str().parse().unwrap();
+            let month = captures.name("m").unwrap().as_str().parse::<u8>().unwrap();
 
-            let days = if month == 12 {
+            let date = if month == 12 {
                 NaiveDate::from_ymd(year + 1, 1, 1)
             } else {
                 NaiveDate::from_ymd(year, month as u32 + 1, 1)
-            }
-            .signed_duration_since(NaiveDate::from_ymd(year, month as u32, 1))
-            .num_days();
+            };
+
+            let days = date
+                .signed_duration_since(NaiveDate::from_ymd(year, month as u32, 1))
+                .num_days();
 
             (
                 Datetime {
@@ -289,120 +284,61 @@ impl Date {
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
-        let mut res = vec![];
-        match self.value {
-            DateValue::Atom(date) => {
-                let year = if date.year >= 0 {
-                    format!("{:04}", date.year)
-                } else {
-                    format!("{:05}", date.year)
-                };
-
-                res.push(("year".to_string(), year));
-
-                if let Some(month) = date.month {
-                    res.push(("month".to_string(), format!("{:02}", month + 1)));
-
-                    if let Some(day) = date.day {
-                        res.push(("day".to_string(), format!("{:02}", day + 1)));
-                    }
-                }
-            }
-
-            DateValue::Range(start, end) => {
-                let mut open = 0;
-
-                if matches!(start, DateBound::Open) {
-                    open += 1;
-                }
-                if matches!(end, DateBound::Open) {
-                    open += 1;
-                }
-
-                match open {
-                    0 => {}
-                    1 => {
-                        let date = if let DateBound::Definite(date) = start {
-                            date
-                        } else if let DateBound::Definite(date) = end {
-                            date
-                        } else {
-                            panic!("One DateBound should be definite")
-                        };
-
-                        res = Date::new_from_date_atom(date).to_fieldset();
-                    }
-                    2 => {
-                        let start = if let DateBound::Definite(date) = start {
-                            date
-                        } else {
-                            panic!("Start has to be definite at this point")
-                        };
-
-                        let end = if let DateBound::Definite(date) = end {
-                            date
-                        } else {
-                            panic!("End has to be definite at this point")
-                        };
-
-                        res = Date::new_from_date_atom(start).to_fieldset();
-                        let mut end_fieldset =
-                            Date::new_from_date_atom(end).to_fieldset();
-                        end_fieldset = end_fieldset
-                            .into_iter()
-                            .map(|(k, v)| (format!("end{}", k), v))
-                            .collect();
-                        res.append(&mut end_fieldset);
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
-
-        res
+        self.value.to_fieldset()
     }
 }
 
 impl Type for Date {
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        Date::new(chunks)
+        Date::parse(chunks)
     }
 
     fn to_chunks(&self) -> Chunks {
-        let uncertainity_symbol = match (self.is_approximate, self.is_uncertain) {
+        let mut s = match self.value {
+            DateValue::At(date) => format!("{}", date),
+            DateValue::After(start) => format!("{}/..", start),
+            DateValue::Before(end) => format!("../{}", end),
+            DateValue::Between(start, end) => format!("{}/{}", start, end),
+        };
+
+        s.push_str(match (self.approximate, self.uncertain) {
             (true, true) => "%",
             (true, false) => "~",
             (false, true) => "?",
             (false, false) => "",
-        };
+        });
 
-        vec![Chunk::Normal(match self.value {
-            DateValue::Atom(date) => format!("{}{}", date, uncertainity_symbol),
-            DateValue::Range(start, end) => {
-                format!("{}/{}{}", start, end, uncertainity_symbol)
-            }
-        })]
+        vec![Chunk::Normal(s)]
     }
 }
 
-impl Display for DateBound {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl DateValue {
+    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
         match self {
-            DateBound::Open => write!(f, ".."),
-            DateBound::Definite(atom) => write!(f, "{}", atom),
+            DateValue::At(date) | DateValue::After(date) | DateValue::Before(date) => {
+                date.to_fieldset()
+            }
+
+            DateValue::Between(start, end) => {
+                let mut set = start.to_fieldset();
+                set.extend(
+                    end.to_fieldset().into_iter().map(|(k, v)| (format!("end{}", k), v)),
+                );
+                set
+            }
         }
     }
 }
 
 impl Datetime {
-    /// Parse a date atom from a string.
-    pub fn new(mut source: String) -> Option<Self> {
-        source.retain(|f| !f.is_whitespace());
+    /// Parse a datetime from a string.
+    fn parse(mut src: String) -> Option<Self> {
+        src.retain(|f| !f.is_whitespace());
 
-        let time = if let Some(pos) = source.find('T') {
-            if pos + 1 < source.len() {
-                let time_str = source.split_off(pos + 1);
-                source.pop();
+        let time = if let Some(pos) = src.find('T') {
+            if pos + 1 < src.len() {
+                let time_str = src.split_off(pos + 1);
+                src.pop();
                 time_str.parse::<NaiveTime>().ok()
             } else {
                 None
@@ -411,7 +347,7 @@ impl Datetime {
             None
         };
 
-        let full_date = source.parse::<NaiveDate>();
+        let full_date = src.parse::<NaiveDate>();
 
         Some(if let Ok(ndate) = full_date {
             Datetime {
@@ -420,7 +356,7 @@ impl Datetime {
                 day: Some(ndate.day0() as u8),
                 time,
             }
-        } else if let Some(captures) = MONTH_REGEX.captures(&source) {
+        } else if let Some(captures) = MONTH_REGEX.captures(&src) {
             Datetime {
                 year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
                 month: Some(
@@ -429,7 +365,7 @@ impl Datetime {
                 day: None,
                 time,
             }
-        } else if let Some(captures) = YEAR_REGEX.captures(&source) {
+        } else if let Some(captures) = YEAR_REGEX.captures(&src) {
             Datetime {
                 year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
                 month: None,
@@ -439,6 +375,25 @@ impl Datetime {
         } else {
             return None;
         })
+    }
+
+    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
+        let year = if self.year >= 0 {
+            format!("{:04}", self.year)
+        } else {
+            format!("{:05}", self.year)
+        };
+
+        let mut fields = vec![("year".to_string(), year)];
+        if let Some(month) = self.month {
+            fields.push(("month".to_string(), format!("{:02}", month + 1)));
+
+            if let Some(day) = self.day {
+                fields.push(("day".to_string(), format!("{:02}", day + 1)));
+            }
+        }
+
+        fields
     }
 }
 
@@ -541,144 +496,159 @@ fn get_month_for_name(month: &str) -> Option<u8> {
 mod tests {
     use super::*;
     use crate::chunk::tests::*;
-    use DateBound::Definite;
 
     #[test]
-    fn test_new_date() {
-        let date = Date::new(&[N("2017-10 -25?")]).unwrap();
-        assert_eq!(date.is_uncertain, true);
-        assert_eq!(date.is_approximate, false);
-        if let DateValue::Atom(val) = date.value {
-            assert_eq!(val.year, 2017);
-            assert_eq!(val.month, Some(9));
-            assert_eq!(val.day, Some(24));
-            assert_eq!(val.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+    fn test_parse_date() {
+        let date = Date::parse(&[N("2017-10 -25?")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("2017-10-25?")]);
+        assert_eq!(date, Date {
+            value: DateValue::At(Datetime {
+                year: 2017,
+                month: Some(9),
+                day: Some(24),
+                time: None,
+            }),
+            uncertain: true,
+            approximate: false,
+        });
 
-        let date = Date::new(&[N("19XX~")]).unwrap();
-        assert_eq!(date.is_uncertain, false);
-        assert_eq!(date.is_approximate, true);
-        if let DateValue::Range(Definite(start), Definite(end)) = date.value {
-            assert_eq!(start.year, 1900);
-            assert_eq!(start.month, None);
-            assert_eq!(start.day, None);
-            assert_eq!(start.time, None);
-
-            assert_eq!(end.year, 1999);
-            assert_eq!(end.month, None);
-            assert_eq!(end.day, None);
-            assert_eq!(end.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse(&[N("19XX~")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("1900/1999~")]);
+        assert_eq!(date, Date {
+            value: DateValue::Between(
+                Datetime {
+                    year: 1900,
+                    month: None,
+                    day: None,
+                    time: None,
+                },
+                Datetime {
+                    year: 1999,
+                    month: None,
+                    day: None,
+                    time: None,
+                }
+            ),
+            uncertain: false,
+            approximate: true,
+        });
 
-        let date = Date::new(&[N("1948-03-02/1950")]).unwrap();
-        assert_eq!(date.is_uncertain, false);
-        assert_eq!(date.is_approximate, false);
-        if let DateValue::Range(Definite(start), Definite(end)) = date.value {
-            assert_eq!(start.year, 1948);
-            assert_eq!(start.month, Some(2));
-            assert_eq!(start.day, Some(1));
-            assert_eq!(start.time, None);
-
-            assert_eq!(end.year, 1950);
-            assert_eq!(end.month, None);
-            assert_eq!(end.day, None);
-            assert_eq!(end.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse(&[N("1948-03-02/1950")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("1948-03-02/1950")]);
+        assert_eq!(date, Date {
+            value: DateValue::Between(
+                Datetime {
+                    year: 1948,
+                    month: Some(2),
+                    day: Some(1),
+                    time: None,
+                },
+                Datetime {
+                    year: 1950,
+                    month: None,
+                    day: None,
+                    time: None,
+                }
+            ),
+            uncertain: false,
+            approximate: false,
+        });
 
-        let date = Date::new(&[N("2020-04-04T18:30:31/")]).unwrap();
-        assert_eq!(date.is_uncertain, false);
-        assert_eq!(date.is_approximate, false);
-        if let DateValue::Range(Definite(start), DateBound::Open) = date.value {
-            assert_eq!(start.year, 2020);
-            assert_eq!(start.month, Some(3));
-            assert_eq!(start.day, Some(3));
-            assert_eq!(start.time, Some(NaiveTime::from_hms(18, 30, 31)));
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse(&[N("2020-04-04T18:30:31/")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("2020-04-04/..")]);
+        assert_eq!(date, Date {
+            value: DateValue::After(Datetime {
+                year: 2020,
+                month: Some(3),
+                day: Some(3),
+                time: Some(NaiveTime::from_hms(18, 30, 31)),
+            }),
+            uncertain: false,
+            approximate: false,
+        });
 
-        let date = Date::new(&[N("/-0031-07%")]).unwrap();
-        assert_eq!(date.is_uncertain, true);
-        assert_eq!(date.is_approximate, true);
-        if let DateValue::Range(DateBound::Open, Definite(end)) = date.value {
-            assert_eq!(end.year, -31);
-            assert_eq!(end.month, Some(6));
-            assert_eq!(end.day, None);
-            assert_eq!(end.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse(&[N("/-0031-07%")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("../-0031-07%")]);
+        assert_eq!(date, Date {
+            value: DateValue::After(Datetime {
+                year: -31,
+                month: Some(6),
+                day: None,
+                time: None,
+            }),
+            uncertain: true,
+            approximate: true,
+        });
     }
 
     #[test]
-    fn test_new_date_from_three_fields() {
+    fn test_parse_date_from_three_fields() {
         let year = &[N("2020")];
         let month = &[N("January\u{A0}12th")];
-        let date = Date::new_from_three_fields(year, Some(month), None).unwrap();
-        if let DateValue::Atom(val) = date.value {
-            assert_eq!(val.year, 2020);
-            assert_eq!(val.month, Some(0));
-            assert_eq!(val.day, Some(11));
-            assert_eq!(val.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse_three_fields(year, Some(month), None).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime {
+                year: 2020,
+                month: Some(0),
+                day: Some(11),
+                time: None,
+            })
+        );
 
         let year = &[N("-0004")];
         let month = &[N("aug")];
         let day = &[N("28")];
-        let date = Date::new_from_three_fields(year, Some(month), Some(day)).unwrap();
-        if let DateValue::Atom(val) = date.value {
-            assert_eq!(val.year, -4);
-            assert_eq!(val.month, Some(7));
-            assert_eq!(val.day, Some(27));
-            assert_eq!(val.time, None);
-        } else {
-            panic!("wrong date kind");
-        }
+        let date = Date::parse_three_fields(year, Some(month), Some(day)).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime {
+                year: -4,
+                month: Some(7),
+                day: Some(27),
+                time: None,
+            })
+        );
     }
 
     #[test]
-    fn test_new_datetime() {
-        let atom1 = Datetime::new("2017-10 -25".to_string()).unwrap();
-        assert_eq!(atom1.year, 2017);
-        assert_eq!(atom1.month, Some(9));
-        assert_eq!(atom1.day, Some(24));
-        assert_eq!(atom1.time, None);
-        assert_eq!(atom1.to_string(), "2017-10-25");
+    fn test_parse_datetime() {
+        let date1 = Datetime::parse("2017-10 -25".to_string()).unwrap();
+        assert_eq!(date1.to_string(), "2017-10-25");
+        assert_eq!(date1, Datetime {
+            year: 2017,
+            month: Some(9),
+            day: Some(24),
+            time: None,
+        });
 
-        let atom2 = Datetime::new("  2019 -- 03 ".to_string()).unwrap();
-        assert_eq!(atom2.year, 2019);
-        assert_eq!(atom2.month, Some(2));
-        assert_eq!(atom2.day, None);
-        assert_eq!(atom2.time, None);
-        assert_eq!(atom2.to_string(), "2019-03");
+        let date2 = Datetime::parse("  2019 -- 03 ".to_string()).unwrap();
+        assert_eq!(date2.to_string(), "2019-03");
+        assert_eq!(date2, Datetime {
+            year: 2019,
+            month: Some(2),
+            day: None,
+            time: None,
+        });
 
-        let atom3 = Datetime::new("  -0006".to_string()).unwrap();
-        assert_eq!(atom3.year, -6);
-        assert_eq!(atom3.month, None);
-        assert_eq!(atom3.day, None);
-        assert_eq!(atom3.time, None);
-        assert_eq!(atom3.to_string(), "-0006");
+        let date3 = Datetime::parse("  -0006".to_string()).unwrap();
+        assert_eq!(date3.to_string(), "-0006");
+        assert_eq!(date3, Datetime {
+            year: -6,
+            month: None,
+            day: None,
+            time: None,
+        });
 
-        let atom4 = Datetime::new("2020-09-06T13:39:00".to_string()).unwrap();
-        assert_eq!(atom4.year, 2020);
-        assert_eq!(atom4.month, Some(8));
-        assert_eq!(atom4.day, Some(5));
-        assert_eq!(atom4.time, Some(NaiveTime::from_hms(13, 39, 00)));
+        let date4 = Datetime::parse("2020-09-06T13:39:00".to_string()).unwrap();
+        assert_eq!(date4, Datetime {
+            year: 2020,
+            month: Some(8),
+            day: Some(5),
+            time: Some(NaiveTime::from_hms(13, 39, 00)),
+        });
 
-        assert!(atom3 < atom4);
-        assert!(atom2 > atom1);
+        assert!(date3 < date4);
+        assert!(date2 > date1);
     }
 }

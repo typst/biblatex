@@ -5,11 +5,11 @@ use std::str::FromStr;
 
 use strum::{Display, EnumString};
 
-/// Describes the type of bibliographical item being cited.
+/// Describes the type of a bibliographical entry.
 ///
 /// Each type comes with a different set of required fields
 /// as per the spec that can be extracted using `EntryType::get_requirements`.
-#[derive(Clone, Display, Debug, EnumString, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
 #[strum(serialize_all = "lowercase")]
 pub enum EntryType {
     // BibTeX
@@ -89,7 +89,6 @@ impl AuthorMode {
             | Self::BothRequired
             | Self::AuthorRequiredEditorOptional => vec!["author", "editor"],
             Self::EditorRequired | Self::EditorRequiredAuthorForbidden => vec!["editor"],
-
             _ => vec![],
         }
     }
@@ -124,7 +123,6 @@ impl PagesChapterMode {
         match self {
             Self::PagesRequired | Self::PagesOptional => vec!["pages"],
             Self::PagesChapterRequired | Self::BothOptional => vec!["pages", "chapter"],
-
             _ => vec![],
         }
     }
