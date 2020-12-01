@@ -3,8 +3,8 @@ use std::mem::take;
 
 use unicode_normalization::char;
 
-use super::types::get_month_for_abbr;
-use super::{Chunk, Chunks};
+use crate::chunk::{Chunk, Chunks};
+use crate::types::get_month_for_abbr;
 
 /// Fully parse a value, resolving abbreviations and LaTeX commands.
 pub fn resolve(value: &str, abbreviations: &HashMap<&str, &str>) -> Chunks {
