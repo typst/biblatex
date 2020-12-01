@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use crate::chunk::*;
 use crate::Type;
 
-/// An author, editor, or some other person affiliated with the cited work.
+/// An author, editor, or some other person affiliated with a cited work.
 ///
 /// When parsed through [`Person::parse`], the whitespace is trimmed from the
 /// fields.

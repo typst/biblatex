@@ -1,5 +1,5 @@
-//! Defines the different bibliographical items and which
-//! fields should be attached to each of them.
+//! Defines the different bibliographical items and which fields should be
+//! attached to each of them.
 
 use std::str::FromStr;
 
@@ -7,8 +7,8 @@ use strum::{Display, EnumString};
 
 /// Describes the type of a bibliographical entry.
 ///
-/// Each type comes with a different set of required fields
-/// as per the spec that can be extracted using `EntryType::get_requirements`.
+/// Each type comes with a different set of required and allowable fields that
+/// are taken into consideration in [`Entry::verify`](crate::Entry::verify).
 #[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
 #[strum(serialize_all = "lowercase")]
 pub enum EntryType {
@@ -55,24 +55,18 @@ pub enum EntryType {
 /// Describes the optionality mode of the `author` and `editor` fields.
 #[derive(Clone, Debug)]
 pub enum AuthorMode {
+    /// Neither of the fields are required to be set.
+    NoneRequired,
+    /// At least one of the fields must be present.
+    OneRequired,
+    /// Both fields must be set.
+    BothRequired,
     /// The `author` field must be present.
     AuthorRequired,
     /// The `author` field must be present, the `editor` field is optional.
     AuthorRequiredEditorOptional,
-    /// The `author` field might be present,
-    /// there is no specification for the `editor` field.
-    AuthorOptional,
-    /// Either one or both fields must be present.
-    AuthorEditorRequired,
-    /// The `editor` field must be present.
-    EditorRequired,
-    /// The `editor` field must be set
-    /// while the `author` field must not be set.
+    /// The `editor` field must be set while the `author` field must not be set.
     EditorRequiredAuthorForbidden,
-    /// Both fields must be set.
-    BothRequired,
-    /// Neither of the fields are required to be set.
-    NoneRequired,
 }
 
 impl Default for AuthorMode {
@@ -82,14 +76,14 @@ impl Default for AuthorMode {
 }
 
 impl AuthorMode {
-    pub fn get_all_possible(&self) -> Vec<&str> {
+    pub(crate) fn possible(&self) -> &'static [&'static str] {
         match self {
-            Self::AuthorRequired | Self::AuthorOptional => vec!["author"],
-            Self::AuthorEditorRequired
+            Self::OneRequired
             | Self::BothRequired
-            | Self::AuthorRequiredEditorOptional => vec!["author", "editor"],
-            Self::EditorRequired | Self::EditorRequiredAuthorForbidden => vec!["editor"],
-            _ => vec![],
+            | Self::AuthorRequiredEditorOptional => &["author", "editor"],
+            Self::AuthorRequired => &["author"],
+            Self::EditorRequiredAuthorForbidden => &["editor"],
+            _ => &[],
         }
     }
 }
@@ -97,49 +91,49 @@ impl AuthorMode {
 /// Describes the optionality mode of the `pages` and `chapter` field
 #[derive(Clone, Debug)]
 pub enum PagesChapterMode {
-    /// The `pages` field must be present.
-    PagesRequired,
-    /// The `pages` field might be present,
-    /// there is no specification for the `chapter` field.
-    PagesOptional,
-    /// Either one or both fields must be present.
-    PagesChapterRequired,
+    /// No specification for the `page` and `chapter` field is given.
+    None,
+    /// At least one of the fields must be present.
+    OneRequired,
     /// Both fields are optional.
     BothOptional,
     /// Neither field may appear.
     BothForbidden,
-    /// No specification for the `page` and `chapter` field is given.
-    NoSpec,
+    /// The `pages` field might be present, there is no specification for the
+    /// `chapter` field.
+    PagesOptional,
+    /// The `pages` field must be present.
+    PagesRequired,
 }
 
 impl Default for PagesChapterMode {
     fn default() -> Self {
-        Self::NoSpec
+        Self::None
     }
 }
 
 impl PagesChapterMode {
-    pub fn get_all_possible(&self) -> Vec<&str> {
+    pub(crate) fn possible(&self) -> &'static [&'static str] {
         match self {
-            Self::PagesRequired | Self::PagesOptional => vec!["pages"],
-            Self::PagesChapterRequired | Self::BothOptional => vec!["pages", "chapter"],
-            _ => vec![],
+            Self::OneRequired | Self::BothOptional => &["pages", "chapter"],
+            Self::PagesOptional | Self::PagesRequired => &["pages"],
+            _ => &[],
         }
     }
 }
 
 /// Specifies what kinds of fields an entry might have to hold.
-#[derive(Clone, Debug, Default)]
-pub struct FieldRequirements<'s> {
+#[derive(Debug, Default, Clone)]
+pub struct Requirements {
     /// Fields that have to be present for the entry to be valid.
-    pub required: Vec<&'s str>,
+    pub required: Vec<&'static str>,
     /// Fields that might be present and are often used by bibliography styles.
     ///
     /// These fields, together with the required fields, will be taken into
     /// consideration for `crossref` and `xdata` transfers.
-    pub optional: Vec<&'s str>,
+    pub optional: Vec<&'static str>,
     /// These fields must not appear for the entry to be valid.
-    pub forbidden: Vec<&'s str>,
+    pub forbidden: Vec<&'static str>,
     /// Specifies the relation of author and editor field compulsiveness.
     pub author_eds_field: AuthorMode,
     /// Specifies the relation of page and chapter field compulsiveness.
@@ -149,14 +143,15 @@ pub struct FieldRequirements<'s> {
 }
 
 impl EntryType {
-    /// Get a `EntryType` for a `&str`.
+    /// Parse from a string.
     ///
-    /// Use instead of `from_str` when constructing from `.bib` files because
-    /// aliases are handled here.
-    pub fn robust_from_str(name: &str) -> Self {
+    /// Use this instead of the basic `from_str` when constructing from `.bib`
+    /// files because case and aliases are considered here.
+    pub fn new(name: &str) -> Self {
         let name = name.to_lowercase();
-        if let Ok(trial) = EntryType::from_str(&name) {
-            return trial;
+
+        if let Ok(ty) = EntryType::from_str(&name) {
+            return ty;
         }
 
         match name.as_str() {
@@ -167,7 +162,41 @@ impl EntryType {
         }
     }
 
-    /// Convert the type to a type supported by BibTeX.
+    /// Is this a multi-volume work?
+    pub fn is_multi_volume(&self) -> bool {
+        match self {
+            Self::MvBook => true,
+            Self::MvCollection => true,
+            Self::MvReference => true,
+            Self::MvProceedings => true,
+            _ => false,
+        }
+    }
+
+    /// Is this a single-volume composite work?
+    pub fn is_collection(&self) -> bool {
+        match self {
+            Self::Book => true,
+            Self::Collection => true,
+            Self::Periodical => true,
+            Self::Reference => true,
+            Self::Proceedings => true,
+            _ => false,
+        }
+    }
+
+    /// Convert into a type native to BibLaTeX.
+    pub fn to_biblatex(&self) -> Self {
+        match self {
+            Self::MastersThesis => Self::Thesis,
+            Self::PhdThesis => Self::Thesis,
+            Self::TechReport => Self::Report,
+            Self::Unknown(_) => Self::Misc,
+            _ => self.clone(),
+        }
+    }
+
+    /// Convert into a type supported by BibTeX.
     pub fn to_bibtex(&self) -> Self {
         match self {
             Self::MvBook => Self::Book,
@@ -195,44 +224,11 @@ impl EntryType {
         }
     }
 
-    /// Convert the type to a type native to BibLaTeX.
-    pub fn to_biblatex(&self) -> Self {
-        match self {
-            Self::MastersThesis => Self::Thesis,
-            Self::PhdThesis => Self::Thesis,
-            Self::TechReport => Self::Report,
-            Self::Unknown(_) => Self::Misc,
-            _ => self.clone(),
-        }
-    }
-
-    /// Is the `EntryType` a multi-volume work?
-    pub fn is_multi_volume(&self) -> bool {
-        match self {
-            Self::MvBook => true,
-            Self::MvCollection => true,
-            Self::MvReference => true,
-            Self::MvProceedings => true,
-            _ => false,
-        }
-    }
-
-    /// Is the `EntryType` a single-volume composite work?
-    pub fn is_collection(&self) -> bool {
-        match self {
-            Self::Book => true,
-            Self::Collection => true,
-            Self::Periodical => true,
-            Self::Reference => true,
-            Self::Proceedings => true,
-            _ => false,
-        }
-    }
-
     /// Get the required fields for the `EntryType`.
-    pub fn get_requirements(&self) -> FieldRequirements {
-        let mut reqs = FieldRequirements::default();
+    pub(crate) fn requirements(&self) -> Requirements {
+        let mut reqs = Requirements::default();
         reqs.needs_date = true;
+
         reqs.required.push("title");
 
         reqs.optional.push("note");
@@ -302,7 +298,7 @@ impl EntryType {
                 reqs.optional.push("isbn");
                 reqs.optional.push("pagetotal");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
             }
             Self::Booklet => {
@@ -310,7 +306,7 @@ impl EntryType {
                 reqs.optional.push("type");
                 reqs.optional.push("pagetotal");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
                 reqs.needs_date = false;
             }
@@ -342,8 +338,8 @@ impl EntryType {
 
                 reqs.forbidden.push("pagetotal");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
-                reqs.page_chapter_field = PagesChapterMode::PagesChapterRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
+                reqs.page_chapter_field = PagesChapterMode::OneRequired;
             }
             Self::InCollection => {
                 reqs.required.push("publisher");
@@ -412,7 +408,7 @@ impl EntryType {
                 reqs.optional.push("type");
                 reqs.optional.push("pagetotal");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
                 reqs.needs_date = false;
             }
@@ -428,7 +424,7 @@ impl EntryType {
                 reqs.optional.push("organization");
                 reqs.optional.push("type");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
                 // reqs.page_chapter_field = PagesChapterMode::BothOptional;
                 reqs.needs_date = false;
             }
@@ -586,7 +582,7 @@ impl EntryType {
                 reqs.optional.remove(1);
                 reqs.optional.push("organization");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
             }
             Self::Dataset => {
                 reqs.optional.push("edition");
@@ -597,34 +593,34 @@ impl EntryType {
                 reqs.optional.push("organization");
                 reqs.optional.push("publisher");
 
-                reqs.author_eds_field = AuthorMode::AuthorEditorRequired;
+                reqs.author_eds_field = AuthorMode::OneRequired;
             }
             Self::PhdThesis => {
-                reqs = Self::MastersThesis.get_requirements();
+                reqs = Self::MastersThesis.requirements();
             }
             Self::SuppPeriodical => {
-                reqs = Self::Article.get_requirements();
+                reqs = Self::Article.requirements();
             }
             Self::BookInBook => {
-                reqs = Self::InBook.get_requirements();
+                reqs = Self::InBook.requirements();
             }
             Self::SuppBook => {
-                reqs = Self::InBook.get_requirements();
+                reqs = Self::InBook.requirements();
             }
             Self::SuppCollection => {
-                reqs = Self::InCollection.get_requirements();
+                reqs = Self::InCollection.requirements();
             }
             Self::Reference => {
-                reqs = Self::Collection.get_requirements();
+                reqs = Self::Collection.requirements();
             }
             Self::MvReference => {
-                reqs = Self::MvCollection.get_requirements();
+                reqs = Self::MvCollection.requirements();
             }
             Self::InReference => {
-                reqs = Self::InCollection.get_requirements();
+                reqs = Self::InCollection.requirements();
             }
             Self::Software => {
-                reqs = Self::Misc.get_requirements();
+                reqs = Self::Misc.requirements();
             }
             Self::Set => {
                 reqs.optional.clear();
@@ -639,7 +635,7 @@ impl EntryType {
                 reqs.needs_date = false;
             }
             Self::Unknown(_) => {
-                reqs = Self::MvCollection.get_requirements();
+                reqs = Self::MvCollection.requirements();
             }
         }
 
