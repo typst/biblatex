@@ -14,7 +14,7 @@ use numerals::roman::Roman;
 use regex::Regex;
 use strum::{AsRefStr, Display, EnumString};
 
-use super::*;
+use crate::chunk::*;
 
 /// Convert Bib(La)TeX data types from and to chunk slices.
 pub trait Type: Sized {
@@ -23,6 +23,45 @@ pub trait Type: Sized {
 
     /// Serialize the type into chunks.
     fn to_chunks(&self) -> Chunks;
+}
+
+impl Type for i64 {
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        let s = chunks.format_verbatim();
+        let s = s.trim();
+
+        if let Ok(n) = s.parse::<i64>() {
+            Some(n)
+        } else if let Some(roman) = Roman::parse(s) {
+            Some(roman.value() as i64)
+        } else {
+            None
+        }
+    }
+
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(self.to_string())]
+    }
+}
+
+impl Type for String {
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        Some(chunks.format_verbatim())
+    }
+
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Verbatim(self.clone())]
+    }
+}
+
+impl Type for Range<u32> {
+    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+        chunks.parse::<Vec<Range<u32>>>()?.into_iter().next()
+    }
+
+    fn to_chunks(&self) -> Chunks {
+        vec![Chunk::Normal(format!("{}-{}", self.start, self.end))]
+    }
 }
 
 impl Type for Vec<Chunks> {
@@ -49,6 +88,7 @@ impl Type for Vec<Chunks> {
 }
 
 impl Type for Vec<String> {
+    /// Splits the chunks at commas.
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
         Some(
             split_token_lists(chunks, ",")
@@ -64,46 +104,8 @@ impl Type for Vec<String> {
     }
 }
 
-impl Type for String {
-    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        Some(chunks.format_verbatim())
-    }
-
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Verbatim(self.clone())]
-    }
-}
-
-impl Type for i64 {
-    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        let s = chunks.format_verbatim();
-        let s = s.trim();
-
-        if let Ok(n) = s.parse::<i64>() {
-            Some(n)
-        } else if let Some(roman) = Roman::parse(s) {
-            Some(roman.value() as i64)
-        } else {
-            None
-        }
-    }
-
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(self.to_string())]
-    }
-}
-
-impl Type for Range<u32> {
-    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        chunks.parse::<Vec<Range<u32>>>()?.into_iter().next()
-    }
-
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(format!("{}-{}", self.start, self.end))]
-    }
-}
-
 impl Type for Vec<Range<u32>> {
+    /// Splits the ranges at commas.
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
         lazy_static! {
             // Range regex (like `5 -- 7`).
@@ -183,7 +185,9 @@ impl Type for Pagination {
     }
 }
 
-/// Which role the according editor had (cf. EditorA, EditorB, EditorC fields).
+/// Which role the according editor had.
+///
+/// The value of the `editor` through `editorc` fields.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum EditorType {
@@ -207,7 +211,7 @@ impl Type for EditorType {
     }
 }
 
-/// Gender of the author or editor (if no author specified).
+/// Gender of the author or editor (if no author was specified).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, AsRefStr)]
 pub enum Gender {
     SingularFemale,

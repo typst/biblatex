@@ -21,10 +21,11 @@ biblatex = "0.3.0"
 Parsing a bibliography and getting the author of an item is as simple as:
 
 ```rust
-let bibliography = Bibliography::parse(bib_src, true);
-let entry = bibliography.get("cite_key")?;
-let author = entry.author()?;
-println!("{}", author[0].name);
+let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
+let bibliography = Bibliography::parse(src);
+let entry = bibliography.get("tolkien1937").unwrap();
+let author = entry.author().unwrap();
+assert_eq!(author[0].name, "Tolkien");
 ```
 
 This library operates on a `Bibliography` struct, which is a collection of

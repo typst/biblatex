@@ -6,7 +6,8 @@ use std::str::Chars;
 
 use unicode_xid::UnicodeXID;
 
-/// The file's most literal representation, with abbreviations not yet resolved.
+/// A literal representation of a bibliography file, with abbreviations not yet
+/// resolved.
 #[derive(Debug, Clone)]
 pub struct RawBibliography<'s> {
     /// TeX commands to be prepended to the document, only supported by BibTeX.
@@ -22,9 +23,9 @@ pub struct RawBibliography<'s> {
 pub struct RawEntry<'s> {
     /// The citation key.
     pub key: &'s str,
-    /// Denotes the type of bibliography item (e.g. `article`).
+    /// Denotes the type of bibliographic item (e.g. `article`).
     pub entry_type: &'s str,
-    /// Maps from field names to their associated values.
+    /// Maps from field names to their values.
     pub fields: HashMap<&'s str, &'s str>,
 }
 

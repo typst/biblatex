@@ -1,6 +1,23 @@
-//!  A crate for parsing Bib(La)TeX files.
-//!
-//! The API entrypoint is [`Bibliography`].
+/*!
+A crate for parsing Bib(La)TeX files.
+
+The main API entrypoint is a [`Bibliography`].
+
+# Example
+
+Finding out the author of a work.
+```
+# use biblatex::Bibliography;
+# fn main() -> std::io::Result<()> {
+let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
+let bibliography = Bibliography::parse(src);
+let entry = bibliography.get("tolkien1937").unwrap();
+let author = entry.author().unwrap();
+assert_eq!(author[0].name, "Tolkien");
+# Ok(())
+# }
+```
+*/
 
 mod chunk;
 mod mechanics;
@@ -8,14 +25,16 @@ mod raw;
 mod resolve;
 mod types;
 
-pub use chunk::*;
-pub use mechanics::*;
-pub use raw::*;
+pub use chunk::{Chunk, Chunks, ChunksExt};
+pub use mechanics::EntryType;
+pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
 use std::collections::HashMap;
-use std::fmt::Write as WriteFmt;
+use std::fmt::Write as _;
 use std::io::{self, Write};
+
+use mechanics::{AuthorMode, PagesChapterMode};
 
 use paste::paste;
 
@@ -62,7 +81,7 @@ impl Bibliography {
         for entry in raw.entries {
             res.insert(Entry {
                 key: entry.key.to_string(),
-                entry_type: EntryType::robust_from_str(entry.entry_type),
+                entry_type: EntryType::new(entry.entry_type),
                 fields: entry
                     .fields
                     .into_iter()
@@ -146,24 +165,6 @@ impl Bibliography {
         }
     }
 
-    /// Serialize this bibliography into a BibLaTeX string.
-    pub fn to_biblatex_string(&mut self) -> String {
-        let mut biblatex = String::new();
-        for entry in self.entries.iter_mut() {
-            biblatex.push_str(&entry.to_biblatex_string());
-            biblatex.push('\n');
-        }
-        biblatex
-    }
-
-    /// Write the entry into a writer in the BibLaTeX format.
-    pub fn write_biblatex(&mut self, mut sink: impl Write) -> io::Result<()> {
-        for entry in self.entries.iter_mut() {
-            writeln!(sink, "{}", entry.to_biblatex_string())?;
-        }
-        Ok(())
-    }
-
     /// An iterator over the bibliography's entries.
     pub fn iter(&self) -> std::slice::Iter<Entry> {
         self.entries.iter()
@@ -172,6 +173,42 @@ impl Bibliography {
     /// A mutable iterator over the bibliography's entries.
     pub fn iter_mut(&mut self) -> std::slice::IterMut<Entry> {
         self.entries.iter_mut()
+    }
+
+    /// Serialize this bibliography into a BibLaTeX string.
+    pub fn to_biblatex_string(&self) -> String {
+        let mut biblatex = String::new();
+        for entry in &self.entries {
+            biblatex.push_str(&entry.to_biblatex_string());
+            biblatex.push('\n');
+        }
+        biblatex
+    }
+
+    /// Write the entry into a writer in the BibLaTeX format.
+    pub fn write_biblatex(&self, mut sink: impl Write) -> io::Result<()> {
+        for entry in &self.entries {
+            writeln!(sink, "{}", entry.to_biblatex_string())?;
+        }
+        Ok(())
+    }
+
+    /// Serialize this bibliography into a BibTeX string.
+    pub fn to_bibtex_string(&self) -> String {
+        let mut bibtex = String::new();
+        for entry in &self.entries {
+            bibtex.push_str(&entry.to_bibtex_string());
+            bibtex.push('\n');
+        }
+        bibtex
+    }
+
+    /// Write the entry into a writer in the BibTeX format.
+    pub fn write_bibtex(&self, mut sink: impl Write) -> io::Result<()> {
+        for entry in &self.entries {
+            writeln!(sink, "{}", entry.to_bibtex_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -190,41 +227,179 @@ impl Entry {
         Self { key, entry_type, fields: HashMap::new() }
     }
 
-    /// Get the chunk slice for a field.
+    /// Get the chunk slice of a field.
     ///
     /// The field key must be lowercase.
     pub fn get(&self, key: &str) -> Option<&[Chunk]> {
         self.fields.get(key).map(AsRef::as_ref)
     }
 
-    /// Parse the chunk slice for a field as a specific type.
+    /// Parse the value of a field into a specific type.
+    ///
+    /// The field key must be lowercase.
     pub fn get_as<T: Type>(&self, key: &str) -> Option<T> {
         self.get(key)?.parse::<T>()
     }
 
-    /// Get an entry but return None for empty chunk slices.
-    fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
-        let entry = self.get(key)?;
-        if !entry.is_empty() { Some(entry) } else { None }
-    }
-
-    /// Sets a field value as a chunk vector.
+    /// Set the chunk slice for a field.
+    ///
+    /// The field key is lowercased before insertion.
     pub fn set(&mut self, key: &str, chunks: Chunks) {
         self.fields.insert(key.to_lowercase(), chunks);
     }
 
-    /// Sets a field value as a chunk vector as a specific type.
+    /// Set the value of a field as a specific type.
+    ///
+    /// The field key is lowercased before insertion.
     pub fn set_as<T: Type>(&mut self, key: &str, value: &T) {
         self.set(key, value.to_chunks());
     }
 
-    /// Removes a field from the entry.
+    /// Remove a field from the entry.
     pub fn remove(&mut self, key: &str) -> Option<Chunks> {
         self.fields.remove(key)
     }
 
+    /// The parents of an entry in a semantic sense (`crossref` and `xref`).
+    pub fn parents(&self) -> Vec<String> {
+        let mut parents = vec![];
+
+        if let Some(crossref) = self.get_as::<String>("crossref") {
+            parents.push(crossref);
+        }
+
+        if let Some(xrefs) = self.get_as::<Vec<String>>("xref") {
+            parents.extend(xrefs);
+        }
+
+        parents
+    }
+
+    /// Verify if the entry has the appropriate fields for its [`EntryType`].
+    ///
+    /// This function returns two vectors: The first indicating fields that
+    /// should have been present but were not, the second indicating fields that
+    /// were set but are forbidden by the [`EntryType`]. Consequently, the entry
+    /// is well-formed if both vectors are empty.
+    ///
+    /// _Note:_ This function will not resolve the entry. If you want to support
+    /// / expect files using `crossref` and `xdata`, you will want to call this
+    /// method only on entries obtained through [`Bibliography::get_resolved`].
+    pub fn verify(&self) -> (Vec<&str>, Vec<&str>) {
+        let reqs = self.entry_type.requirements();
+        let mut missing = vec![];
+        let mut outlawed = vec![];
+
+        for field in reqs.required {
+            match field {
+                "journaltitle" => {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("journal"))
+                        .is_none()
+                    {
+                        missing.push(field);
+                    }
+                }
+                "location" => {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("address"))
+                        .is_none()
+                    {
+                        missing.push(field);
+                    }
+                }
+                "school"
+                    if self.entry_type == EntryType::Thesis
+                        || self.entry_type == EntryType::MastersThesis
+                        || self.entry_type == EntryType::PhdThesis =>
+                {
+                    if self
+                        .get_non_empty(field)
+                        .or_else(|| self.get_non_empty("institution"))
+                        .is_none()
+                    {
+                        missing.push(field);
+                    }
+                }
+                _ => {
+                    if self.get_non_empty(field).is_none() {
+                        missing.push(field);
+                    }
+                }
+            }
+        }
+
+        for field in reqs.forbidden {
+            if self.get_non_empty(field).is_some() {
+                outlawed.push(field);
+            }
+        }
+
+        match reqs.author_eds_field {
+            AuthorMode::OneRequired => {
+                if self.author().is_none() && self.editors().is_empty() {
+                    missing.push("author");
+                }
+            }
+            AuthorMode::BothRequired => {
+                if self.editors().is_empty() {
+                    missing.push("editor");
+                }
+                if self.author().is_none() {
+                    missing.push("author");
+                }
+            }
+            AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
+                if self.author().is_none() {
+                    missing.push("author");
+                }
+            }
+            AuthorMode::EditorRequiredAuthorForbidden => {
+                if self.editors().is_empty() {
+                    missing.push("editor");
+                }
+                if self.author().is_some() {
+                    outlawed.push("author");
+                }
+            }
+            _ => {}
+        }
+
+        match reqs.page_chapter_field {
+            PagesChapterMode::OneRequired => {
+                if self.pages().is_none() && self.chapter().is_none() {
+                    missing.push("pages");
+                }
+            }
+            PagesChapterMode::BothForbidden => {
+                if self.pages().is_some() {
+                    outlawed.push("pages");
+                }
+                if self.chapter().is_some() {
+                    outlawed.push("chapter");
+                }
+            }
+            PagesChapterMode::PagesRequired => {
+                if self.pages().is_none() {
+                    missing.push("pages");
+                }
+            }
+            _ => {}
+        }
+
+        if reqs.needs_date {
+            if self.date().is_none() {
+                missing.push("year");
+            }
+        }
+
+        (missing, outlawed)
+    }
+
     /// Serialize this entry into a BibLaTeX string.
-    pub fn to_biblatex_string(&mut self) -> String {
+    pub fn to_biblatex_string(&self) -> String {
         let mut biblatex = String::new();
         let ty = self.entry_type.to_biblatex();
 
@@ -246,7 +421,7 @@ impl Entry {
     }
 
     /// Serialize this entry into a BibTeX string.
-    pub fn to_bibtex_string(&mut self) -> String {
+    pub fn to_bibtex_string(&self) -> String {
         let mut bibtex = String::new();
         let ty = self.entry_type.to_bibtex();
         let thesis = matches!(ty, EntryType::PhdThesis | EntryType::MastersThesis);
@@ -278,37 +453,51 @@ impl Entry {
         bibtex
     }
 
-    /// The parents of an entry in a semantic sense (`crossref` and `xref`).
-    pub fn parents(&self) -> Vec<String> {
-        let mut parents = vec![];
+    /// Get an entry but return None for empty chunk slices.
+    fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
+        let entry = self.get(key)?;
+        if !entry.is_empty() { Some(entry) } else { None }
+    }
+
+    /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
+    fn resolve_crossrefs(&mut self, bib: &Bibliography) {
+        let mut refs = vec![];
 
         if let Some(crossref) = self.get_as::<String>("crossref") {
-            parents.push(crossref);
+            refs.extend(bib.get(&crossref).cloned());
         }
 
-        if let Some(xrefs) = self.get_as::<Vec<String>>("xref") {
-            parents.extend(xrefs);
+        if let Some(keys) = self.get_as::<Vec<String>>("xdata") {
+            for key in keys {
+                refs.extend(bib.get(&key).cloned());
+            }
         }
 
-        parents
+        for mut crossref in refs {
+            crossref.resolve_crossrefs(bib);
+            self.resolve_single_crossref(crossref);
+        }
+
+        self.remove("crossref");
+        self.remove("xdata");
     }
 
     /// Resolve data dependencies using another entry.
     fn resolve_single_crossref(&mut self, crossref: Entry) {
-        let typ = self.entry_type.clone();
-        let mut requirements = typ.get_requirements();
-        let mut active_fields = requirements.required.clone();
-        active_fields.append(&mut requirements.optional);
-        active_fields.append(&mut requirements.page_chapter_field.get_all_possible());
-        active_fields.append(&mut requirements.author_eds_field.get_all_possible());
+        let req = self.entry_type.requirements();
+
+        let mut relevant = req.required;
+        relevant.extend(req.optional);
+        relevant.extend(req.page_chapter_field.possible());
+        relevant.extend(req.author_eds_field.possible());
 
         if self.entry_type == EntryType::XData {
             for f in crossref.fields.keys() {
-                active_fields.push(f);
+                relevant.push(f);
             }
         }
 
-        for f in active_fields {
+        for f in relevant {
             if self.get(f).is_some() {
                 continue;
             }
@@ -393,167 +582,10 @@ impl Entry {
             return;
         }
 
-        if requirements.needs_date {
+        if req.needs_date {
             if let Some(date) = crossref.date() {
                 self.set_date(date);
             }
-        }
-    }
-
-    /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &Bibliography) {
-        let mut refs = vec![];
-
-        if let Some(crossref) = self.get_as::<String>("crossref") {
-            refs.extend(bib.get(&crossref).cloned());
-        }
-
-        if let Some(keys) = self.get_as::<Vec<String>>("xdata") {
-            for key in keys {
-                refs.extend(bib.get(&key).cloned());
-            }
-        }
-
-        for mut crossref in refs {
-            crossref.resolve_crossrefs(bib);
-            self.resolve_single_crossref(crossref);
-        }
-
-        self.remove("crossref");
-        self.remove("xdata");
-    }
-
-    /// Verify if the entry has all fields required for its [`EntryType`].
-    ///
-    /// This function returns `Ok(())` upon successful validation. The `Err`
-    /// variant of the result contains a pair carrying two vectors of keys: The
-    /// first indicating fields that should have been present but were not, the
-    /// second indicating fields that were set but are forbidden by the
-    /// [`EntryType`].
-    ///
-    /// _Note:_ This function will not resolve the entry. If you want to support
-    /// / expect files using `crossref` and `xdata`, you will want to call this
-    /// method only on entries obtained through the `Bibliography::get_resolved`
-    /// call.
-    pub fn verify(&self) -> Result<(), (Vec<&str>, Vec<&str>)> {
-        let reqs = self.entry_type.get_requirements();
-        let mut expected = vec![];
-        let mut outlawed = vec![];
-
-        for field in reqs.required {
-            match field {
-                "journaltitle" => {
-                    if self
-                        .get_non_empty(field)
-                        .or_else(|| self.get_non_empty("journal"))
-                        .is_none()
-                    {
-                        expected.push(field);
-                    }
-                }
-                "location" => {
-                    if self
-                        .get_non_empty(field)
-                        .or_else(|| self.get_non_empty("address"))
-                        .is_none()
-                    {
-                        expected.push(field);
-                    }
-                }
-                "school"
-                    if self.entry_type == EntryType::Thesis
-                        || self.entry_type == EntryType::MastersThesis
-                        || self.entry_type == EntryType::PhdThesis =>
-                {
-                    if self
-                        .get_non_empty(field)
-                        .or_else(|| self.get_non_empty("institution"))
-                        .is_none()
-                    {
-                        expected.push(field);
-                    }
-                }
-                _ => {
-                    if self.get_non_empty(field).is_none() {
-                        expected.push(field);
-                    }
-                }
-            }
-        }
-
-        for field in reqs.forbidden {
-            if self.get_non_empty(field).is_some() {
-                outlawed.push(field);
-            }
-        }
-
-        if reqs.needs_date {
-            if self.date().is_none() {
-                expected.push("year");
-            }
-        }
-
-        match reqs.page_chapter_field {
-            PagesChapterMode::PagesRequired => {
-                if self.pages().is_none() {
-                    expected.push("pages");
-                }
-            }
-            PagesChapterMode::PagesChapterRequired => {
-                if self.pages().is_none() && self.chapter().is_none() {
-                    expected.push("pages");
-                }
-            }
-            PagesChapterMode::BothForbidden => {
-                if self.pages().is_some() {
-                    outlawed.push("pages");
-                }
-                if self.chapter().is_some() {
-                    outlawed.push("chapter");
-                }
-            }
-            _ => {}
-        }
-
-        match reqs.author_eds_field {
-            AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
-                if self.author().is_none() {
-                    expected.push("author");
-                }
-            }
-            AuthorMode::AuthorEditorRequired => {
-                if self.author().is_none() && self.editors().is_empty() {
-                    expected.push("author");
-                }
-            }
-            AuthorMode::EditorRequired => {
-                if self.editors().is_empty() {
-                    expected.push("editor");
-                }
-            }
-            AuthorMode::EditorRequiredAuthorForbidden => {
-                if self.editors().is_empty() {
-                    expected.push("editor");
-                }
-                if self.author().is_some() {
-                    outlawed.push("author");
-                }
-            }
-            AuthorMode::BothRequired => {
-                if self.editors().is_empty() {
-                    expected.push("editor");
-                }
-                if self.author().is_none() {
-                    expected.push("author");
-                }
-            }
-            _ => {}
-        }
-
-        if expected.is_empty() && outlawed.is_empty() {
-            Ok(())
-        } else {
-            Err((expected, outlawed))
         }
     }
 }
@@ -835,22 +867,20 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents);
 
-        assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
-        assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
+        let ok = (vec![], vec![]);
+        assert_eq!(bibliography.get_mut("haug2019").unwrap().verify(), ok);
+        assert_eq!(bibliography.get_mut("cannonfodder").unwrap().verify(), ok);
 
         let ill = bibliography.get("ill-defined").unwrap();
-        if let Err((exp, forb)) = ill.verify() {
-            assert!(exp.contains(&"title"));
-            assert!(exp.contains(&"year"));
-            assert!(exp.contains(&"editor"));
-            assert!(forb.contains(&"maintitle"));
-            assert!(forb.contains(&"author"));
-            assert!(forb.contains(&"chapter"));
-            assert_eq!(exp.len(), 3);
-            assert_eq!(forb.len(), 3);
-        } else {
-            panic!("Should not have passed test");
-        }
+        let (missing, outlawed) = ill.verify();
+        assert_eq!(missing.len(), 3);
+        assert_eq!(outlawed.len(), 3);
+        assert!(missing.contains(&"title"));
+        assert!(missing.contains(&"year"));
+        assert!(missing.contains(&"editor"));
+        assert!(outlawed.contains(&"maintitle"));
+        assert!(outlawed.contains(&"author"));
+        assert!(outlawed.contains(&"chapter"));
     }
 
     #[test]
@@ -902,7 +932,7 @@ mod tests {
 
     fn dump_author_title(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let mut bibliography = Bibliography::parse(&contents);
+        let bibliography = Bibliography::parse(&contents);
 
         println!("{}", bibliography.to_biblatex_string());
 

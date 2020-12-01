@@ -25,7 +25,7 @@ lazy_static! {
     static ref MONTH_DAY_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)(-|\u{00a0}|\s)+(?P<d>[0-9]+)").unwrap();
 }
 
-/// Represents a date or a range of dates and their certainty and exactness.
+/// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Date {
     /// The date or the date range.
@@ -36,7 +36,7 @@ pub struct Date {
     pub approximate: bool,
 }
 
-/// Represents a atomic date or a range of dates.
+/// A single date or a range of dates.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DateValue {
     /// A single date.
@@ -49,11 +49,9 @@ pub enum DateValue {
     Between(Datetime, Datetime),
 }
 
-/// A timezone-unaware date that must specify a year and may specify month, day,
-/// and time.
+/// Timezone-unaware date and time.
 ///
-/// Flags about uncertainity / precision are stored within the parent [`Date`]
-/// struct.
+/// Must specify a year and may specify month, day, and time.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Datetime {
     /// The year.
@@ -570,7 +568,7 @@ mod tests {
         let date = Date::parse(&[N("/-0031-07%")]).unwrap();
         assert_eq!(date.to_chunks(), vec![N("../-0031-07%")]);
         assert_eq!(date, Date {
-            value: DateValue::After(Datetime {
+            value: DateValue::Before(Datetime {
                 year: -31,
                 month: Some(6),
                 day: None,

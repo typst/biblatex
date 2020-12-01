@@ -1,5 +1,5 @@
-use super::Type;
 use crate::resolve::is_escapable;
+use crate::types::Type;
 
 /// A sequence of chunks.
 pub type Chunks = Vec<Chunk>;
