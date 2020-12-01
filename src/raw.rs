@@ -4,8 +4,6 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use unicode_xid::UnicodeXID;
-
 /// A literal representation of a bibliography file, with abbreviations not yet
 /// resolved.
 #[derive(Debug, Clone)]
@@ -304,15 +302,10 @@ impl<'s> BiblatexParser<'s> {
 /// Characters allowable in identifiers like cite keys.
 fn is_ident(c: char, first: bool) -> bool {
     match c {
-        '"' | '#' | '\'' | '(' | ')' | ',' | '=' | '{' | '}' | '%' | '\\' | '~' => false,
-        ':' | '<' | '-' | '>' | '_' if !first => true,
-        _ => {
-            if first {
-                c.is_xid_start()
-            } else {
-                c.is_xid_continue()
-            }
-        }
+        ' ' | '@' | '{' | '}' | '"' | '#' | '\'' | '(' | ')' | ',' | '=' | '%' | '\\'
+        | '~' => false,
+        ':' | '<' | '-' | '>' | '_' if first => false,
+        _ => true,
     }
 }
 
