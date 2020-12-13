@@ -53,7 +53,7 @@ pub struct Bibliography {
 pub struct Entry {
     /// The citation key.
     pub key: String,
-    /// Denotes the type of bibliography item (e.g. `article`).
+    /// Denotes the type of bibliography item (e.g. `Article`).
     pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
     pub fields: HashMap<String, Chunks>,

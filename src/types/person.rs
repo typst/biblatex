@@ -217,7 +217,7 @@ impl Person {
 impl Type for Vec<Person> {
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
         Some(
-            split_token_lists(chunks, "and")
+            split_token_lists(chunks, " and ")
                 .into_iter()
                 .map(|subchunks| Person::parse(&subchunks))
                 .collect(),

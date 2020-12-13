@@ -67,7 +67,7 @@ impl Type for Range<u32> {
 impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
     fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
-        Some(split_token_lists(chunks, "and"))
+        Some(split_token_lists(chunks, " and "))
     }
 
     fn to_chunks(&self) -> Chunks {
