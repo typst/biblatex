@@ -277,7 +277,8 @@ impl Display for Person {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::tests::*;
+    use std::collections::HashMap;
+    use crate::{chunk::tests::*, resolve::resolve};
 
     #[test]
     fn test_person_comma() {
@@ -371,5 +372,15 @@ mod tests {
         assert_eq!(p.prefix, "");
         assert_eq!(p.suffix, "Sr.");
         assert_eq!(p.given_name, "Harcourt Fenton");
+    }
+
+    #[test]
+    fn person_with_command() {
+        let value ="{Syperek, Marcin and Dusanowski, {\\L}ukasz and Misiewicz, Jan and Langer, Fabian and Forchel, Alfred}";
+        let res = resolve(value, &HashMap::new()).unwrap();
+        let pers: Vec<Person> = Vec::<Person>::from_chunks(&res).unwrap();
+        assert_eq!(pers.len(), 5);
+        assert_eq!(pers[1].given_name, "Łukasz");
+        assert_eq!(pers[2].given_name, "Jan");
     }
 }

@@ -128,7 +128,7 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
             }
             '{' if stack.last() == Some(&Symbols::Command) => {
                 let res = parse_string(&value[index + 1..], true)?;
-                for _ in 0..res.1 {
+                for _ in 0..(res.1 + 1) {
                     chars_iter.next();
                 }
 
@@ -138,10 +138,15 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
                     panic!("If the last symbol was a command, the stack has to have a Command.");
                 }
 
+                stack.pop();
+
                 expect_arg = false;
             }
             '}' if stack.last() == Some(&Symbols::Command) => {
                 if stack.pop() != Some(Symbols::Command) {
+                    return None
+                }
+                if stack.pop() != Some(Symbols::Braces) {
                     return None
                 }
             }
@@ -536,14 +541,20 @@ mod tests {
 
     #[test]
     fn test_commands() {
-        let res = resolve_latex_commands(parse_string("{\\LaTeX{}~is gr\\~e\\`at\\o", false).unwrap().0);
-        assert_eq!(res[0], V("LaTeX"));
-        assert_eq!(res[1], N("\u{00A0}is grẽàtø"));
+        // let res = resolve_latex_commands(parse_string("{\\LaTeX{}~is gr\\~e\\`at\\o", false).unwrap().0);
+        // assert_eq!(res[0], V("LaTeX"));
+        // assert_eq!(res[1], N("\u{00A0}is grẽàtø"));
+        let res = resolve_latex_commands(parse_string("{Bose\\textendash{}Einstein}", false).unwrap().0);
+        assert_eq!(res[0], N("Bose–Einstein"));
     }
 
     #[test]
     fn test_nested_commands() {
-        let res = resolve_latex_commands(parse_string("{\\textendash{\\`a}}", false).unwrap().0);
-        assert_eq!(res[0], N("–à"));
+        // let res = resolve_latex_commands(parse_string("{\\textendash{\\`a}}", false).unwrap().0);
+        // assert_eq!(res[0], N("–à"));
+        let res = resolve_latex_commands(parse_string("{A{\\ss}{\\ss}{\\ss}mann}", false).unwrap().0);
+        assert_eq!(res[0], N("A"));
+        assert_eq!(res[1], V("ßßß"));
+        assert_eq!(res[2], N("mann"));
     }
 }
