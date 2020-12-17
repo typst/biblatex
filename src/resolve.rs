@@ -7,18 +7,18 @@ use crate::chunk::{Chunk, Chunks};
 use crate::types::get_month_for_abbr;
 
 /// Fully parse a value, resolving abbreviations and LaTeX commands.
-pub fn resolve(value: &str, abbreviations: &HashMap<&str, &str>) -> Chunks {
-    let parsed = parse_string(value);
+pub fn resolve(value: &str, abbreviations: &HashMap<&str, &str>) -> Option<Chunks> {
+    let parsed = parse_string(value, false)?.0;
     let resolved = resolve_abbreviations(parsed, abbreviations);
     let evaluated = resolve_latex_commands(resolved);
-    evaluated
+    Some(evaluated
         .into_iter()
         .map(|raw| match raw {
             RawChunk::Normal(n) => Chunk::Normal(n),
             RawChunk::Verbatim(v) => Chunk::Verbatim(v),
             raw => panic!("raw chunk should have been resolved: {:?}", raw),
         })
-        .collect()
+        .collect())
 }
 
 /// A not yet fully resolved chunk.
@@ -39,14 +39,42 @@ enum RawChunk {
     Abbreviation(String),
     /// LaTeX command names within quotes or braces.
     /// May be followed by `Chunk::CommandArgs` in chunk slices.
-    CommandName(String, bool),
-    /// LaTeX command arguments.
-    /// Must be preceeded by `Chunk::CommandName` in chunk slices.
-    CommandArgs(String),
+    /// The boolean indicates if the command has appeared in a
+    /// verbatim context.
+    /// Arguments may appear in the `Option<Vec<RawChunk>>` element.
+    CommandName(String, bool, Option<Vec<RawChunk>>),
+}
+
+impl RawChunk {
+    fn to_verbatim(self) -> Self {
+        if let Self::Normal(s) = self {
+            Self::Verbatim(s)
+        } else {
+            self
+        }
+    }
+
+    fn display_string(&self) -> Option<&str> {
+        match self {
+            Self::Normal(s) => Some(s.as_ref()),
+            Self::Verbatim(s) => Some(s.as_ref()),
+            _ => None,
+        }
+    }
+
+    fn reset_string(self, s: String) -> Self {
+        match self {
+            Self::Normal(_) => Self::Normal(s),
+            Self::Verbatim(_) => Self::Verbatim(s),
+            Self::Abbreviation(_) => Self::Abbreviation(s),
+            Self::CommandName(_, a, b) => Self::CommandName(s, a, b),
+        }
+    }
 }
 
 /// Create a chunk vector from field value string.
-fn parse_string(value: &str) -> Vec<RawChunk> {
+/// Recurses to resolve nested commands.
+fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChunk>, usize)> {
     /// Symbols that may occur while parsing a field value.
     #[derive(Debug, PartialEq)]
     enum Symbols {
@@ -64,35 +92,34 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
         Neither,
     }
 
-    let mut stack: Vec<Symbols> = vec![];
+    let mut stack: Vec<Symbols> = if allow_stack_depletion { vec![Symbols::Braces] } else { vec![] };
     let mut vals: Vec<RawChunk> = vec![];
     let mut allow_resolvable = true;
     let mut is_math = false;
     let mut expect_arg = false;
     let mut esc_cmd_mode = EscCommandMode::Neither;
+    let mut chars_iter = value.chars().enumerate().peekable();
 
-    for c in value.chars().peekable() {
+    while let Some((index, c)) = chars_iter.next() {
         if c == '$' && esc_cmd_mode != EscCommandMode::Both {
             is_math = !is_math;
         }
 
         match c {
             _ if esc_cmd_mode == EscCommandMode::Both && is_escapable(c) => {
-                let _success = if let Some(x) = vals.last_mut() {
+                if let Some(x) = vals.last_mut() {
                     if let RawChunk::Normal(s) = x {
                         s.push(c);
-                        true
                     } else if let RawChunk::Verbatim(s) = x {
                         s.push(c);
-                        true
                     } else {
-                        false
+                        vals.push(RawChunk::Normal(c.into()));
                     }
+                } else if stack.len() == 1 {
+                    vals.push(RawChunk::Normal(c.into()));
                 } else {
-                    false
-                };
-
-                // TODO: Report unexpected escape if !success
+                    vals.push(RawChunk::Verbatim(c.into()));
+                }
             }
 
             '{' if stack.last() != Some(&Symbols::Command) && !is_math => {
@@ -100,13 +127,32 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
                 stack.push(Symbols::Braces);
             }
             '{' if stack.last() == Some(&Symbols::Command) => {
+                let res = parse_string(&value[index + 1..], true)?;
+                for _ in 0..res.1 {
+                    chars_iter.next();
+                }
+
+                if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
+                    args.replace(res.0);
+                } else {
+                    panic!("If the last symbol was a command, the stack has to have a Command.");
+                }
+
                 expect_arg = false;
             }
             '}' if stack.last() == Some(&Symbols::Command) => {
-                assert_eq!(stack.pop(), Some(Symbols::Command));
+                if stack.pop() != Some(Symbols::Command) {
+                    return None
+                }
             }
             '}' if !is_math => {
-                assert_eq!(stack.pop(), Some(Symbols::Braces));
+                if stack.pop() != Some(Symbols::Braces) {
+                    return None;
+                }
+
+                if stack.is_empty() && allow_stack_depletion {
+                    return Some((vals, index))
+                }
             }
 
             '"' if stack.is_empty() => {
@@ -139,21 +185,25 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
             '\r' => {}
 
             _ if expect_arg => {
-                vals.push(RawChunk::CommandArgs(c.to_string()));
+                if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
+                    args.replace(vec![RawChunk::Normal(c.to_string())]);
+                } else {
+                    panic!("If an argument is expected, the stack has to have a Command.");
+                }
                 stack.pop();
                 expect_arg = false;
             }
 
             _ if esc_cmd_mode != EscCommandMode::Neither && !c.is_whitespace() => {
                 match vals.last_mut() {
-                    Some(RawChunk::CommandName(s, _))
+                    Some(RawChunk::CommandName(s, _, _))
                         if esc_cmd_mode == EscCommandMode::OnlyCommand =>
                     {
                         s.push(c);
                     }
                     _ => {
                         esc_cmd_mode = EscCommandMode::OnlyCommand;
-                        vals.push(RawChunk::CommandName(c.to_string(), stack.len() > 1));
+                        vals.push(RawChunk::CommandName(c.to_string(), stack.len() > 1, None));
                         if !matches!(stack.last(), Some(Symbols::Command)) {
                             stack.push(Symbols::Command);
                         }
@@ -166,11 +216,6 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
 
                 continue;
             }
-
-            _ if stack.last() == Some(&Symbols::Command) => match vals.last_mut() {
-                Some(RawChunk::CommandArgs(s)) => s.push(c),
-                _ => vals.push(RawChunk::CommandArgs(c.to_string())),
-            },
 
             _ if stack.is_empty() => match vals.last_mut() {
                 Some(RawChunk::Abbreviation(s)) if !allow_resolvable => s.push(c),
@@ -206,7 +251,7 @@ fn parse_string(value: &str) -> Vec<RawChunk> {
         esc_cmd_mode = EscCommandMode::Neither;
     }
 
-    vals
+    Some((vals, value.len()))
 }
 
 /// Resolves `Chunk::Abbreviation` items to their respective string values.
@@ -218,7 +263,7 @@ fn resolve_abbreviations(s: Vec<RawChunk>, map: &HashMap<&str, &str>) -> Vec<Raw
             // FIXME: Prevent cyclic evaluation.
             let val = map
                 .get(x.as_str())
-                .map(|&s| resolve_abbreviations(parse_string(s), map));
+                .and_then(|&s| Some(resolve_abbreviations(parse_string(s, false)?.0, map)));
 
             if let Some(mut x) = val {
                 res.append(&mut x);
@@ -237,50 +282,60 @@ fn resolve_abbreviations(s: Vec<RawChunk>, map: &HashMap<&str, &str>) -> Vec<Raw
 /// Will dump the command arguments if evaluation not possible.
 /// Nested commands are not supported.
 fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
-    use std::iter::Peekable;
-    use std::vec::IntoIter;
-
     let mut res: Vec<RawChunk> = vec![];
-
     let mut iter = values.into_iter().peekable();
 
     fn modify_args(
-        iter: &mut Peekable<IntoIter<RawChunk>>,
+        args: Option<Vec<RawChunk>>,
         verb: bool,
-        f: impl Fn(String) -> String,
-    ) -> Option<RawChunk> {
-        // Don't treat commands as arguments.
-        if let Some(&RawChunk::CommandName(..)) = iter.peek() {
-            None
+        f: impl Fn(Option<Vec<RawChunk>>) -> Option<Vec<RawChunk>>,
+    ) -> Option<Vec<RawChunk>> {
+        if verb {
+            f(args).map(|a| a.into_iter().map(|a| a.to_verbatim()).collect())
         } else {
-            match iter.next() {
-                Some(RawChunk::CommandArgs(args)) => Some(to_value(&f(args), verb)),
-                chunk => chunk,
+            f(args)
+        }
+    }
+
+    fn last_char_combine(v: Option<Vec<RawChunk>>, combine: char) -> Option<Vec<RawChunk>> {
+        let mut v = v?;
+        if let Some(item) = v.pop() {
+            if let Some(ds) = item.display_string() {
+                let len = ds.len();
+                let lc = if ds.len() > 0 && ds.is_char_boundary(len - 1) {
+                    ds.chars().last().and_then(|c| char::compose(c, combine))
+                } else {
+                    None
+                };
+
+                let item = if let Some(lc) = lc {
+                    let mut s = (&ds[..len - 1]).to_string();
+                    s.push(lc);
+                    item.reset_string(s)
+                } else {
+                    item
+                };
+                v.push(item);
+            } else {
+                v.push(item);
             }
         }
+        Some(v)
     }
 
-    fn last_char_combine(mut v: String, combine: char) -> String {
-        if let Some(c) = v.pop().and_then(|c| char::compose(c, combine)) {
-            v.push(c);
-        }
-        v
-    }
+    fn to_value(s: &str, args: Option<Vec<RawChunk>>) -> Option<Vec<RawChunk>> {
+        let mut start = vec![RawChunk::Normal(s.to_string())];
 
-    fn to_value(s: &str, verb: bool) -> RawChunk {
-        if verb {
-            RawChunk::Verbatim(s.to_string())
-        } else {
-            RawChunk::Normal(s.to_string())
+        if let Some(args) = args {
+            start.extend(args);
         }
+
+        Some(start)
     }
 
     while let Some(val) = iter.next() {
-        let (cmd, verb) = match val {
-            RawChunk::CommandName(cmd, verb) => (cmd, verb),
-            RawChunk::CommandArgs(_) => {
-                panic!("command args where not preceded by command name")
-            }
+        let (cmd, verb, args) = match val {
+            RawChunk::CommandName(cmd, verb, args) => (cmd, verb, args.map(|a| resolve_latex_commands(a))),
             chunk => {
                 res.push(chunk);
                 continue;
@@ -288,54 +343,47 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
         };
 
         let next = match cmd.as_str() {
-            "LaTeX" => Some(to_value("LaTeX", true)),
-            "TeX" => Some(to_value("TeX", true)),
-            "aa" => Some(to_value("å", verb)),
-            "AA" => Some(to_value("Å", verb)),
-            "l" => Some(to_value("ł", verb)),
-            "L" => Some(to_value("Ł", verb)),
-            "i" => Some(to_value("ı", verb)),
-            "oe" => Some(to_value("œ", verb)),
-            "OE" => Some(to_value("Œ", verb)),
-            "ae" => Some(to_value("æ", verb)),
-            "AE" => Some(to_value("Æ", verb)),
-            "o" if !matches!(iter.peek(), Some(RawChunk::CommandArgs(_))) => {
-                Some(to_value("ø", verb))
+            "LaTeX" => modify_args(args, true, |v| to_value("LaTeX", v)),
+            "TeX" => modify_args(args, true, |v| to_value("TeX", v)),
+            "textendash" => modify_args(args, verb, |v| to_value("–", v)),
+            "textemdash" => modify_args(args, verb, |v| to_value("—", v)),
+            "aa" => modify_args(args, verb, |v| to_value("å", v)),
+            "AA" => modify_args(args, verb, |v| to_value("Å", v)),
+            "l" => modify_args(args, verb, |v| to_value("ł", v)),
+            "L" => modify_args(args, verb, |v| to_value("Ł", v)),
+            "i" => modify_args(args, verb, |v| to_value("ı", v)),
+            "oe" => modify_args(args, verb, |v| to_value("œ", v)),
+            "OE" => modify_args(args, verb, |v| to_value("Œ", v)),
+            "ae" => modify_args(args, verb, |v| to_value("æ", v)),
+            "AE" => modify_args(args, verb, |v| to_value("Æ", v)),
+            "o" if args.is_none() => {
+                modify_args(args, verb, |v| to_value("ø", v))
             }
-            "O" => Some(to_value("Ø", verb)),
-            "ss" => Some(to_value("ß", verb)),
-            "SS" => Some(to_value("ẞ", verb)),
-            "`" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{300}')),
-            "´" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{301}')),
-            "'" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{301}')),
-            "^" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{302}')),
-            "~" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{303}')),
-            "=" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{304}')),
-            "u" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{306}')),
-            "." => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{307}')),
-            "\"" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{308}')),
-            "r" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{30A}')),
-            "H" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{30B}')),
-            "v" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{30C}')),
-            "d" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{323}')),
-            "c" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{327}')),
-            "k" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{328}')),
-            "b" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{332}')),
-            "o" => modify_args(&mut iter, verb, |v| last_char_combine(v, '\u{338}')),
-            "t" => modify_args(&mut iter, verb, |mut v| {
-                // FIXME: This one does not seem to work.
-                let last = v.pop();
-                v.push('\u{361}');
-                if let Some(c) = last {
-                    v.push(c);
-                }
-                v
-            }),
-            _ => modify_args(&mut iter, verb, |v| v),
+            "O" => modify_args(args, verb, |v| to_value("Ø", v)),
+            "ss" => modify_args(args, verb, |v| to_value("ß", v)),
+            "SS" => modify_args(args, verb, |v| to_value("ẞ", v)),
+            "`" => modify_args(args, verb, |v| last_char_combine(v, '\u{300}')),
+            "´" => modify_args(args, verb, |v| last_char_combine(v, '\u{301}')),
+            "'" => modify_args(args, verb, |v| last_char_combine(v, '\u{301}')),
+            "^" => modify_args(args, verb, |v| last_char_combine(v, '\u{302}')),
+            "~" => modify_args(args, verb, |v| last_char_combine(v, '\u{303}')),
+            "=" => modify_args(args, verb, |v| last_char_combine(v, '\u{304}')),
+            "u" => modify_args(args, verb, |v| last_char_combine(v, '\u{306}')),
+            "." => modify_args(args, verb, |v| last_char_combine(v, '\u{307}')),
+            "\"" => modify_args(args, verb, |v| last_char_combine(v, '\u{308}')),
+            "r" => modify_args(args, verb, |v| last_char_combine(v, '\u{30A}')),
+            "H" => modify_args(args, verb, |v| last_char_combine(v, '\u{30B}')),
+            "v" => modify_args(args, verb, |v| last_char_combine(v, '\u{30C}')),
+            "d" => modify_args(args, verb, |v| last_char_combine(v, '\u{323}')),
+            "c" => modify_args(args, verb, |v| last_char_combine(v, '\u{327}')),
+            "k" => modify_args(args, verb, |v| last_char_combine(v, '\u{328}')),
+            "b" => modify_args(args, verb, |v| last_char_combine(v, '\u{332}')),
+            "o" => modify_args(args, verb, |v| last_char_combine(v, '\u{338}')),
+            _ => modify_args(args, verb, |v| v),
         };
 
         if let Some(v) = next {
-            res.push(v)
+            res.extend(v)
         }
     }
 
@@ -386,7 +434,7 @@ fn flatten(s: Vec<RawChunk>) -> Vec<RawChunk> {
 /// Characters that can be escaped.
 pub fn is_escapable(c: char) -> bool {
     match c {
-        '&' | '%' | '{' | '}' | '$' | '_' => true,
+        '&' | '%' | '{' | '}' | '$' | '_' | '\\' => true,
         _ => false,
     }
 }
@@ -417,16 +465,13 @@ mod tests {
     fn V(s: &str) -> RawChunk {
         RawChunk::Verbatim(s.to_string())
     }
-    fn C(s: &str, verb: bool) -> RawChunk {
-        RawChunk::CommandName(s.to_string(), verb)
-    }
-    fn CA(s: &str) -> RawChunk {
-        RawChunk::CommandArgs(s.to_string())
+    fn C(s: &str, verb: bool, args: Option<Vec<RawChunk>>) -> RawChunk {
+        RawChunk::CommandName(s.to_string(), verb, args)
     }
 
     #[test]
     fn test_process() {
-        let res = parse_string("abc # \"good {TIMES}\" # hi # you # \"last\"");
+        let res = parse_string("abc # \"good {TIMES}\" # hi # you # \"last\"", false).unwrap().0;
         assert_eq!(res[0], R("abc"));
         assert_eq!(res[1], N("good "));
         assert_eq!(res[2], V("TIMES"));
@@ -438,31 +483,28 @@ mod tests {
 
     #[test]
     fn test_resolve_commands_and_escape() {
-        let res = parse_string("\"\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}\"");
-        assert_eq!(res[0], C("\"", false));
-        assert_eq!(res[1], CA("A"));
-        assert_eq!(res[2], N("ther und "));
-        assert_eq!(res[3], V("\""));
-        assert_eq!(res[4], C("LaTeX", true));
-        assert_eq!(res[5], V("\""));
-        assert_eq!(res[6], N(" "));
-        assert_eq!(res[7], C("relax", true));
-        assert_eq!(res[8], V("for you}"));
-        assert_eq!(res.len(), 9);
+        let res = parse_string("\"\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}\"", false).unwrap().0;
+        assert_eq!(res[0], C("\"", false, Some(vec![N("A")])));
+        assert_eq!(res[1], N("ther und "));
+        assert_eq!(res[2], V("\""));
+        assert_eq!(res[3], C("LaTeX", true, None));
+        assert_eq!(res[4], V("\""));
+        assert_eq!(res[5], N(" "));
+        assert_eq!(res[6], C("relax", true, None));
+        assert_eq!(res[7], V("for you}"));
+        assert_eq!(res.len(), 8);
 
-        let res = parse_string("\"M\\\"etal S\\= ound\"");
+        let res = parse_string("\"M\\\"etal S\\= ound\"", false).unwrap().0;
         assert_eq!(res[0], N("M"));
-        assert_eq!(res[1], C("\"", false));
-        assert_eq!(res[2], CA("e"));
-        assert_eq!(res[3], N("tal S"));
-        assert_eq!(res[4], C("=", false));
-        assert_eq!(res[5], CA("o"));
-        assert_eq!(res[6], N("und"));
+        assert_eq!(res[1], C("\"", false, Some(vec![N("e")])));
+        assert_eq!(res[2], N("tal S"));
+        assert_eq!(res[3], C("=", false, Some(vec![N("o")])));
+        assert_eq!(res[4], N("und"));
     }
 
     #[test]
     fn test_resolve_strings() {
-        let res = parse_string("a # b # c # \" \\\"{a} and others\"");
+        let res = parse_string("a # b # c # \" \\\"{a} and others\"", false).unwrap().0;
         let mut map = HashMap::new();
         map.insert("a", "\"trees\"");
         map.insert("b", "\"bushes\"");
@@ -470,26 +512,38 @@ mod tests {
 
         let res = resolve_abbreviations(res, &map);
         assert_eq!(res[0], N("treesbushestrees and bushes "));
-        assert_eq!(res[1], C("\"", false));
-        assert_eq!(res[2], CA("a"));
-        assert_eq!(res[3], N(" and others"));
+        assert_eq!(res[1], C("\"", false, Some(vec![N("a")])));
+        assert_eq!(res[2], N(" and others"));
 
         let map = HashMap::new();
-        let res = resolve_abbreviations(parse_string("Jan # \"~12\""), &map);
+        let res = resolve_abbreviations(parse_string("Jan # \"~12\"", false).unwrap().0, &map);
         assert_eq!(res[0], N("January\u{A0}12"));
     }
 
     #[test]
     fn test_math() {
-        let res = parse_string("{The $11^{th}$ International Conference on How To Make \\$\\$}");
+        let res = parse_string("{The $11^{th}$ International Conference on How To Make \\$\\$}", false).unwrap().0;
         assert_eq!(res[0], N("The $11^{th}$ International Conference on How To Make $$"));
         assert_eq!(res.len(), 1);
     }
 
     #[test]
+    fn test_first_escape() {
+        let res = parse_string("{\\\\\" in the eye}", false).unwrap().0;
+        assert_eq!(res[0], N("\\\" in the eye"));
+        assert_eq!(res.len(), 1);
+    }
+
+    #[test]
     fn test_commands() {
-        let res = resolve_latex_commands(parse_string("{\\LaTeX{}~is gr\\~e\\`at\\o \\t{oo}"));
+        let res = resolve_latex_commands(parse_string("{\\LaTeX{}~is gr\\~e\\`at\\o", false).unwrap().0);
         assert_eq!(res[0], V("LaTeX"));
-        assert_eq!(res[1], N("\u{00A0}is grẽàtøo\u{361}o"));
+        assert_eq!(res[1], N("\u{00A0}is grẽàtø"));
+    }
+
+    #[test]
+    fn test_nested_commands() {
+        let res = resolve_latex_commands(parse_string("{\\textendash{\\`a}}", false).unwrap().0);
+        assert_eq!(res[0], N("–à"));
     }
 }

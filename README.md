@@ -22,7 +22,7 @@ Parsing a bibliography and getting the author of an item is as simple as:
 
 ```rust
 let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
-let bibliography = Bibliography::parse(src);
+let bibliography = Bibliography::parse(src).unwrap();
 let entry = bibliography.get("tolkien1937").unwrap();
 let author = entry.author().unwrap();
 assert_eq!(author[0].name, "Tolkien");
@@ -50,7 +50,6 @@ spec with which most of the `.bib` files in circulation can be processed.
 
 However, the crate currently has some limitations:
 
-- Nested TeX commands are not supported
 - Math mode formatting is not being processed, instead, the output strings will
   contain the dollar-delimited math syntax as it is found in the input string.
 - There is no explicit support for entry sets, although it is easy to account

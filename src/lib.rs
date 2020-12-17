@@ -10,7 +10,7 @@ Finding out the author of a work.
 # use biblatex::Bibliography;
 # fn main() -> std::io::Result<()> {
 let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
-let bibliography = Bibliography::parse(src);
+let bibliography = Bibliography::parse(src).unwrap();
 let entry = bibliography.get("tolkien1937").unwrap();
 let author = entry.author().unwrap();
 assert_eq!(author[0].name, "Tolkien");
@@ -69,28 +69,33 @@ impl Bibliography {
     }
 
     /// Parse a bibliography from a source string.
-    pub fn parse(src: &str) -> Self {
+    pub fn parse(src: &str) -> Option<Self> {
         Self::from_raw(RawBibliography::parse(src))
     }
 
     /// Construct a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Self {
+    pub fn from_raw(raw: RawBibliography) -> Option<Self> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
+            let count = entry.fields.len();
+            let fields = entry
+                .fields
+                .into_iter()
+                .filter_map(|(key, value)| if let Some(r) = resolve::resolve(value, abbr) { Some((key.to_string(), r)) } else { None })
+                .collect::<HashMap<String, Chunks>>();
+            if fields.len() != count {
+                return None;
+            }
             res.insert(Entry {
                 key: entry.key.to_string(),
                 entry_type: EntryType::new(entry.entry_type),
-                fields: entry
-                    .fields
-                    .into_iter()
-                    .map(|(key, value)| (key.to_string(), resolve::resolve(value, abbr)))
-                    .collect(),
+                fields: fields,
             });
         }
 
-        res
+        Some(res)
     }
 
     /// The number of bibliography entries.
@@ -832,9 +837,14 @@ mod tests {
     }
 
     #[test]
+    fn test_polar_report() {
+        dump_author_title("tests/polaritons.bib");
+    }
+
+    #[test]
     fn test_alias() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::parse(&contents);
+        let mut bibliography = Bibliography::parse(&contents).unwrap();
 
         assert_eq!(bibliography.get("issue201"), bibliography.get("github"));
         bibliography.alias("issue201", "crap");
@@ -849,7 +859,7 @@ mod tests {
     #[test]
     fn test_bibtex_conversion() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::parse(&contents);
+        let mut bibliography = Bibliography::parse(&contents).unwrap();
 
         let biblatex = bibliography.get_mut("haug2019").unwrap().to_biblatex_string();
         assert!(biblatex.contains("institution = {Technische Universität Berlin},"));
@@ -865,7 +875,7 @@ mod tests {
     #[test]
     fn test_verify() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let mut bibliography = Bibliography::parse(&contents);
+        let mut bibliography = Bibliography::parse(&contents).unwrap();
 
         let ok = (vec![], vec![]);
         assert_eq!(bibliography.get_mut("haug2019").unwrap().verify(), ok);
@@ -886,7 +896,7 @@ mod tests {
     #[test]
     fn test_crossref() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
-        let bibliography = Bibliography::parse(&contents);
+        let bibliography = Bibliography::parse(&contents).unwrap();
 
         let e = bibliography.get_resolved("macmillan").unwrap();
         assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
@@ -932,7 +942,7 @@ mod tests {
 
     fn dump_author_title(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let bibliography = Bibliography::parse(&contents);
+        let bibliography = Bibliography::parse(&contents).unwrap();
 
         println!("{}", bibliography.to_biblatex_string());
 
