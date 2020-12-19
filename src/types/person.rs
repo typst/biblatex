@@ -277,8 +277,8 @@ impl Display for Person {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::{chunk::tests::*, resolve::resolve};
+    use std::collections::HashMap;
 
     #[test]
     fn test_person_comma() {
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn person_with_command() {
-        let value ="{Syperek, Marcin and Dusanowski, {\\L}ukasz and Misiewicz, Jan and Langer, Fabian and Forchel, Alfred}";
+        let value = "{Syperek, Marcin and Dusanowski, {\\L}ukasz and Misiewicz, Jan and Langer, Fabian and Forchel, Alfred}";
         let res = resolve(value, &HashMap::new()).unwrap();
         let pers: Vec<Person> = Vec::<Person>::from_chunks(&res).unwrap();
         assert_eq!(pers.len(), 5);

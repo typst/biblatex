@@ -83,7 +83,13 @@ impl Bibliography {
             let fields = entry
                 .fields
                 .into_iter()
-                .filter_map(|(key, value)| if let Some(r) = resolve::resolve(value, abbr) { Some((key.to_string(), r)) } else { None })
+                .filter_map(|(key, value)| {
+                    if let Some(r) = resolve::resolve(value, abbr) {
+                        Some((key.to_string(), r))
+                    } else {
+                        None
+                    }
+                })
                 .collect::<HashMap<String, Chunks>>();
             if fields.len() != count {
                 return None;
@@ -91,7 +97,7 @@ impl Bibliography {
             res.insert(Entry {
                 key: entry.key.to_string(),
                 entry_type: EntryType::new(entry.entry_type),
-                fields: fields,
+                fields,
             });
         }
 

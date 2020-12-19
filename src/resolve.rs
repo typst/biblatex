@@ -11,14 +11,16 @@ pub fn resolve(value: &str, abbreviations: &HashMap<&str, &str>) -> Option<Chunk
     let parsed = parse_string(value, false)?.0;
     let resolved = resolve_abbreviations(parsed, abbreviations);
     let evaluated = resolve_latex_commands(resolved);
-    Some(evaluated
-        .into_iter()
-        .map(|raw| match raw {
-            RawChunk::Normal(n) => Chunk::Normal(n),
-            RawChunk::Verbatim(v) => Chunk::Verbatim(v),
-            raw => panic!("raw chunk should have been resolved: {:?}", raw),
-        })
-        .collect())
+    Some(
+        evaluated
+            .into_iter()
+            .map(|raw| match raw {
+                RawChunk::Normal(n) => Chunk::Normal(n),
+                RawChunk::Verbatim(v) => Chunk::Verbatim(v),
+                raw => panic!("raw chunk should have been resolved: {:?}", raw),
+            })
+            .collect(),
+    )
 }
 
 /// A not yet fully resolved chunk.
@@ -74,7 +76,10 @@ impl RawChunk {
 
 /// Create a chunk vector from field value string.
 /// Recurses to resolve nested commands.
-fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChunk>, usize)> {
+fn parse_string(
+    value: &str,
+    allow_stack_depletion: bool,
+) -> Option<(Vec<RawChunk>, usize)> {
     /// Symbols that may occur while parsing a field value.
     #[derive(Debug, PartialEq)]
     enum Symbols {
@@ -92,7 +97,11 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
         Neither,
     }
 
-    let mut stack: Vec<Symbols> = if allow_stack_depletion { vec![Symbols::Braces] } else { vec![] };
+    let mut stack: Vec<Symbols> = if allow_stack_depletion {
+        vec![Symbols::Braces]
+    } else {
+        vec![]
+    };
     let mut vals: Vec<RawChunk> = vec![];
     let mut allow_resolvable = true;
     let mut is_math = false;
@@ -127,15 +136,17 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
                 stack.push(Symbols::Braces);
             }
             '{' if stack.last() == Some(&Symbols::Command) => {
-                let res = parse_string(&value[index + 1..], true)?;
-                for _ in 0..(res.1 + 1) {
+                let res = parse_string(&value[index + 1 ..], true)?;
+                for _ in 0 .. (res.1 + 1) {
                     chars_iter.next();
                 }
 
                 if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
                     args.replace(res.0);
                 } else {
-                    panic!("If the last symbol was a command, the stack has to have a Command.");
+                    panic!(
+                        "If the last symbol was a command, the stack has to have a Command."
+                    );
                 }
 
                 stack.pop();
@@ -144,10 +155,10 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
             }
             '}' if stack.last() == Some(&Symbols::Command) => {
                 if stack.pop() != Some(Symbols::Command) {
-                    return None
+                    return None;
                 }
                 if stack.pop() != Some(Symbols::Braces) {
-                    return None
+                    return None;
                 }
             }
             '}' if !is_math => {
@@ -156,7 +167,7 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
                 }
 
                 if stack.is_empty() && allow_stack_depletion {
-                    return Some((vals, index))
+                    return Some((vals, index));
                 }
             }
 
@@ -193,7 +204,9 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
                 if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
                     args.replace(vec![RawChunk::Normal(c.to_string())]);
                 } else {
-                    panic!("If an argument is expected, the stack has to have a Command.");
+                    panic!(
+                        "If an argument is expected, the stack has to have a Command."
+                    );
                 }
                 stack.pop();
                 expect_arg = false;
@@ -208,7 +221,11 @@ fn parse_string(value: &str, allow_stack_depletion: bool) -> Option<(Vec<RawChun
                     }
                     _ => {
                         esc_cmd_mode = EscCommandMode::OnlyCommand;
-                        vals.push(RawChunk::CommandName(c.to_string(), stack.len() > 1, None));
+                        vals.push(RawChunk::CommandName(
+                            c.to_string(),
+                            stack.len() > 1,
+                            None,
+                        ));
                         if !matches!(stack.last(), Some(Symbols::Command)) {
                             stack.push(Symbols::Command);
                         }
@@ -266,9 +283,9 @@ fn resolve_abbreviations(s: Vec<RawChunk>, map: &HashMap<&str, &str>) -> Vec<Raw
     for elem in s.into_iter() {
         if let RawChunk::Abbreviation(x) = elem {
             // FIXME: Prevent cyclic evaluation.
-            let val = map
-                .get(x.as_str())
-                .and_then(|&s| Some(resolve_abbreviations(parse_string(s, false)?.0, map)));
+            let val = map.get(x.as_str()).and_then(|&s| {
+                Some(resolve_abbreviations(parse_string(s, false)?.0, map))
+            });
 
             if let Some(mut x) = val {
                 res.append(&mut x);
@@ -302,7 +319,10 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
         }
     }
 
-    fn last_char_combine(v: Option<Vec<RawChunk>>, combine: char) -> Option<Vec<RawChunk>> {
+    fn last_char_combine(
+        v: Option<Vec<RawChunk>>,
+        combine: char,
+    ) -> Option<Vec<RawChunk>> {
         let mut v = v?;
         if let Some(item) = v.pop() {
             if let Some(ds) = item.display_string() {
@@ -314,7 +334,7 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
                 };
 
                 let item = if let Some(lc) = lc {
-                    let mut s = (&ds[..len - 1]).to_string();
+                    let mut s = (&ds[.. len - 1]).to_string();
                     s.push(lc);
                     item.reset_string(s)
                 } else {
@@ -340,7 +360,9 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
 
     while let Some(val) = iter.next() {
         let (cmd, verb, args) = match val {
-            RawChunk::CommandName(cmd, verb, args) => (cmd, verb, args.map(|a| resolve_latex_commands(a))),
+            RawChunk::CommandName(cmd, verb, args) => {
+                (cmd, verb, args.map(|a| resolve_latex_commands(a)))
+            }
             chunk => {
                 res.push(chunk);
                 continue;
@@ -361,9 +383,7 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
             "OE" => modify_args(args, verb, |v| to_value("Œ", v)),
             "ae" => modify_args(args, verb, |v| to_value("æ", v)),
             "AE" => modify_args(args, verb, |v| to_value("Æ", v)),
-            "o" if args.is_none() => {
-                modify_args(args, verb, |v| to_value("ø", v))
-            }
+            "o" if args.is_none() => modify_args(args, verb, |v| to_value("ø", v)),
             "O" => modify_args(args, verb, |v| to_value("Ø", v)),
             "ss" => modify_args(args, verb, |v| to_value("ß", v)),
             "SS" => modify_args(args, verb, |v| to_value("ẞ", v)),
