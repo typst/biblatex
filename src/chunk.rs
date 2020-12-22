@@ -44,9 +44,9 @@ impl ChunksExt for [Chunk] {
             if let Chunk::Normal(s) = val {
                 for c in s.chars() {
                     if first {
-                        out.push_str(&c.to_uppercase().to_string());
+                        out.extend(c.to_uppercase());
                     } else {
-                        out.push(c);
+                        out.extend(c.to_lowercase());
                     }
                     first = false;
                 }
