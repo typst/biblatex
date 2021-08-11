@@ -200,6 +200,11 @@ fn parse_string(
             '\n' => {}
             '\r' => {}
 
+            _ if c.is_numeric() => match vals.last_mut() {
+                Some(RawChunk::Normal(s)) => s.push(c),
+                _ => vals.push(RawChunk::Normal(c.to_string())),
+            }
+
             _ if expect_arg => {
                 if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
                     args.replace(vec![RawChunk::Normal(c.to_string())]);
@@ -576,5 +581,11 @@ mod tests {
         assert_eq!(res[0], N("A"));
         assert_eq!(res[1], V("ßßß"));
         assert_eq!(res[2], N("mann"));
+    }
+
+    #[test]
+    fn test_raw_year() {
+        let res = parse_string("1975", false).unwrap().0;
+        assert_eq!(res[0], N("1975"));
     }
 }
