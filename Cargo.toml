@@ -19,5 +19,5 @@ lazy_static = "1"
 numerals = "0.1.4"
 paste = "1"
 regex = { version = "1.4", default-features = false, features = ["std", "unicode-perl"] }
-strum = { version = "0.21", features = ["derive"] }
+strum = { version = "0.22", features = ["derive"] }
 unicode-normalization = "0.1"
