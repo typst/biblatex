@@ -37,9 +37,10 @@ use std::io::{self, Write};
 use mechanics::{AuthorMode, PagesChapterMode};
 
 use paste::paste;
+use serde::{Deserialize, Serialize};
 
 /// A fully parsed bibliography.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Bibliography {
     /// The bibliography entries.
     entries: Vec<Entry>,
@@ -49,7 +50,7 @@ pub struct Bibliography {
 
 /// A bibliography entry containing chunk fields, which can be parsed into more
 /// specific types on demand.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Entry {
     /// The citation key.
     pub key: String,
@@ -467,7 +468,11 @@ impl Entry {
     /// Get an entry but return None for empty chunk slices.
     fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
         let entry = self.get(key)?;
-        if !entry.is_empty() { Some(entry) } else { None }
+        if !entry.is_empty() {
+            Some(entry)
+        } else {
+            None
+        }
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
@@ -922,9 +927,10 @@ mod tests {
             "Recursive shennenigans and other important stuff"
         );
 
-        assert_eq!(bibliography.get("arrgh").unwrap().parents(), vec![
-            "polecon".to_string()
-        ]);
+        assert_eq!(
+            bibliography.get("arrgh").unwrap().parents(),
+            vec!["polecon".to_string()]
+        );
         let arrgh = bibliography.get_resolved("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
         assert_eq!(arrgh.volume().unwrap(), 115);
