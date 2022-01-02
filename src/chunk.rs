@@ -1,11 +1,12 @@
 use crate::resolve::is_escapable;
 use crate::types::Type;
+use serde::{Deserialize, Serialize};
 
 /// A sequence of chunks.
 pub type Chunks = Vec<Chunk>;
 
 /// Represents one part of a field value.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 pub enum Chunk {
     /// Normal values within quotes or single braces subject to
     /// capitalization formatting.

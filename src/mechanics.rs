@@ -4,12 +4,13 @@
 use std::str::FromStr;
 
 use strum::{Display, EnumString};
+use serde::{Deserialize, Serialize};
 
 /// Describes the type of a bibliographical entry.
 ///
 /// Each type comes with a different set of required and allowable fields that
 /// are taken into consideration in [`Entry::verify`](crate::Entry::verify).
-#[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
+#[derive(Debug, Clone, Eq, PartialEq, Display, EnumString, Deserialize, Serialize)]
 #[strum(serialize_all = "lowercase")]
 pub enum EntryType {
     // BibTeX
