@@ -50,7 +50,11 @@ pub struct Bibliography {
 
 /// A bibliography entry containing chunk fields, which can be parsed into more
 /// specific types on demand.
+<<<<<<< HEAD
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+=======
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+>>>>>>> bda6513 (useless reformating deleted)
 pub struct Entry {
     /// The citation key.
     pub key: String,

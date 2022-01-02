@@ -6,6 +6,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
+use serde::{Serialize, Deserialize};
+
+
 /// Describes the type of a bibliographical entry.
 ///
 /// Each type comes with a different set of required and allowable fields that
