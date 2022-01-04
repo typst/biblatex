@@ -38,8 +38,12 @@ use mechanics::{AuthorMode, PagesChapterMode};
 
 use paste::paste;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A fully parsed bibliography.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bibliography {
     /// The bibliography entries.
     entries: Vec<Entry>,
@@ -50,6 +54,7 @@ pub struct Bibliography {
 /// A bibliography entry containing chunk fields, which can be parsed into more
 /// specific types on demand.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Entry {
     /// The citation key.
     pub key: String,

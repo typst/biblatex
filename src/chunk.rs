@@ -1,11 +1,15 @@
 use crate::resolve::is_escapable;
 use crate::types::Type;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A sequence of chunks.
 pub type Chunks = Vec<Chunk>;
 
 /// Represents one part of a field value.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Chunk {
     /// Normal values within quotes or single braces subject to
     /// capitalization formatting.
