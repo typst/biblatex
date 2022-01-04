@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each type comes with a different set of required and allowable fields that
 /// are taken into consideration in [`Entry::verify`](crate::Entry::verify).
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
 #[strum(serialize_all = "lowercase")]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EntryType {
     // BibTeX
     Article,

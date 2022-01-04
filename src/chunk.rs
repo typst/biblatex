@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 pub type Chunks = Vec<Chunk>;
 
 /// Represents one part of a field value.
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Chunk {
     /// Normal values within quotes or single braces subject to
     /// capitalization formatting.
