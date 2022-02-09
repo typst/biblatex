@@ -30,6 +30,7 @@ pub use mechanics::EntryType;
 pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{self, Write};
@@ -201,6 +202,20 @@ impl Bibliography {
         biblatex
     }
 
+    /// Serialize this bibliography into a BibLaTeX string.
+    ///
+    /// `field_order` is something like `vec!["title", "author"]`. In that case, every entry in the
+    /// output String have the title and author fields first, and then the rest of the fields
+    /// oredered alphabetically.
+    pub fn to_biblatex_string_ordered(&self, field_order: Vec<&str>) -> String {
+        let mut biblatex = String::new();
+        for entry in &self.entries {
+            biblatex.push_str(&entry.to_biblatex_string_ordered(&field_order));
+            biblatex.push('\n');
+        }
+        biblatex
+    }
+
     /// Write the entry into a writer in the BibLaTeX format.
     pub fn write_biblatex(&self, mut sink: impl Write) -> io::Result<()> {
         for entry in &self.entries {
@@ -214,6 +229,20 @@ impl Bibliography {
         let mut bibtex = String::new();
         for entry in &self.entries {
             bibtex.push_str(&entry.to_bibtex_string());
+            bibtex.push('\n');
+        }
+        bibtex
+    }
+
+    /// Serialize this bibliography into a BibTeX string.
+    ///
+    /// `field_order` is something like `vec!["title", "author"]`. In that case, every entry in the
+    /// output String have the title and author fields first, and then the rest of the fields
+    /// oredered alphabetically.
+    pub fn to_bibtex_string_ordered(&self, field_order: Vec<&str>) -> String {
+        let mut bibtex = String::new();
+        for entry in &self.entries {
+            bibtex.push_str(&entry.to_bibtex_string_ordered(&field_order));
             bibtex.push('\n');
         }
         bibtex
@@ -436,6 +465,51 @@ impl Entry {
         biblatex
     }
 
+    /// Serialize this entry into a BibLaTeX string.
+    ///
+    /// Same as `to_biblatex_string`. Takes an extra parameter `order` which is a &vec of &str.
+    /// Will order the entry fields by placing the fields in the vec first (in that order).
+    /// The remaining ones will be ordered alphabetically
+    ///
+    /// e.g. if `order` is `vec!["title", "author"]`, will place the author and title fields first
+    /// and then the rest of the fields ordered alphabetically
+    pub fn to_biblatex_string_ordered(&self, order: &Vec<&str>) -> String {
+        let mut biblatex = String::new();
+        let ty = self.entry_type.to_biblatex();
+
+        writeln!(biblatex, "@{}{{{},", ty, self.key).unwrap();
+
+        for (key, value) in self.fields.iter().sorted_by_key(|x| {
+            for (idx, ord_param) in order.iter().enumerate() {
+                // If the key coincides with the nth element of the order vector
+                if x.0 == ord_param {
+                    // If order is ["title", "author"], author key will be ordered as "001".
+                    return format!("{:03}", idx);
+                }
+            }
+            // If not in the order vec, order as the key
+            // (with the modifications that will take place later on in the function)
+            match x.0.as_ref() {
+                "journal" => "journaltitle".to_string(),
+                "address" => "location".to_string(),
+                "school" => "institution".to_string(),
+                k => k.to_string(),
+            }
+        }) {
+            let key = match key.as_ref() {
+                "journal" => "journaltitle",
+                "address" => "location",
+                "school" => "institution",
+                k => k,
+            };
+
+            writeln!(biblatex, "{} = {},", key, value.to_biblatex_string()).unwrap();
+        }
+
+        biblatex.push('}');
+        biblatex
+    }
+
     /// Serialize this entry into a BibTeX string.
     pub fn to_bibtex_string(&self) -> String {
         let mut bibtex = String::new();
@@ -445,6 +519,63 @@ impl Entry {
         writeln!(bibtex, "@{}{{{},", ty, self.key).unwrap();
 
         for (key, value) in &self.fields {
+            if key == "date" {
+                if let Some(date) = self.date() {
+                    for (key, value) in date.to_fieldset() {
+                        let v = [Chunk::Normal(value)].to_biblatex_string();
+                        writeln!(bibtex, "{} = {},", key, v).unwrap();
+                    }
+                }
+                continue;
+            }
+
+            let key = match key.as_ref() {
+                "journaltitle" => "journal",
+                "location" => "address",
+                "institution" if thesis => "school",
+                k => k,
+            };
+
+            writeln!(bibtex, "{} = {},", key, value.to_biblatex_string()).unwrap();
+        }
+
+        bibtex.push('}');
+        bibtex
+    }
+
+    /// Serialize this entry into a BibTeX string.
+    ///
+    /// Same as `to_bibtex_string`. Takes an extra parameter `order` which is a &vec of &str.
+    /// Will order the entry fields by placing the fields in the vec first (in that order).
+    /// The remaining ones will be ordered alphabetically
+    ///
+    /// e.g. if `order` is `vec!["title", "author"]`, will place the author and title fields first
+    /// and then the rest of the fields ordered alphabetically
+    pub fn to_bibtex_string_ordered(&self, order: &Vec<&str>) -> String {
+        let mut bibtex = String::new();
+        let ty = self.entry_type.to_bibtex();
+        let thesis = matches!(ty, EntryType::PhdThesis | EntryType::MastersThesis);
+
+        writeln!(bibtex, "@{}{{{},", ty, self.key).unwrap();
+
+        for (key, value) in self.fields.iter().sorted_by_key(|x| {
+            for (idx, ord_param) in order.iter().enumerate() {
+                // If the key coincides with the nth element of the order vector
+                if x.0 == ord_param {
+                    // If order is ["title", "author"], author key will be ordered as "001".
+                    return format!("{:03}{}", idx, ord_param);
+                }
+            }
+            // If not in the order vec, order as the key
+            // (with the modifications that will take place later on in the function)
+            match x.0.as_ref() {
+                "date" => "year".to_string(),  // month will be misplaced
+                "journaltitle" => "journal".to_string(),
+                "location" => "address".to_string(),
+                "institution" if thesis => "school".to_string(),
+                k => k.to_string(),
+            }
+        }) {
             if key == "date" {
                 if let Some(date) = self.date() {
                     for (key, value) in date.to_fieldset() {
@@ -881,6 +1012,53 @@ mod tests {
         assert!(bibtex.contains("month = {10},"));
         assert!(!bibtex.contains("institution"));
         assert!(!bibtex.contains("date"));
+    }
+
+    #[test]
+    fn test_bibtex_conversion_ordered() {
+        let contents = fs::read_to_string("tests/cross.bib").unwrap();
+        let mut bibliography = Bibliography::parse(&contents).unwrap();
+
+        let order1 = vec!["title", "author"];
+        let biblatex1 = bibliography
+            .get_mut("haug2019")
+            .unwrap()
+            .to_biblatex_string_ordered(&order1);
+        assert_eq!(biblatex1, "@thesis{haug2019,\n\
+                                 title = {Batch Localization Algorithm for Floating Wireless Sensor Networks},\n\
+                                 author = {Haug, Martin},\n\
+                                 date = {2019-10},\n\
+                                 institution = {Technische Universität Berlin},\n\
+                                 type = {Bachelor's Thesis},\n\
+                               }");
+
+        let order2 = vec!["author", "institution", "title"];
+        let biblatex2 = bibliography
+            .get_mut("haug2019")
+            .unwrap()
+            .to_biblatex_string_ordered(&order2);
+        assert_eq!(biblatex2, "@thesis{haug2019,\n\
+                                 author = {Haug, Martin},\n\
+                                 institution = {Technische Universität Berlin},\n\
+                                 title = {Batch Localization Algorithm for Floating Wireless Sensor Networks},\n\
+                                 date = {2019-10},\n\
+                                 type = {Bachelor's Thesis},\n\
+                               }");
+
+        let bibtex = bibliography
+            .get_mut("haug2019")
+            .unwrap()
+            .to_bibtex_string_ordered(&order1);
+        assert_eq!(bibtex, "@phdthesis{haug2019,\n\
+                              title = {Batch Localization Algorithm for Floating Wireless Sensor Networks},\n\
+                              author = {Haug, Martin},\n\
+                              school = {Technische Universität Berlin},\n\
+                              type = {Bachelor's Thesis},\n\
+                              year = {2019},\n\
+                              month = {10},\n\
+                            }");
+        // date field was ordered as year, so that it appears in the end here.
+        // institution was ordered as school
     }
 
     #[test]
