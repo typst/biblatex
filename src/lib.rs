@@ -563,7 +563,7 @@ impl Entry {
                 // If the key coincides with the nth element of the order vector
                 if x.0 == ord_param {
                     // If order is ["title", "author"], author key will be ordered as "001".
-                    return format!("{:03}{}", idx, ord_param);
+                    return format!("{:03}", idx);
                 }
             }
             // If not in the order vec, order as the key
