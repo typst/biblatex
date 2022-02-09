@@ -75,11 +75,17 @@ impl Bibliography {
 
     /// Parse a bibliography from a source string.
     pub fn parse(src: &str) -> Option<Self> {
+        Self::from_raw(RawBibliography::parse(src)).ok()
+    }
+
+    /// Same as parse but return a Result instead of an Option. The Err variant contains the key
+    /// of the entry that failed to parse
+    pub fn parse_result(src: &str) -> Result<Self, String> {
         Self::from_raw(RawBibliography::parse(src))
     }
 
     /// Construct a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Option<Self> {
+    pub fn from_raw(raw: RawBibliography) -> Result<Self, String> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
@@ -97,7 +103,7 @@ impl Bibliography {
                 })
                 .collect::<HashMap<String, Chunks>>();
             if fields.len() != count {
-                return None;
+                return Err(entry.key.to_string());
             }
             res.insert(Entry {
                 key: entry.key.to_string(),
@@ -106,7 +112,7 @@ impl Bibliography {
             });
         }
 
-        Some(res)
+        Ok(res)
     }
 
     /// The number of bibliography entries.
@@ -826,6 +832,31 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn test_parse_correct_result() {
+        let contents = fs::read_to_string("tests/gral.bib").unwrap();
+        let option_bibliography = Bibliography::parse(&contents).unwrap();
+        let result_bibliography = Bibliography::parse_result(&contents).unwrap();
+        // Both methods should return the same bibliography for correct input files
+        assert_eq!(option_bibliography.entries, result_bibliography.entries);
+    }
+
+    #[test]
+    fn test_parse_incorrect_result() {
+        let contents = fs::read_to_string("tests/incorrect.bib").unwrap();
+
+        // Regular method should return None
+        let option_bibliography = Bibliography::parse(&contents);
+        assert!(option_bibliography.is_none());
+
+        // Result method should return the key of the incorrect entry
+        let result_bibliography = Bibliography::parse_result(&contents);
+        match result_bibliography {
+            Ok(_) => panic!("Should return Err"),
+            Err(s) => assert_eq!(s, String::from("conigliocorbalan")),
+        };
+    }
 
     #[test]
     fn test_gral_paper() {
