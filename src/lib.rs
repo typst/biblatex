@@ -1019,6 +1019,20 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
 
+        // An empty vec means order every field aphabetically
+        let order = vec![];
+        let biblatex = bibliography
+            .get_mut("haug2019")
+            .unwrap()
+            .to_biblatex_string_ordered(&order);
+        assert_eq!(biblatex, "@thesis{haug2019,\n\
+                                 author = {Haug, Martin},\n\
+                                 date = {2019-10},\n\
+                                 institution = {Technische Universität Berlin},\n\
+                                 title = {Batch Localization Algorithm for Floating Wireless Sensor Networks},\n\
+                                 type = {Bachelor's Thesis},\n\
+                               }");
+
         let order1 = vec!["title", "author"];
         let biblatex1 = bibliography
             .get_mut("haug2019")
