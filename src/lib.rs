@@ -30,7 +30,7 @@ pub use mechanics::EntryType;
 pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::io::{self, Write};
 
@@ -61,7 +61,7 @@ pub struct Entry {
     /// Denotes the type of bibliography item (e.g. `Article`).
     pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
-    pub fields: HashMap<String, Chunks>,
+    pub fields: BTreeMap<String, Chunks>,
 }
 
 impl Bibliography {
@@ -95,7 +95,7 @@ impl Bibliography {
                         None
                     }
                 })
-                .collect::<HashMap<String, Chunks>>();
+                .collect::<BTreeMap<_, _>>();
             if fields.len() != count {
                 return None;
             }
@@ -240,7 +240,7 @@ impl IntoIterator for Bibliography {
 impl Entry {
     /// Construct new, empty entry.
     pub fn new(key: String, entry_type: EntryType) -> Self {
-        Self { key, entry_type, fields: HashMap::new() }
+        Self { key, entry_type, fields: BTreeMap::new() }
     }
 
     /// Get the chunk slice of a field.
