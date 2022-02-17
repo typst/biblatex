@@ -74,8 +74,6 @@ impl Bibliography {
     }
 
     /// Parse a bibliography from a source string.
-    ///
-    /// The Err variant contains the key of the entry that failed to parse
     pub fn parse(src: &str) -> Result<Self, String> {
         Self::from_raw(RawBibliography::parse(src))
     }
