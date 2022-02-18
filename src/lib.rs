@@ -31,7 +31,9 @@ pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
+use std::error::Error;
+use std::fmt;
+use std::fmt::{Display, Formatter, Write as _};
 use std::io::{self, Write};
 
 use mechanics::{AuthorMode, PagesChapterMode};
@@ -74,29 +76,31 @@ impl Bibliography {
     }
 
     /// Parse a bibliography from a source string.
-    pub fn parse(src: &str) -> Result<Self, String> {
+    pub fn parse(src: &str) -> Result<Self, BibliographyError> {
         Self::from_raw(RawBibliography::parse(src))
     }
 
     /// Construct a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Result<Self, String> {
+    pub fn from_raw(raw: RawBibliography) -> Result<Self, BibliographyError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
             // Check that the key is not repeated
             if res.get(entry.key).is_some() {
-                return Err(format!("Repeated key '{}'", entry.key));
+                return Err(BibliographyError::DuplicateKey(entry.key.to_string()));
             }
 
             let mut fields = HashMap::new();
             for (field_key, field_value) in entry.fields.into_iter() {
+                let field_key = field_key.to_string();
+
                 if let Some(r) = resolve::resolve(field_value, abbr) {
-                    fields.insert(field_key.to_string(), r);
+                    fields.insert(field_key, r);
                 } else {
-                    return Err(format!(
-                        "Error parsing entry with key '{}', field '{}'",
-                        entry.key, field_key
+                    return Err(BibliographyError::MalformedField(
+                        entry.key.to_string(),
+                        field_key,
                     ));
                 }
             }
@@ -237,6 +241,29 @@ impl IntoIterator for Bibliography {
         self.entries.into_iter()
     }
 }
+
+/// Errors that may occur when converting a [`RawBibliography`] into a [`Bibliography`]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum BibliographyError {
+    /// The key already occurred.
+    DuplicateKey(String),
+    /// The key contains a malformed field.
+    MalformedField(String, String),
+}
+
+impl Display for BibliographyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateKey(key) => write!(f, "Duplicate key \"{}\"", key),
+            Self::MalformedField(key, field) => {
+                write!(f, "Key \"{}\" contains malformed field \"{}\"", key, field)
+            }
+        }
+    }
+}
+
+impl Error for BibliographyError {}
 
 impl Entry {
     /// Construct new, empty entry.
@@ -842,8 +869,8 @@ mod tests {
         match bibliography {
             Ok(_) => panic!("Should return Err"),
             Err(s) => {
-                assert_eq!(s, String::from("Repeated key 'ishihara2012'"));
-            },
+                assert_eq!(s, BibliographyError::DuplicateKey("ishihara2012".into()));
+            }
         };
     }
 
@@ -857,11 +884,12 @@ mod tests {
             Err(s) => {
                 assert_eq!(
                     s,
-                    String::from(
-                        "Error parsing entry with key 'conigliocorbalan', field 'author'"
+                    BibliographyError::MalformedField(
+                        "conigliocorbalan".into(),
+                        "author".into()
                     )
                 );
-            },
+            }
         };
     }
 
