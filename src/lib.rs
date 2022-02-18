@@ -31,7 +31,9 @@ pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write as _;
+use std::error::Error;
+use std::fmt;
+use std::fmt::{Display, Formatter, Write as _};
 use std::io::{self, Write};
 
 use mechanics::{AuthorMode, PagesChapterMode};
@@ -74,30 +76,33 @@ impl Bibliography {
     }
 
     /// Parse a bibliography from a source string.
-    pub fn parse(src: &str) -> Option<Self> {
+    pub fn parse(src: &str) -> Result<Self, BibliographyError> {
         Self::from_raw(RawBibliography::parse(src))
     }
 
     /// Construct a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Option<Self> {
+    pub fn from_raw(raw: RawBibliography) -> Result<Self, BibliographyError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
-            let count = entry.fields.len();
-            let fields = entry
-                .fields
-                .into_iter()
-                .filter_map(|(key, value)| {
-                    if let Some(r) = resolve::resolve(value, abbr) {
-                        Some((key.to_string(), r))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<BTreeMap<_, _>>();
-            if fields.len() != count {
-                return None;
+            // Check that the key is not repeated
+            if res.get(entry.key).is_some() {
+                return Err(BibliographyError::DuplicateKey(entry.key.to_string()));
+            }
+
+            let mut fields = BTreeMap::new();
+            for (field_key, field_value) in entry.fields.into_iter() {
+                let field_key = field_key.to_string();
+
+                if let Some(r) = resolve::resolve(field_value, abbr) {
+                    fields.insert(field_key, r);
+                } else {
+                    return Err(BibliographyError::MalformedField(
+                        entry.key.to_string(),
+                        field_key,
+                    ));
+                }
             }
             res.insert(Entry {
                 key: entry.key.to_string(),
@@ -106,7 +111,7 @@ impl Bibliography {
             });
         }
 
-        Some(res)
+        Ok(res)
     }
 
     /// The number of bibliography entries.
@@ -236,6 +241,29 @@ impl IntoIterator for Bibliography {
         self.entries.into_iter()
     }
 }
+
+/// Errors that may occur when converting a [`RawBibliography`] into a [`Bibliography`]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum BibliographyError {
+    /// The key already occurred.
+    DuplicateKey(String),
+    /// The key contains a malformed field.
+    MalformedField(String, String),
+}
+
+impl Display for BibliographyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateKey(key) => write!(f, "Duplicate key \"{}\"", key),
+            Self::MalformedField(key, field) => {
+                write!(f, "Key \"{}\" contains malformed field \"{}\"", key, field)
+            }
+        }
+    }
+}
+
+impl Error for BibliographyError {}
 
 impl Entry {
     /// Construct new, empty entry.
@@ -826,6 +854,44 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn test_correct_bib() {
+        let contents = fs::read_to_string("tests/gral.bib").unwrap();
+        let bibliography = Bibliography::parse(&contents).unwrap();
+        assert_eq!(bibliography.entries.len(), 83)
+    }
+
+    #[test]
+    fn test_repeated_key() {
+        let contents = fs::read_to_string("tests/gral_rep_key.bib").unwrap();
+        let bibliography = Bibliography::parse(&contents);
+        match bibliography {
+            Ok(_) => panic!("Should return Err"),
+            Err(s) => {
+                assert_eq!(s, BibliographyError::DuplicateKey("ishihara2012".into()));
+            }
+        };
+    }
+
+    #[test]
+    fn test_parse_incorrect_result() {
+        let contents = fs::read_to_string("tests/incorrect.bib").unwrap();
+
+        let bibliography = Bibliography::parse(&contents);
+        match bibliography {
+            Ok(_) => panic!("Should return Err"),
+            Err(s) => {
+                assert_eq!(
+                    s,
+                    BibliographyError::MalformedField(
+                        "conigliocorbalan".into(),
+                        "author".into()
+                    )
+                );
+            }
+        };
+    }
 
     #[test]
     fn test_gral_paper() {
