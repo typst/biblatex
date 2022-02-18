@@ -107,6 +107,7 @@ pub enum PagesChapterMode {
     /// `chapter` field.
     PagesOptional,
     /// The `pages` field must be present.
+    #[allow(dead_code)]
     PagesRequired,
 }
 

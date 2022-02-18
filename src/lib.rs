@@ -33,8 +33,7 @@ pub use types::*;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Display, Formatter, Write as _};
-use std::io::{self, Write};
+use std::fmt::{Display, Formatter, Write};
 
 use mechanics::{AuthorMode, PagesChapterMode};
 
@@ -196,20 +195,35 @@ impl Bibliography {
         self.entries.iter_mut()
     }
 
+    /// Write the entry into a writer in the BibLaTeX format.
+    pub fn write_biblatex(&self, mut sink: impl Write) -> fmt::Result {
+        let mut first = true;
+        for entry in &self.entries {
+            if !first {
+                write!(sink, "\n")?;
+            }
+            writeln!(sink, "{}", entry.to_biblatex_string())?;
+            first = false;
+        }
+        Ok(())
+    }
+
     /// Serialize this bibliography into a BibLaTeX string.
     pub fn to_biblatex_string(&self) -> String {
         let mut biblatex = String::new();
-        for entry in &self.entries {
-            biblatex.push_str(&entry.to_biblatex_string());
-            biblatex.push('\n');
-        }
+        self.write_biblatex(&mut biblatex).unwrap();
         biblatex
     }
 
-    /// Write the entry into a writer in the BibLaTeX format.
-    pub fn write_biblatex(&self, mut sink: impl Write) -> io::Result<()> {
+    /// Write the entry into a writer in the BibTeX format.
+    pub fn write_bibtex(&self, mut sink: impl Write) -> fmt::Result {
+        let mut first = true;
         for entry in &self.entries {
-            writeln!(sink, "{}", entry.to_biblatex_string())?;
+            if !first {
+                write!(sink, "\n")?;
+            }
+            writeln!(sink, "{}", entry.to_bibtex_string())?;
+            first = false;
         }
         Ok(())
     }
@@ -217,19 +231,8 @@ impl Bibliography {
     /// Serialize this bibliography into a BibTeX string.
     pub fn to_bibtex_string(&self) -> String {
         let mut bibtex = String::new();
-        for entry in &self.entries {
-            bibtex.push_str(&entry.to_bibtex_string());
-            bibtex.push('\n');
-        }
+        self.write_bibtex(&mut bibtex).unwrap();
         bibtex
-    }
-
-    /// Write the entry into a writer in the BibTeX format.
-    pub fn write_bibtex(&self, mut sink: impl Write) -> io::Result<()> {
-        for entry in &self.entries {
-            writeln!(sink, "{}", entry.to_bibtex_string())?;
-        }
-        Ok(())
     }
 }
 
