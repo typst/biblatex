@@ -30,7 +30,7 @@ pub use mechanics::EntryType;
 pub use raw::{RawBibliography, RawEntry};
 pub use types::*;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter, Write as _};
@@ -63,7 +63,7 @@ pub struct Entry {
     /// Denotes the type of bibliography item (e.g. `Article`).
     pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
-    pub fields: HashMap<String, Chunks>,
+    pub fields: BTreeMap<String, Chunks>,
 }
 
 impl Bibliography {
@@ -91,7 +91,7 @@ impl Bibliography {
                 return Err(BibliographyError::DuplicateKey(entry.key.to_string()));
             }
 
-            let mut fields = HashMap::new();
+            let mut fields = BTreeMap::new();
             for (field_key, field_value) in entry.fields.into_iter() {
                 let field_key = field_key.to_string();
 
@@ -268,7 +268,7 @@ impl Error for BibliographyError {}
 impl Entry {
     /// Construct new, empty entry.
     pub fn new(key: String, entry_type: EntryType) -> Self {
-        Self { key, entry_type, fields: HashMap::new() }
+        Self { key, entry_type, fields: BTreeMap::new() }
     }
 
     /// Get the chunk slice of a field.
