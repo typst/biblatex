@@ -12,10 +12,12 @@ within the fields into easily usable structs and enums like `Person` and `Date`
 for downstream consumption.
 
 ## Usage
+
 Add this to your `Cargo.toml`:
+
 ```toml
 [dependencies]
-biblatex = "0.4"
+biblatex = "0.5"
 ```
 
 Parsing a bibliography and getting the author of an item is as simple as:

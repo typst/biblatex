@@ -1,6 +1,6 @@
 [package]
 name = "biblatex"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["Martin Haug <mhaug@live.de>"]
 license = "MIT OR Apache-2.0"
 description = "Parsing, writing, and evaluating BibTeX and BibLaTeX files"
@@ -22,4 +22,3 @@ regex = { version = "1.4", default-features = false, features = ["std", "unicode
 strum = { version = "0.23", features = ["derive"] }
 unicode-normalization = "0.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
-
