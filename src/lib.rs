@@ -197,6 +197,16 @@ impl Bibliography {
         self.entries.iter_mut()
     }
 
+    /// Consume this struct and return an iterator over the bibliography's entries.
+    pub fn into_iter(self) -> impl Iterator<Item = Entry> {
+        self.entries.into_iter()
+    }
+
+    /// Consume this struct and return a vector of the bibliography's entries.
+    pub fn into_vec(self) -> Vec<Entry> {
+        self.entries
+    }
+
     /// Write the entry into a writer in the BibLaTeX format.
     pub fn write_biblatex(&self, mut sink: impl Write) -> fmt::Result {
         let mut first = true;
