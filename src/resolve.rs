@@ -16,7 +16,7 @@ pub fn resolve(value: &str, abbreviations: &HashMap<&str, &str>) -> Option<Chunk
             .into_iter()
             .map(|raw| match raw {
                 RawChunk::Normal(n) => Chunk::Normal(n),
-                RawChunk::Verbatim(v) => Chunk::Verbatim(v),
+                RawChunk::PreserveCase(v) => Chunk::Verbatim(v),
                 raw => panic!("raw chunk should have been resolved: {:?}", raw),
             })
             .collect(),
@@ -33,7 +33,7 @@ enum RawChunk {
     /// in the file. Escapes keywords.
     ///
     /// Example: `"Inside {NASA}"` or `{Memes are {gReAT}}`.
-    Verbatim(String),
+    PreserveCase(String),
     /// BibTeX allows strings to be saved and concatenated later.
     /// This chunk is a reference to a named string to be resolved.
     ///
@@ -48,9 +48,9 @@ enum RawChunk {
 }
 
 impl RawChunk {
-    fn to_verbatim(self) -> Self {
+    fn to_preserved(self) -> Self {
         if let Self::Normal(s) = self {
-            Self::Verbatim(s)
+            Self::PreserveCase(s)
         } else {
             self
         }
@@ -59,7 +59,7 @@ impl RawChunk {
     fn display_string(&self) -> Option<&str> {
         match self {
             Self::Normal(s) => Some(s.as_ref()),
-            Self::Verbatim(s) => Some(s.as_ref()),
+            Self::PreserveCase(s) => Some(s.as_ref()),
             _ => None,
         }
     }
@@ -67,7 +67,7 @@ impl RawChunk {
     fn reset_string(self, s: String) -> Self {
         match self {
             Self::Normal(_) => Self::Normal(s),
-            Self::Verbatim(_) => Self::Verbatim(s),
+            Self::PreserveCase(_) => Self::PreserveCase(s),
             Self::Abbreviation(_) => Self::Abbreviation(s),
             Self::CommandName(_, a, b) => Self::CommandName(s, a, b),
         }
@@ -119,7 +119,7 @@ fn parse_string(
                 if let Some(x) = vals.last_mut() {
                     if let RawChunk::Normal(s) = x {
                         s.push(c);
-                    } else if let RawChunk::Verbatim(s) = x {
+                    } else if let RawChunk::PreserveCase(s) = x {
                         s.push(c);
                     } else {
                         vals.push(RawChunk::Normal(c.into()));
@@ -127,7 +127,7 @@ fn parse_string(
                 } else if stack.len() == 1 {
                     vals.push(RawChunk::Normal(c.into()));
                 } else {
-                    vals.push(RawChunk::Verbatim(c.into()));
+                    vals.push(RawChunk::PreserveCase(c.into()));
                 }
             }
 
@@ -203,7 +203,7 @@ fn parse_string(
             _ if c.is_numeric() => match vals.last_mut() {
                 Some(RawChunk::Normal(s)) => s.push(c),
                 _ => vals.push(RawChunk::Normal(c.to_string())),
-            }
+            },
 
             _ if expect_arg => {
                 if let Some(RawChunk::CommandName(_, _, args)) = vals.last_mut() {
@@ -255,12 +255,12 @@ fn parse_string(
 
             '~' if !stack.is_empty() => match vals.last_mut() {
                 Some(RawChunk::Normal(s)) => s.push('\u{00A0}'),
-                Some(RawChunk::Verbatim(s)) => s.push('\u{00A0}'),
+                Some(RawChunk::PreserveCase(s)) => s.push('\u{00A0}'),
                 _ if stack.len() == 1 => {
                     vals.push(RawChunk::Normal('\u{00A0}'.to_string()));
                 }
                 _ => {
-                    vals.push(RawChunk::Verbatim('\u{00A0}'.to_string()));
+                    vals.push(RawChunk::PreserveCase('\u{00A0}'.to_string()));
                 }
             },
 
@@ -270,8 +270,8 @@ fn parse_string(
             },
 
             _ => match vals.last_mut() {
-                Some(RawChunk::Verbatim(s)) => s.push(c),
-                _ => vals.push(RawChunk::Verbatim(c.to_string())),
+                Some(RawChunk::PreserveCase(s)) => s.push(c),
+                _ => vals.push(RawChunk::PreserveCase(c.to_string())),
             },
         }
 
@@ -318,7 +318,7 @@ fn resolve_latex_commands(values: Vec<RawChunk>) -> Vec<RawChunk> {
         f: impl Fn(Option<Vec<RawChunk>>) -> Option<Vec<RawChunk>>,
     ) -> Option<Vec<RawChunk>> {
         if verb {
-            f(args).map(|a| a.into_iter().map(|a| a.to_verbatim()).collect())
+            f(args).map(|a| a.into_iter().map(|a| a.to_preserved()).collect())
         } else {
             f(args)
         }
@@ -429,17 +429,17 @@ fn flatten(s: Vec<RawChunk>) -> Vec<RawChunk> {
     for elem in s {
         if let RawChunk::Normal(x) = elem {
             if !verbatim.is_empty() {
-                res.push(RawChunk::Verbatim(take(&mut verbatim)));
+                res.push(RawChunk::PreserveCase(take(&mut verbatim)));
             }
             normal += &x;
-        } else if let RawChunk::Verbatim(x) = elem {
+        } else if let RawChunk::PreserveCase(x) = elem {
             if !normal.is_empty() {
                 res.push(RawChunk::Normal(take(&mut normal)));
             }
             verbatim += &x;
         } else {
             if !verbatim.is_empty() {
-                res.push(RawChunk::Verbatim(take(&mut verbatim)));
+                res.push(RawChunk::PreserveCase(take(&mut verbatim)));
             }
 
             if !normal.is_empty() {
@@ -451,7 +451,7 @@ fn flatten(s: Vec<RawChunk>) -> Vec<RawChunk> {
     }
 
     if !verbatim.is_empty() {
-        res.push(RawChunk::Verbatim(verbatim));
+        res.push(RawChunk::PreserveCase(verbatim));
     }
 
     if !normal.is_empty() {
@@ -493,7 +493,7 @@ mod tests {
         RawChunk::Normal(s.to_string())
     }
     fn V(s: &str) -> RawChunk {
-        RawChunk::Verbatim(s.to_string())
+        RawChunk::PreserveCase(s.to_string())
     }
     fn C(s: &str, verb: bool, args: Option<Vec<RawChunk>>) -> RawChunk {
         RawChunk::CommandName(s.to_string(), verb, args)

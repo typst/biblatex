@@ -24,6 +24,7 @@ mod macros;
 mod mechanics;
 mod raw;
 mod resolve;
+mod scanner;
 mod types;
 
 pub use chunk::{Chunk, Chunks, ChunksExt};
@@ -107,7 +108,7 @@ impl Bibliography {
             }
             res.insert(Entry {
                 key: entry.key.to_string(),
-                entry_type: EntryType::new(entry.entry_type),
+                entry_type: EntryType::new(entry.kind),
                 fields,
             });
         }
@@ -966,4 +967,16 @@ mod tests {
             println!("\"{}\".", x.title().unwrap().format_sentence());
         }
     }
+
+    // #[test]
+    // fn test_verbatim_fields() {
+    //     let contents = fs::read_to_string("tests/libra.bib").unwrap();
+    //     let bibliography = Bibliography::parse(&contents).unwrap();
+    //     let e = bibliography.get("dierksmeierJustHODLMoral2018").unwrap();
+    //     assert_eq!(e.doi().unwrap(), "10.1007/s41463-018-0036-z");
+    //     assert_eq!(
+    //         e.file().unwrap(),
+    //         "C:\\Users\\mhaug\\Zotero\\storage\\DTPR7TES\\Dierksmeier - 2018 - Just HODL On the Moral Claims of Bitcoin and Ripp.pdf"
+    //     );
+    // }
 }
