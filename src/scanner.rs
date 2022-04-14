@@ -46,6 +46,7 @@ impl<'s> Scanner<'s> {
 
     /// Consume the next char, debug-asserting that it is the given one.
     #[inline]
+    #[track_caller]
     pub fn eat_assert(&mut self, c: char) {
         let next = self.eat();
         debug_assert_eq!(next, Some(c));
@@ -74,6 +75,18 @@ impl<'s> Scanner<'s> {
             self.index += c.len_utf8();
         }
         self.eaten_from(start)
+    }
+
+    /// Skip the whitespace in the file.
+    #[inline]
+    pub fn skip_ws(&mut self) {
+        self.eat_while(|c| c.is_whitespace());
+    }
+
+    /// Skip the newlines and whitespace in the file.
+    #[inline]
+    pub fn skip_trivia(&mut self) {
+        self.eat_while(|c| c.is_whitespace() || is_newline(c));
     }
 
     /// Uneat the last eaten char.
@@ -115,6 +128,13 @@ impl<'s> Scanner<'s> {
     #[inline]
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// Return a span of the current position.
+    #[inline]
+    pub fn here(&self) -> std::ops::Range<usize> {
+        let pos = self.index();
+        pos .. pos
     }
 
     /// Jump to an index in the source string.
@@ -184,10 +204,7 @@ pub fn is_newline(character: char) -> bool {
 /// Whether a character can start an identifier.
 #[inline]
 pub fn is_id_start(c: char) -> bool {
-    !matches!(
-        c,
-        '@' | '{' | '}' | '"' | '#' | '\'' | '(' | ')' | ',' | '=' | '%' | '\\' | '~'
-    ) && is_id_continue(c)
+    !matches!(c, ':' | '<' | '-' | '>' | '_') && is_id_continue(c)
 }
 
 /// Whether a character can continue an identifier.

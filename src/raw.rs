@@ -1,9 +1,11 @@
 //! Low-level representation of a bibliography file.
 
-use std::collections::HashMap;
 use std::fmt;
+use std::{collections::HashMap, vec};
 
 use crate::scanner::{is_id_continue, is_id_start, is_newline, Scanner};
+
+pub type Field<'s> = Vec<LiteralEntry<'s>>;
 
 /// A literal representation of a bibliography file, with abbreviations not yet
 /// resolved.
@@ -14,7 +16,7 @@ pub struct RawBibliography<'s> {
     /// The collection of citation keys and bibliography entries.
     pub entries: Vec<RawEntry<'s>>,
     /// A map of reusable abbreviations, only supported by BibTeX.
-    pub abbreviations: HashMap<&'s str, &'s str>,
+    pub abbreviations: HashMap<&'s str, Vec<LiteralEntry<'s>>>,
 }
 
 /// A raw extracted entry, with abbreviations not yet resolved.
@@ -25,7 +27,16 @@ pub struct RawEntry<'s> {
     /// Denotes the type of bibliographic item (e.g. `article`).
     pub kind: &'s str,
     /// Maps from field names to their values.
-    pub fields: HashMap<&'s str, &'s str>,
+    pub fields: HashMap<&'s str, Vec<LiteralEntry<'s>>>,
+}
+
+/// A literal representation of a bibliography entry field.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralEntry<'s> {
+    /// A normal field value.
+    Normal(&'s str),
+    /// A field with strings and abbreviations.
+    Abbreviation(&'s str),
 }
 
 impl<'s> RawBibliography<'s> {
@@ -42,13 +53,13 @@ struct BiblatexParser<'s> {
 }
 
 #[derive(Debug, Clone)]
-struct ParseError {
+pub struct ParseError {
     span: std::ops::Range<usize>,
     kind: ParseErrorKind,
 }
 
 impl ParseError {
-    fn new(span: std::ops::Range<usize>, kind: ParseErrorKind) -> Self {
+    pub(crate) fn new(span: std::ops::Range<usize>, kind: ParseErrorKind) -> Self {
         Self { span, kind }
     }
 }
@@ -59,20 +70,24 @@ impl fmt::Display for ParseError {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-enum ParseErrorKind {
+#[derive(Debug, Clone)]
+pub enum ParseErrorKind {
     UnexpectedEof,
+    Unexpected(Token),
     Expected(Token),
+    UnknownAbbreviation(String),
+    MalformedCommand,
 }
 
 #[derive(Debug, Copy, Clone)]
-enum Token {
+pub enum Token {
     Identifier,
     OpeningBrace,
     ClosingBrace,
     Comma,
     QuotationMark,
     Equals,
+    DecimalPoint,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -80,19 +95,23 @@ impl fmt::Display for ParseErrorKind {
         match self {
             Self::UnexpectedEof => write!(f, "unexpected end of file"),
             Self::Expected(token) => write!(f, "expected {}", token),
+            Self::Unexpected(token) => write!(f, "unexpected {}", token),
+            Self::UnknownAbbreviation(s) => write!(f, "unknown abbreviation {:?}", s),
+            Self::MalformedCommand => write!(f, "malformed command"),
         }
     }
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
+        f.write_str(match self {
             Self::Identifier => "identifier",
             Self::OpeningBrace => "opening brace",
             Self::ClosingBrace => "closing brace",
             Self::Comma => "comma",
             Self::QuotationMark => "double quote",
             Self::Equals => "equals",
+            Self::DecimalPoint => "decimal point",
         })
     }
 }
@@ -115,7 +134,7 @@ impl<'s> BiblatexParser<'s> {
         let mut errors = vec![];
 
         while !self.s.eof() {
-            self.skip_trivia();
+            self.s.skip_trivia();
             match self.s.peek() {
                 Some('@') => {
                     if let Err(e) = self.entry() {
@@ -132,21 +151,11 @@ impl<'s> BiblatexParser<'s> {
         (self.res, errors)
     }
 
-    /// Skip the whitespace in the file.
-    fn skip_ws(&mut self) {
-        self.s.eat_while(|c| c.is_whitespace());
-    }
-
-    /// Skip the newlines and whitespace in the file.
-    fn skip_trivia(&mut self) {
-        self.s.eat_while(|c| c.is_whitespace() || is_newline(c));
-    }
-
     /// Eat a comma.
     fn comma(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if(',') {
             return Err(ParseError::new(
-                self.here(),
+                self.s.here(),
                 ParseErrorKind::Expected(Token::Comma),
             ));
         }
@@ -169,7 +178,7 @@ impl<'s> BiblatexParser<'s> {
             Ok(())
         } else {
             Err(ParseError::new(
-                self.here(),
+                self.s.here(),
                 ParseErrorKind::Expected(token),
             ))
         }
@@ -179,7 +188,7 @@ impl<'s> BiblatexParser<'s> {
     fn quote(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if('"') {
             Err(ParseError::new(
-                self.here(),
+                self.s.here(),
                 ParseErrorKind::Expected(Token::QuotationMark),
             ))
         } else {
@@ -191,7 +200,7 @@ impl<'s> BiblatexParser<'s> {
     fn equals(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if('=') {
             Err(ParseError::new(
-                self.here(),
+                self.s.here(),
                 ParseErrorKind::Expected(Token::Equals),
             ))
         } else {
@@ -200,14 +209,16 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat a string.
-    fn string(&mut self) -> Result<(), ParseError> {
+    fn string(&mut self) -> Result<&'s str, ParseError> {
         self.quote()?;
+        let idx = self.s.index();
 
         while let Some(c) = self.s.peek() {
             match c {
                 '"' => {
+                    let res = self.s.eaten_from(idx);
                     self.quote()?;
-                    return Ok(());
+                    return Ok(res);
                 }
                 '\\' => {
                     self.s.eat_assert('\\');
@@ -219,12 +230,50 @@ impl<'s> BiblatexParser<'s> {
             }
         }
 
-        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
+        Err(ParseError::new(
+            self.s.here(),
+            ParseErrorKind::UnexpectedEof,
+        ))
+    }
+
+    /// Eat a number.
+    fn number(&mut self) -> Result<&'s str, ParseError> {
+        let idx = self.s.index();
+        let mut has_dot = false;
+
+        while let Some(c) = self.s.peek() {
+            let start = self.s.index();
+            match c {
+                '0' ..= '9' => {
+                    self.s.eat();
+                }
+                '.' => {
+                    if !has_dot {
+                        self.s.eat();
+                        has_dot = true;
+                    } else {
+                        return Err(ParseError::new(
+                            start .. self.s.index(),
+                            ParseErrorKind::Unexpected(Token::DecimalPoint),
+                        ));
+                    }
+                }
+                _ => {
+                    return Ok(self.s.eaten_from(idx));
+                }
+            }
+        }
+
+        Err(ParseError::new(
+            self.s.here(),
+            ParseErrorKind::UnexpectedEof,
+        ))
     }
 
     /// Eat a braced value.
-    fn braced(&mut self) -> Result<(), ParseError> {
+    fn braced(&mut self) -> Result<LiteralEntry<'s>, ParseError> {
         self.brace(true)?;
+        let idx = self.s.index();
         let mut braces = 0;
 
         while let Some(c) = self.s.peek() {
@@ -234,9 +283,10 @@ impl<'s> BiblatexParser<'s> {
                     braces += 1;
                 }
                 '}' => {
+                    let res = self.s.eaten_from(idx);
                     self.brace(false)?;
                     if braces == 0 {
-                        return Ok(());
+                        return Ok(LiteralEntry::Normal(res));
                     }
                     braces -= 1;
                 }
@@ -250,58 +300,68 @@ impl<'s> BiblatexParser<'s> {
             }
         }
 
-        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
+        Err(ParseError::new(
+            self.s.here(),
+            ParseErrorKind::UnexpectedEof,
+        ))
     }
 
     /// Eat an element of an abbreviation.
-    fn abbr_element(&mut self) -> Result<(), ParseError> {
+    fn abbr_element(&mut self) -> Result<LiteralEntry<'s>, ParseError> {
         match self.s.peek() {
-            Some(c) if is_id_start(c) => self.ident().map(|_| ()),
-            _ => self.string().map(|_| ()),
+            Some(c) if is_id_start(c) => {
+                self.ident().map(|s| LiteralEntry::Abbreviation(s))
+            }
+            Some(c) if c.is_numeric() => self.number().map(|s| LiteralEntry::Normal(s)),
+            _ => self.string().map(|s| LiteralEntry::Normal(s)),
         }
     }
 
     /// Eat an abbreviation field.
-    fn abbr_field(&mut self) -> Result<(), ParseError> {
+    fn abbr_field(&mut self) -> Result<Field<'s>, ParseError> {
+        let mut elems = vec![];
+
         loop {
-            self.abbr_element()?;
-            self.skip_ws();
+            elems.push(self.abbr_element()?);
+            self.s.skip_ws();
             if !self.s.eat_if('#') {
                 break;
             }
-            self.skip_ws();
+            self.s.skip_ws();
         }
 
-        Ok(())
+        Ok(elems)
     }
 
     /// Eat a field.
-    fn field(&mut self) -> Result<(&'s str, &'s str), ParseError> {
+    fn field(&mut self) -> Result<(&'s str, Field<'s>), ParseError> {
         let key = self.ident()?;
-        self.skip_ws();
+        self.s.skip_ws();
         self.equals()?;
-        self.skip_ws();
+        self.s.skip_ws();
 
-        let value_pos = self.s.index();
-        match self.s.peek() {
-            Some('{') => self.braced()?,
+        let value = match self.s.peek() {
+            Some('{') => vec![self.braced()?],
             Some(_) => self.abbr_field()?,
             None => {
-                return Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof));
+                return Err(ParseError::new(
+                    self.s.here(),
+                    ParseErrorKind::UnexpectedEof,
+                ));
             }
-        }
+        };
 
-        self.skip_ws();
+        self.s.skip_ws();
 
-        Ok((key, self.s.eaten_from(value_pos)))
+        Ok((key, value))
     }
 
     /// Eat fields.
-    fn fields(&mut self) -> Result<HashMap<&'s str, &'s str>, ParseError> {
+    fn fields(&mut self) -> Result<HashMap<&'s str, Field<'s>>, ParseError> {
         let mut fields = HashMap::new();
 
         while !self.s.eof() {
-            self.skip_ws();
+            self.s.skip_ws();
 
             if self.s.peek() == Some('}') {
                 return Ok(fields);
@@ -309,7 +369,7 @@ impl<'s> BiblatexParser<'s> {
 
             let (key, value) = self.field()?;
 
-            self.skip_trivia();
+            self.s.skip_trivia();
 
             fields.insert(key, value);
 
@@ -320,14 +380,17 @@ impl<'s> BiblatexParser<'s> {
                 }
                 _ => {
                     return Err(ParseError::new(
-                        self.here(),
+                        self.s.here(),
                         ParseErrorKind::Expected(Token::Comma),
                     ));
                 }
             }
         }
 
-        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
+        Err(ParseError::new(
+            self.s.here(),
+            ParseErrorKind::UnexpectedEof,
+        ))
     }
 
     /// Eat an identifier.
@@ -341,7 +404,7 @@ impl<'s> BiblatexParser<'s> {
             Ok(self.s.eaten_from(idx))
         } else {
             Err(ParseError::new(
-                self.here(),
+                self.s.here(),
                 ParseErrorKind::Expected(Token::Identifier),
             ))
         }
@@ -351,9 +414,9 @@ impl<'s> BiblatexParser<'s> {
     fn entry(&mut self) -> Result<(), ParseError> {
         self.s.eat_assert('@');
         let entry_type = self.ident()?;
-        self.skip_trivia();
+        self.s.skip_trivia();
         self.brace(true)?;
-        self.skip_trivia();
+        self.s.skip_trivia();
 
         match entry_type.to_ascii_lowercase().as_str() {
             "string" => self.strings()?,
@@ -361,7 +424,7 @@ impl<'s> BiblatexParser<'s> {
             _ => self.body(entry_type)?,
         }
 
-        self.skip_trivia();
+        self.s.skip_trivia();
         self.brace(false)?;
 
         Ok(())
@@ -392,20 +455,14 @@ impl<'s> BiblatexParser<'s> {
     /// Eat the body of a entry.
     fn body(&mut self, kind: &'s str) -> Result<(), ParseError> {
         let key = self.ident()?;
-        self.skip_ws();
+        self.s.skip_ws();
         self.comma()?;
 
-        self.skip_trivia();
+        self.s.skip_trivia();
         let fields = self.fields()?;
 
         self.res.entries.push(RawEntry { key, kind, fields });
         Ok(())
-    }
-
-    /// Return a span of the current position.
-    fn here(&self) -> std::ops::Range<usize> {
-        let pos = self.s.index();
-        pos .. pos
     }
 }
 
@@ -414,12 +471,42 @@ impl<'s> BiblatexParser<'s> {
 mod tests {
     use super::*;
 
+    fn format(field: &Field<'_>) -> String {
+        if field.len() == 1 {
+            if let Some(LiteralEntry::Normal(s)) = field.first() {
+                return format!("{{{}}}", s);
+            }
+        }
+
+        let mut res = String::new();
+        let mut first = true;
+
+        for field in field {
+            if !first {
+                res.push_str(" # ");
+            } else {
+                first = false;
+            }
+
+            match field {
+                LiteralEntry::Normal(s) => {
+                    res.push('"');
+                    res.push_str(s);
+                    res.push('"');
+                },
+                LiteralEntry::Abbreviation(s) => res.push_str(s),
+            }
+        }
+
+        res
+    }
+
     #[track_caller]
     fn test_prop(key: &str, value: &str) -> String {
         let test = format!("@article{{test, {}={}}}", key, value);
         let bt = RawBibliography::parse(&test);
         let article = &bt.entries[0];
-        article.fields.get(key).expect("fail").to_string()
+        format(article.fields.get(key).expect("fail"))
     }
 
     #[test]
@@ -433,15 +520,15 @@ mod tests {
         let article = &bt.entries[0];
 
         assert_eq!(article.kind, "article");
-        assert_eq!(article.fields.get("title"), Some(&"\"Great proceedings\\{\""));
-        assert_eq!(article.fields.get("year"), Some(&"2002"));
-        assert_eq!(article.fields.get("author"), Some(&"{Haug, {Martin} and Haug, Gregor}"));
+        assert_eq!(format(article.fields.get("title").unwrap()), "{Great proceedings\\{}");
+        assert_eq!(format(article.fields.get("year").unwrap()), "2002");
+        assert_eq!(format(article.fields.get("author").unwrap()), "{Haug, {Martin} and Haug, Gregor}");
     }
 
     #[test]
     fn test_resolve_string() {
         let bt = RawBibliography::parse("@string{BT = \"bibtex\"}");
-        assert_eq!(bt.abbreviations.get("BT"), Some(&"\"bibtex\""));
+        assert_eq!(bt.abbreviations.get("BT"), Some(&vec![LiteralEntry::Normal("bibtex")]));
     }
 
     #[test]

@@ -97,7 +97,7 @@ impl Bibliography {
             for (field_key, field_value) in entry.fields.into_iter() {
                 let field_key = field_key.to_string();
 
-                if let Some(r) = resolve::resolve(field_value, abbr) {
+                if let Ok(r) = resolve::parse_field(&field_key, &field_value, abbr) {
                     fields.insert(field_key, r);
                 } else {
                     return Err(BibliographyError::MalformedField(

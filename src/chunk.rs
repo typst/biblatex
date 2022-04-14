@@ -19,6 +19,26 @@ pub enum Chunk {
     ///
     /// Example: `"Inside {NASA}"` or `{Memes are {gReAT}}`.
     Verbatim(String),
+    /// Values nested in dollar signs.
+    Math(String),
+}
+
+impl Chunk {
+    pub fn get(&self) -> &str {
+        match self {
+            Chunk::Normal(s) => s,
+            Chunk::Verbatim(s) => s,
+            Chunk::Math(s) => s,
+        }
+    }
+
+    pub fn get_mut(&mut self) -> &mut String {
+        match self {
+            Chunk::Normal(s) => s,
+            Chunk::Verbatim(s) => s,
+            Chunk::Math(s) => s,
+        }
+    }
 }
 
 /// Additional methods for chunk slices.
@@ -113,6 +133,7 @@ pub(crate) fn chunk_chars(chunks: &[Chunk]) -> impl Iterator<Item = (char, bool)
         let (s, verbatim) = match chunk {
             Chunk::Normal(s) => (s, false),
             Chunk::Verbatim(s) => (s, true),
+            Chunk::Math(s) => (s, false),
         };
 
         s.chars().map(move |c| (c, verbatim))
@@ -217,6 +238,7 @@ pub(crate) fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Chunks, Chun
     let (content, verb) = match item {
         Chunk::Normal(s) => (s, false),
         Chunk::Verbatim(s) => (s, true),
+        Chunk::Math(s) => (s, false),
     };
 
     let (s1, s2) = content.split_at(si);
