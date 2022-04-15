@@ -647,3 +647,13 @@ impl EntryType {
         reqs
     }
 }
+
+/// Whether a field with this key should be parsed with commands and most
+/// escapes turned off.
+pub fn is_verbatim_field(key: &str) -> bool {
+    match key {
+        "file" | "doi" | "uri" | "eprint" | "verba" | "verbb" | "verbc" | "pdf"
+        | "url" | "urlraw" => true,
+        _ => false,
+    }
+}

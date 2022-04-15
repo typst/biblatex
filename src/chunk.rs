@@ -39,6 +39,17 @@ impl Chunk {
             Chunk::Math(s) => s,
         }
     }
+
+    pub fn get_escaped(&self, verbatim_mode: bool) -> String {
+        let mut s = String::new();
+        for c in self.get().chars() {
+            if is_escapable(c, verbatim_mode) {
+                s.push('\\');
+            }
+            s.push(c);
+        }
+        s
+    }
 }
 
 /// Additional methods for chunk slices.
@@ -53,7 +64,7 @@ pub trait ChunksExt {
     fn format_verbatim(&self) -> String;
 
     /// Serialize the chunks into a BibLaTeX string.
-    fn to_biblatex_string(&self) -> String;
+    fn to_biblatex_string(&self, verbatim_mode: bool) -> String;
 }
 
 impl ChunksExt for [Chunk] {
@@ -65,18 +76,27 @@ impl ChunksExt for [Chunk] {
         let mut out = String::new();
         let mut first = true;
         for val in self {
-            if let Chunk::Normal(s) = val {
-                for c in s.chars() {
-                    if first {
-                        out.extend(c.to_uppercase());
-                    } else {
-                        out.extend(c.to_lowercase());
+            match val {
+                Chunk::Normal(s) => {
+                    for c in s.chars() {
+                        if first {
+                            out.extend(c.to_uppercase());
+                        } else {
+                            out.extend(c.to_lowercase());
+                        }
+                        first = false;
                     }
-                    first = false;
                 }
-            } else if let Chunk::Verbatim(s) = val {
-                out += s;
+                Chunk::Verbatim(s) => {
+                    out.push_str(&s);
+                }
+                Chunk::Math(s) => {
+                    out.push('$');
+                    out += s;
+                    out.push('$');
+                }
             }
+
             first = false;
         }
 
@@ -86,39 +106,49 @@ impl ChunksExt for [Chunk] {
     fn format_verbatim(&self) -> String {
         let mut out = String::new();
         for val in self {
-            if let Chunk::Normal(s) = val {
-                out += s;
-            } else if let Chunk::Verbatim(s) = val {
-                out += s;
+            match val {
+                Chunk::Normal(s) => out += s,
+                Chunk::Verbatim(s) => out += s,
+                Chunk::Math(s) => {
+                    out.push('$');
+                    out += s;
+                    out.push('$');
+                }
             }
         }
 
         out
     }
 
-    fn to_biblatex_string(&self) -> String {
-        let iter = chunk_chars(self);
+    fn to_biblatex_string(&self, verbatim_mode: bool) -> String {
         let mut res = String::new();
         res.push('{');
-        let mut braces = 1;
+        let mut extra_brace = false;
 
-        for (c, v) in iter {
-            if v && braces <= 1 {
-                res.push('{');
-                braces += 1;
-            } else if !v && braces > 1 {
-                res.push('}');
-                braces -= 1;
+        for chunk in self.iter() {
+            match chunk {
+                Chunk::Verbatim(_) if !extra_brace => {
+                    res.push('{');
+                    extra_brace = true;
+                }
+                Chunk::Normal(_) if extra_brace => {
+                    res.push('}');
+                    extra_brace = false;
+                }
+                Chunk::Math(_) => {
+                    res.push('$');
+                }
+                _ => {}
             }
 
-            if is_escapable(c) || c == '\\' {
-                res.push('\\');
-            }
+            res.push_str(&chunk.get_escaped(verbatim_mode));
 
-            res.push(c);
+            if let Chunk::Math(_) = chunk {
+                res.push('$');
+            }
         }
 
-        for _ in 0 .. braces {
+        for _ in 0 .. if extra_brace { 2 } else { 1 } {
             res.push('}');
         }
 
@@ -263,19 +293,6 @@ pub(crate) mod tests {
     }
     pub fn V(s: &str) -> Chunk {
         Chunk::Verbatim(s.to_string())
-    }
-
-    #[test]
-    fn test_chars_iterator() {
-        let vls = &[N("it "), V("te")];
-        let mut iter = chunk_chars(vls);
-        assert_eq!(iter.next(), Some(('i', false)));
-        assert_eq!(iter.next(), Some(('t', false)));
-        assert_eq!(iter.next(), Some((' ', false)));
-        assert_eq!(iter.next(), Some(('t', true)));
-        assert_eq!(iter.next(), Some(('e', true)));
-        assert_eq!(iter.next(), None);
-        assert_eq!(iter.next(), None);
     }
 
     #[test]

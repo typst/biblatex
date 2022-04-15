@@ -3,9 +3,9 @@
 use std::fmt;
 use std::{collections::HashMap, vec};
 
-use crate::scanner::{is_id_continue, is_id_start, is_newline, Scanner};
+use crate::scanner::{is_id_continue, is_id_start, Scanner};
 
-pub type Field<'s> = Vec<LiteralEntry<'s>>;
+pub type Field<'s> = Vec<RawChunk<'s>>;
 
 /// A literal representation of a bibliography file, with abbreviations not yet
 /// resolved.
@@ -16,7 +16,7 @@ pub struct RawBibliography<'s> {
     /// The collection of citation keys and bibliography entries.
     pub entries: Vec<RawEntry<'s>>,
     /// A map of reusable abbreviations, only supported by BibTeX.
-    pub abbreviations: HashMap<&'s str, Vec<LiteralEntry<'s>>>,
+    pub abbreviations: HashMap<&'s str, Vec<RawChunk<'s>>>,
 }
 
 /// A raw extracted entry, with abbreviations not yet resolved.
@@ -27,12 +27,12 @@ pub struct RawEntry<'s> {
     /// Denotes the type of bibliographic item (e.g. `article`).
     pub kind: &'s str,
     /// Maps from field names to their values.
-    pub fields: HashMap<&'s str, Vec<LiteralEntry<'s>>>,
+    pub fields: HashMap<&'s str, Vec<RawChunk<'s>>>,
 }
 
 /// A literal representation of a bibliography entry field.
 #[derive(Debug, Clone, PartialEq)]
-pub enum LiteralEntry<'s> {
+pub enum RawChunk<'s> {
     /// A normal field value.
     Normal(&'s str),
     /// A field with strings and abbreviations.
@@ -271,7 +271,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat a braced value.
-    fn braced(&mut self) -> Result<LiteralEntry<'s>, ParseError> {
+    fn braced(&mut self) -> Result<RawChunk<'s>, ParseError> {
         self.brace(true)?;
         let idx = self.s.index();
         let mut braces = 0;
@@ -286,7 +286,7 @@ impl<'s> BiblatexParser<'s> {
                     let res = self.s.eaten_from(idx);
                     self.brace(false)?;
                     if braces == 0 {
-                        return Ok(LiteralEntry::Normal(res));
+                        return Ok(RawChunk::Normal(res));
                     }
                     braces -= 1;
                 }
@@ -307,13 +307,11 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat an element of an abbreviation.
-    fn abbr_element(&mut self) -> Result<LiteralEntry<'s>, ParseError> {
+    fn abbr_element(&mut self) -> Result<RawChunk<'s>, ParseError> {
         match self.s.peek() {
-            Some(c) if is_id_start(c) => {
-                self.ident().map(|s| LiteralEntry::Abbreviation(s))
-            }
-            Some(c) if c.is_numeric() => self.number().map(|s| LiteralEntry::Normal(s)),
-            _ => self.string().map(|s| LiteralEntry::Normal(s)),
+            Some(c) if is_id_start(c) => self.ident().map(|s| RawChunk::Abbreviation(s)),
+            Some(c) if c.is_numeric() => self.number().map(|s| RawChunk::Normal(s)),
+            _ => self.string().map(|s| RawChunk::Normal(s)),
         }
     }
 
@@ -473,7 +471,7 @@ mod tests {
 
     fn format(field: &Field<'_>) -> String {
         if field.len() == 1 {
-            if let Some(LiteralEntry::Normal(s)) = field.first() {
+            if let Some(RawChunk::Normal(s)) = field.first() {
                 return format!("{{{}}}", s);
             }
         }
@@ -489,12 +487,12 @@ mod tests {
             }
 
             match field {
-                LiteralEntry::Normal(s) => {
+                RawChunk::Normal(s) => {
                     res.push('"');
                     res.push_str(s);
                     res.push('"');
                 },
-                LiteralEntry::Abbreviation(s) => res.push_str(s),
+                RawChunk::Abbreviation(s) => res.push_str(s),
             }
         }
 
@@ -528,7 +526,7 @@ mod tests {
     #[test]
     fn test_resolve_string() {
         let bt = RawBibliography::parse("@string{BT = \"bibtex\"}");
-        assert_eq!(bt.abbreviations.get("BT"), Some(&vec![LiteralEntry::Normal("bibtex")]));
+        assert_eq!(bt.abbreviations.get("BT"), Some(&vec![RawChunk::Normal("bibtex")]));
     }
 
     #[test]

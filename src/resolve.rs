@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use unicode_normalization::char;
 
 use crate::chunk::{Chunk, Chunks};
-use crate::raw::{Field, LiteralEntry, ParseError, ParseErrorKind, Token};
-use crate::scanner::{is_id_continue, is_id_start, Scanner};
+use crate::mechanics::is_verbatim_field;
+use crate::raw::{Field, ParseError, ParseErrorKind, RawChunk, Token};
+use crate::scanner::{is_id_continue, is_newline, Scanner};
 use crate::types::get_month_for_abbr;
+use crate::ChunksExt;
 
 /// Fully parse a field, resolving abbreviations and LaTeX commands.
 pub fn parse_field(
@@ -16,10 +18,10 @@ pub fn parse_field(
     let mut chunks = vec![];
     for e in field {
         match e {
-            LiteralEntry::Abbreviation(s) => {
+            RawChunk::Abbreviation(s) => {
                 chunks.extend(resolve_abbreviation(key, s, abbreviations)?);
             }
-            LiteralEntry::Normal(s) => {
+            RawChunk::Normal(s) => {
                 chunks.extend(ContentParser::new(key, s).parse()?);
             }
         }
@@ -32,12 +34,15 @@ pub fn parse_field(
 #[derive(Clone)]
 struct ContentParser<'s> {
     s: Scanner<'s>,
-    key: &'s str,
+    verb_field: bool,
 }
 
 impl<'s> ContentParser<'s> {
     fn new(key: &'s str, field: &'s str) -> Self {
-        Self { s: Scanner::new(field), key }
+        Self {
+            s: Scanner::new(field),
+            verb_field: is_verbatim_field(key),
+        }
     }
 
     fn parse(mut self) -> Result<Chunks, ParseError> {
@@ -100,9 +105,12 @@ impl<'s> ContentParser<'s> {
         self.s.eat_assert('\\');
         // TODO fix escaping for file field
         match self.s.peek() {
-            Some(c) if is_escapable(c) => {
+            Some(c) if is_escapable(c, self.verb_field) => {
                 self.s.eat_assert(c);
                 Ok(c.to_string())
+            }
+            _ if self.verb_field => {
+                return Ok("\\".to_string());
             }
             Some(c) if !c.is_whitespace() && !c.is_control() => self.command(),
             Some(c) => Ok(format!("\\{}", c)),
@@ -118,7 +126,7 @@ impl<'s> ContentParser<'s> {
         let valid_start = self
             .s
             .peek()
-            .map(|c| is_id_start(c) || is_single_char_func(c))
+            .map(|c| !c.is_whitespace() && !c.is_control() && !is_newline(c))
             .unwrap_or_default();
         if !valid_start {
             return Err(ParseError::new(
@@ -140,22 +148,47 @@ impl<'s> ContentParser<'s> {
         {
             let idx = self.s.index();
             self.s.eat();
-            Some(self.s.eaten_from(idx))
+            Some(self.s.eaten_from(idx).into())
         } else if !ws && self.s.eat_if('{') {
-            let arg = self.s.eat_until(|c| c == '}');
-            if self.s.eof() {
-                return Err(ParseError::new(
-                    self.s.here(),
-                    ParseErrorKind::UnexpectedEof,
-                ));
+            let mut depth = 1;
+            let idx = self.s.index();
+
+            loop {
+                self.s.eat_until(|c| c == '}' || c == '{');
+
+                match self.s.eat() {
+                    Some('{') => {
+                        depth += 1;
+                    }
+                    Some('}') => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    Some(_) => unreachable!(),
+                    None => {
+                        return Err(ParseError::new(
+                            self.s.here(),
+                            ParseErrorKind::UnexpectedEof,
+                        ));
+                    }
+                }
             }
-            self.s.eat();
+
+            let brace = '}'.len_utf8();
+            let arg = self.s.eaten_from(idx);
+
+            let arg = ContentParser::new("", &arg[.. arg.len() - brace])
+                .parse()?
+                .format_verbatim();
+
             Some(arg)
         } else {
             None
         };
 
-        Ok(execute_command(command, arg))
+        Ok(execute_command(command, arg.as_deref()))
     }
 
     fn math(&mut self) -> Result<Chunk, ParseError> {
@@ -204,7 +237,15 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
                 combine.into()
             } else {
                 let mut chars = v.chars();
-                let last = chars.next_back().unwrap();
+
+                // Account for legacy TeX behavior of requiring an uncapped i or
+                // j to add another diacritic.
+                let last = match chars.next_back().unwrap() {
+                    'ı' => 'i',
+                    'ȷ' => 'j',
+                    c => c,
+                };
+
                 let combined = char::compose(last, combine).unwrap_or(last);
                 let mut res = chars.as_str().to_string();
                 res.push(combined);
@@ -279,7 +320,8 @@ fn flatten(chunks: &mut Chunks) {
         };
 
         if merge {
-            let redundant = std::mem::replace(&mut chunks[i], Chunk::Normal("".into()));
+            let redundant =
+                std::mem::replace(&mut chunks[i], Chunk::Normal("".to_string()));
             chunks[i - 1].get_mut().push_str(redundant.get());
             chunks.remove(i);
         } else {
@@ -289,9 +331,10 @@ fn flatten(chunks: &mut Chunks) {
 }
 
 /// Characters that can be escaped.
-pub fn is_escapable(c: char) -> bool {
+pub fn is_escapable(c: char, verb: bool) -> bool {
     match c {
-        '&' | '%' | '{' | '}' | '$' | '_' | '\\' => true,
+        '{' | '}' | '\\' => true,
+        '&' | '%' | '$' | '_' if !verb => true,
         _ => false,
     }
 }
@@ -300,7 +343,7 @@ pub fn is_escapable(c: char) -> bool {
 /// that automatically terminates.
 fn is_single_char_func(c: char) -> bool {
     match c {
-        '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' => true,
+        '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\' => true,
         _ => false,
     }
 }
@@ -311,7 +354,7 @@ fn is_single_char_func(c: char) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{parse_field, Chunk, LiteralEntry};
+    use super::{parse_field, Chunk, RawChunk};
 
     fn N(s: &str) -> Chunk {
         Chunk::Normal(s.to_string())
@@ -326,16 +369,16 @@ mod tests {
     #[test]
     fn test_process() {
         let mut map = HashMap::new();
-        map.insert("abc", vec![LiteralEntry::Normal("ABC")]);
-        map.insert("hi", vec![LiteralEntry::Normal("hello")]);
-        map.insert("you", vec![LiteralEntry::Normal("person")]);
+        map.insert("abc", vec![RawChunk::Normal("ABC")]);
+        map.insert("hi", vec![RawChunk::Normal("hello")]);
+        map.insert("you", vec![RawChunk::Normal("person")]);
 
         let field = vec![
-            LiteralEntry::Abbreviation("abc"),
-            LiteralEntry::Normal("good {TIMES}"),
-            LiteralEntry::Abbreviation("hi"),
-            LiteralEntry::Abbreviation("you"),
-            LiteralEntry::Normal("last"),
+            RawChunk::Abbreviation("abc"),
+            RawChunk::Normal("good {TIMES}"),
+            RawChunk::Abbreviation("hi"),
+            RawChunk::Abbreviation("you"),
+            RawChunk::Normal("last"),
         ];
 
         let res = parse_field("", &field, &map).unwrap();
@@ -347,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_resolve_commands_and_escape() {
-        let field = vec![LiteralEntry::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}")];
+        let field = vec![RawChunk::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}")];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0], N("Äther und "));
@@ -356,7 +399,7 @@ mod tests {
         assert_eq!(res[3], V("\\relax for you}"));
         assert_eq!(res.len(), 4);
 
-        let field = vec![LiteralEntry::Normal("M\\\"etal S\\= ound")];
+        let field = vec![RawChunk::Normal("M\\\"etal S\\= ound")];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0], N("Mëtal Sōund"));
@@ -364,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_math() {
-        let field = vec![LiteralEntry::Normal("The $11^{th}$ International Conference on How To Make \\$\\$")];
+        let field = vec![RawChunk::Normal("The $11^{th}$ International Conference on How To Make \\$\\$")];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0], N("The "));
@@ -375,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_commands() {
-        let field = vec![LiteralEntry::Normal("Bose\\textendash{}Einstein")];
+        let field = vec![RawChunk::Normal("Bose\\textendash{}Einstein")];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0], N("Bose–Einstein"));
