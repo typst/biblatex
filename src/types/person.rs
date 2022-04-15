@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::raw::ParseError;
 use crate::Type;
-use crate::{chunk::*, MalformKind};
+use crate::{chunk::*, FieldType};
 
 /// An author, editor, or some other person affiliated with a cited work.
 ///
@@ -216,7 +216,7 @@ impl Person {
 }
 
 impl Type for Vec<Person> {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Ok(split_token_lists(chunks, " and ")
             .into_iter()
             .map(|subchunks| Person::parse(&subchunks))

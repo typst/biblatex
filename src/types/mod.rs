@@ -13,23 +13,22 @@ use std::str::FromStr;
 use numerals::roman::Roman;
 use strum::{AsRefStr, Display, EnumString};
 
-use crate::raw::ParseError;
 use crate::scanner::Scanner;
 use crate::{chunk::*, Span};
 
-#[derive(Debug, Clone)]
-pub struct MalformedError {
-    span: Span,
-    kind: MalformKind,
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeError {
+    pub span: Span,
+    pub kind: FieldType,
 }
 
-impl MalformedError {
-    pub(crate) fn new(span: Span, kind: MalformKind) -> Self {
+impl TypeError {
+    pub(crate) fn new(span: Span, kind: FieldType) -> Self {
         Self { span, kind }
     }
 }
 
-impl fmt::Display for MalformedError {
+impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -39,9 +38,9 @@ impl fmt::Display for MalformedError {
     }
 }
 
-#[derive(Debug, Display, Copy, Clone)]
+#[derive(Debug, Display, Copy, Clone, PartialEq)]
 #[strum(serialize_all = "snake_case")]
-pub enum MalformKind {
+pub enum FieldType {
     Date,
     Gender,
     Integer,
@@ -53,14 +52,14 @@ pub enum MalformKind {
 /// Convert Bib(La)TeX data types from and to chunk slices.
 pub trait Type: Sized {
     /// Parse the type from chunks.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind>;
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType>;
 
     /// Serialize the type into chunks.
     fn to_chunks(&self) -> Chunks;
 }
 
 impl Type for i64 {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         let s = chunks.format_verbatim();
         let s = s.trim();
 
@@ -69,7 +68,7 @@ impl Type for i64 {
         } else if let Some(roman) = Roman::parse(s) {
             Ok(roman.value() as i64)
         } else {
-            Err(MalformKind::Integer)
+            Err(FieldType::Integer)
         }
     }
 
@@ -79,7 +78,7 @@ impl Type for i64 {
 }
 
 impl Type for String {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Ok(chunks.format_verbatim())
     }
 
@@ -89,13 +88,13 @@ impl Type for String {
 }
 
 impl Type for Range<u32> {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         chunks
             .parse::<Vec<Range<u32>>>()
             .map_err(|e| e.kind)?
             .into_iter()
             .next()
-            .ok_or(MalformKind::IntegerRange)
+            .ok_or(FieldType::IntegerRange)
     }
 
     fn to_chunks(&self) -> Chunks {
@@ -105,7 +104,7 @@ impl Type for Range<u32> {
 
 impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Ok(split_token_lists(chunks, " and "))
     }
 
@@ -128,7 +127,7 @@ impl Type for Vec<Chunks> {
 
 impl Type for Vec<String> {
     /// Splits the chunks at commas.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Ok(split_token_lists(chunks, ",")
             .into_iter()
             .map(|chunks| chunks.format_verbatim())
@@ -143,17 +142,17 @@ impl Type for Vec<String> {
 
 impl Type for Vec<Range<u32>> {
     /// Splits the ranges at commas.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         let range_vecs = split_token_lists(chunks, ",");
         let mut res = vec![];
 
-        let number = |s: &mut Scanner| -> Result<u32, MalformKind> {
+        let number = |s: &mut Scanner| -> Result<u32, FieldType> {
             s.skip_ws();
             let num = s.eat_while(|c| c.is_digit(10));
-            u32::from_str(num).map_err(|_| MalformKind::IntegerRange)
+            u32::from_str(num).map_err(|_| FieldType::IntegerRange)
         };
 
-        let component = |s: &mut Scanner| -> Result<u32, MalformKind> {
+        let component = |s: &mut Scanner| -> Result<u32, FieldType> {
             loop {
                 let num = number(s)?;
                 s.skip_ws();
@@ -200,7 +199,7 @@ pub enum Edition {
 }
 
 impl Type for Edition {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Ok(if let Ok(int) = chunks.parse() {
             Edition::Int(int)
         } else {
@@ -229,9 +228,9 @@ pub enum Pagination {
 }
 
 impl Type for Pagination {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Pagination::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| MalformKind::Pagination)
+            .map_err(|_| FieldType::Pagination)
     }
 
     fn to_chunks(&self) -> Chunks {
@@ -256,9 +255,9 @@ pub enum EditorType {
 }
 
 impl Type for EditorType {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         EditorType::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| MalformKind::EditorType)
+            .map_err(|_| FieldType::EditorType)
     }
 
     fn to_chunks(&self) -> Chunks {
@@ -331,7 +330,7 @@ impl Gender {
 }
 
 impl Type for Gender {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         // Two-letter gender serialization in accordance with the BibLaTeX standard.
         match chunks.format_verbatim().to_lowercase().as_ref() {
             "sf" => Ok(Gender::SingularFemale),
@@ -340,7 +339,7 @@ impl Type for Gender {
             "pf" => Ok(Gender::PluralFemale),
             "pm" => Ok(Gender::PluralMale),
             "pn" => Ok(Gender::PluralNeuter),
-            _ => Err(MalformKind::Gender),
+            _ => Err(FieldType::Gender),
         }
     }
 

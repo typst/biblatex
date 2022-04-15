@@ -4,6 +4,7 @@ use std::fmt;
 use std::{collections::HashMap, vec};
 
 use crate::scanner::{is_id_continue, is_id_start, Scanner};
+use crate::TypeError;
 
 pub type Field<'s> = Vec<RawChunk<'s>>;
 
@@ -54,8 +55,8 @@ struct BiblatexParser<'s> {
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    span: std::ops::Range<usize>,
-    kind: ParseErrorKind,
+    pub span: std::ops::Range<usize>,
+    pub kind: ParseErrorKind,
 }
 
 impl ParseError {
@@ -70,16 +71,18 @@ impl fmt::Display for ParseError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ParseErrorKind {
     UnexpectedEof,
     Unexpected(Token),
     Expected(Token),
     UnknownAbbreviation(String),
     MalformedCommand,
+    DuplicateKey(String),
+    TypeError(TypeError),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Token {
     Identifier,
     OpeningBrace,
@@ -98,7 +101,15 @@ impl fmt::Display for ParseErrorKind {
             Self::Unexpected(token) => write!(f, "unexpected {}", token),
             Self::UnknownAbbreviation(s) => write!(f, "unknown abbreviation {:?}", s),
             Self::MalformedCommand => write!(f, "malformed command"),
+            Self::DuplicateKey(s) => write!(f, "duplicate key {:?}", s),
+            Self::TypeError(e) => write!(f, "{}", e),
         }
+    }
+}
+
+impl From<TypeError> for ParseError {
+    fn from(e: TypeError) -> Self {
+        Self::new(e.span.clone(), ParseErrorKind::TypeError(e))
     }
 }
 

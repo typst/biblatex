@@ -12,7 +12,7 @@ Finding out the author of a work.
 let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
 let bibliography = Bibliography::parse(src).unwrap();
 let entry = bibliography.get("tolkien1937").unwrap();
-let author = entry.author().unwrap().unwrap();
+let author = entry.author().unwrap();
 assert_eq!(author[0].name, "Tolkien");
 # Ok(())
 # }
@@ -30,11 +30,10 @@ mod types;
 pub use chunk::{Chunk, Chunks, ChunksExt};
 use macros::*;
 pub use mechanics::{is_verbatim_field, EntryType};
-pub use raw::{ParseError, RawBibliography, RawEntry};
+pub use raw::{ParseError, ParseErrorKind, RawBibliography, RawEntry};
 pub use types::*;
 
 use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
@@ -68,6 +67,35 @@ pub struct Entry {
     pub fields: BTreeMap<String, Chunks>,
 }
 
+#[derive(Debug, Clone)]
+pub enum RetrievalError {
+    NotFound,
+    TypeError(TypeError),
+}
+
+impl Display for RetrievalError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::NotFound => write!(f, "entry not found"),
+            Self::TypeError(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl From<TypeError> for RetrievalError {
+    fn from(err: TypeError) -> Self {
+        Self::TypeError(err)
+    }
+}
+
+fn convert_result<T>(err: Result<T, RetrievalError>) -> Result<Option<T>, TypeError> {
+    match err {
+        Ok(val) => Ok(Some(val)),
+        Err(RetrievalError::NotFound) => Ok(None),
+        Err(RetrievalError::TypeError(err)) => Err(err),
+    }
+}
+
 impl Bibliography {
     /// Create a new, empty bibliography.
     pub fn new() -> Self {
@@ -78,42 +106,35 @@ impl Bibliography {
     }
 
     /// Parse a bibliography from a source string.
-    pub fn parse(src: &str) -> Result<Self, BibliographyError> {
+    pub fn parse(src: &str) -> Result<Self, ParseError> {
         Self::from_raw(RawBibliography::parse(src))
     }
 
     /// Construct a bibliography from a raw bibliography.
-    pub fn from_raw(raw: RawBibliography) -> Result<Self, BibliographyError> {
+    pub fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
             // Check that the key is not repeated
             if res.get(entry.key).is_some() {
-                return Err(BibliographyError::DuplicateKey(entry.key.to_string()));
+                return Err(ParseError::new(
+                    0 .. 0,
+                    ParseErrorKind::DuplicateKey(entry.key.to_string()),
+                ));
             }
 
             let mut fields = BTreeMap::new();
             for (field_key, field_value) in entry.fields.into_iter() {
                 let field_key = field_key.to_string();
-
-                match resolve::parse_field(&field_key, &field_value, abbr) {
-                    Ok(r) => {
-                        fields.insert(field_key, r);
-                    }
-                    Err(e) => {
-                        return Err(BibliographyError::MalformedField(
-                            entry.key.to_string(),
-                            field_key,
-                        ));
-                    }
-                }
+                let parsed = resolve::parse_field(&field_key, &field_value, abbr)?;
+                fields.insert(field_key, parsed);
             }
             res.insert(Entry {
                 key: entry.key.to_string(),
                 entry_type: EntryType::new(entry.kind),
                 fields,
-            });
+            })?;
         }
 
         Ok(res)
@@ -148,14 +169,14 @@ impl Bibliography {
     ///
     /// If an entry with the same cite key is already present, the entry is
     /// updated and the old entry is returned.
-    pub fn insert(&mut self, entry: Entry) -> Result<Option<Entry>, MalformedError> {
+    pub fn insert(&mut self, entry: Entry) -> Result<Option<Entry>, ParseError> {
         if let Some(prev) = self.get_mut(&entry.key) {
             Ok(Some(std::mem::replace(prev, entry)))
         } else {
             let index = self.entries.len();
             self.keys.insert(entry.key.clone(), index);
-            if let Some(ids) = entry.get_as::<Vec<String>>("ids") {
-                for alias in ids? {
+            if let Some(ids) = convert_result(entry.get_as::<Vec<String>>("ids"))? {
+                for alias in ids {
                     self.keys.insert(alias, index);
                 }
             }
@@ -265,29 +286,6 @@ impl IntoIterator for Bibliography {
     }
 }
 
-/// Errors that may occur when converting a [`RawBibliography`] into a [`Bibliography`]
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum BibliographyError {
-    /// The key already occurred.
-    DuplicateKey(String),
-    /// The key contains a malformed field.
-    MalformedField(String, String),
-}
-
-impl Display for BibliographyError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::DuplicateKey(key) => write!(f, "Duplicate key \"{}\"", key),
-            Self::MalformedField(key, field) => {
-                write!(f, "Key \"{}\" contains malformed field \"{}\"", key, field)
-            }
-        }
-    }
-}
-
-impl Error for BibliographyError {}
-
 impl Entry {
     /// Construct new, empty entry.
     pub fn new(key: String, entry_type: EntryType) -> Self {
@@ -304,8 +302,11 @@ impl Entry {
     /// Parse the value of a field into a specific type.
     ///
     /// The field key must be lowercase.
-    pub fn get_as<T: Type>(&self, key: &str) -> Option<Result<T, MalformedError>> {
-        self.get(key).map(|e| e.parse::<T>())
+    pub fn get_as<T: Type>(&self, key: &str) -> Result<T, RetrievalError> {
+        self.get(key)
+            .ok_or(RetrievalError::NotFound)?
+            .parse::<T>()
+            .map_err(Into::into)
     }
 
     /// Set the chunk slice for a field.
@@ -328,15 +329,15 @@ impl Entry {
     }
 
     /// The parents of an entry in a semantic sense (`crossref` and `xref`).
-    pub fn parents(&self) -> Result<Vec<String>, MalformedError> {
+    pub fn parents(&self) -> Result<Vec<String>, TypeError> {
         let mut parents = vec![];
 
-        if let Some(crossref) = self.get_as::<String>("crossref") {
-            parents.push(crossref?);
+        if let Some(crossref) = convert_result(self.get_as::<String>("crossref"))? {
+            parents.push(crossref);
         }
 
-        if let Some(xrefs) = self.get_as::<Vec<String>>("xref") {
-            parents.extend(xrefs?);
+        if let Some(xrefs) = convert_result(self.get_as::<Vec<String>>("xref"))? {
+            parents.extend(xrefs);
         }
 
         Ok(parents)
@@ -352,7 +353,7 @@ impl Entry {
     /// _Note:_ This function will not resolve the entry. If you want to support
     /// / expect files using `crossref` and `xdata`, you will want to call this
     /// method only on entries obtained through [`Bibliography::get_resolved`].
-    pub fn verify(&self) -> Result<(Vec<&str>, Vec<&str>), MalformedError> {
+    pub fn verify(&self) -> Result<(Vec<&str>, Vec<&str>), TypeError> {
         let reqs = self.entry_type.requirements();
         let mut missing = vec![];
         let mut outlawed = vec![];
@@ -406,7 +407,7 @@ impl Entry {
 
         match reqs.author_eds_field {
             AuthorMode::OneRequired => {
-                if self.author().is_none() && self.editors()?.is_empty() {
+                if self.author().is_err() && self.editors()?.is_empty() {
                     missing.push("author");
                 }
             }
@@ -414,12 +415,12 @@ impl Entry {
                 if self.editors()?.is_empty() {
                     missing.push("editor");
                 }
-                if self.author().is_none() {
+                if self.author().is_err() {
                     missing.push("author");
                 }
             }
             AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
-                if self.author().is_none() {
+                if self.author().is_err() {
                     missing.push("author");
                 }
             }
@@ -427,7 +428,7 @@ impl Entry {
                 if self.editors()?.is_empty() {
                     missing.push("editor");
                 }
-                if self.author().is_some() {
+                if self.author().is_ok() {
                     outlawed.push("author");
                 }
             }
@@ -436,20 +437,20 @@ impl Entry {
 
         match reqs.page_chapter_field {
             PagesChapterMode::OneRequired => {
-                if self.pages().is_none() && self.chapter().is_none() {
+                if self.pages().is_err() && self.chapter().is_err() {
                     missing.push("pages");
                 }
             }
             PagesChapterMode::BothForbidden => {
-                if self.pages().is_some() {
+                if self.pages().is_ok() {
                     outlawed.push("pages");
                 }
-                if self.chapter().is_some() {
+                if self.chapter().is_ok() {
                     outlawed.push("chapter");
                 }
             }
             PagesChapterMode::PagesRequired => {
-                if self.pages().is_none() {
+                if self.pages().is_err() {
                     missing.push("pages");
                 }
             }
@@ -457,7 +458,7 @@ impl Entry {
         }
 
         if reqs.needs_date {
-            if self.date().is_none() {
+            if self.date().is_err() {
                 missing.push("year");
             }
         }
@@ -494,7 +495,7 @@ impl Entry {
     }
 
     /// Serialize this entry into a BibTeX string.
-    pub fn to_bibtex_string(&self) -> Result<String, MalformedError> {
+    pub fn to_bibtex_string(&self) -> Result<String, TypeError> {
         let mut bibtex = String::new();
         let ty = self.entry_type.to_bibtex();
         let thesis = matches!(ty, EntryType::PhdThesis | EntryType::MastersThesis);
@@ -503,8 +504,8 @@ impl Entry {
 
         for (key, value) in &self.fields {
             if key == "date" {
-                if let Some(date) = self.date() {
-                    for (key, value) in date?.to_fieldset() {
+                if let Some(date) = convert_result(self.date())? {
+                    for (key, value) in date.to_fieldset() {
                         let v = [Chunk::Normal(value)].to_biblatex_string(false);
                         writeln!(bibtex, "{} = {},", key, v).unwrap();
                     }
@@ -539,15 +540,15 @@ impl Entry {
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &Bibliography) -> Result<(), MalformedError> {
+    fn resolve_crossrefs(&mut self, bib: &Bibliography) -> Result<(), TypeError> {
         let mut refs = vec![];
 
-        if let Some(crossref) = self.get_as::<String>("crossref") {
-            refs.extend(bib.get(&crossref?).cloned());
+        if let Some(crossref) = convert_result(self.get_as::<String>("crossref"))? {
+            refs.extend(bib.get(&crossref).cloned());
         }
 
-        if let Some(keys) = self.get_as::<Vec<String>>("xdata") {
-            for key in keys? {
+        if let Some(keys) = convert_result(self.get_as::<Vec<String>>("xdata"))? {
+            for key in keys {
                 refs.extend(bib.get(&key).cloned());
             }
         }
@@ -564,7 +565,7 @@ impl Entry {
     }
 
     /// Resolve data dependencies using another entry.
-    fn resolve_single_crossref(&mut self, crossref: Entry) -> Result<(), MalformedError> {
+    fn resolve_single_crossref(&mut self, crossref: Entry) -> Result<(), TypeError> {
         let req = self.entry_type.requirements();
 
         let mut relevant = req.required;
@@ -664,8 +665,8 @@ impl Entry {
         }
 
         if req.needs_date {
-            if let Some(date) = crossref.date() {
-                self.set_date(date?);
+            if let Some(date) = convert_result(crossref.date())? {
+                self.set_date(date);
             }
         }
 
@@ -678,29 +679,17 @@ impl Entry {
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
         author: "author" => Vec<Person>,
-    }
-    fields! {
         book_title: "booktitle",
         chapter: "chapter",
-    }
-    fields! {
         edition: "edition" => Edition,
-    }
-    fields! {
         how_published: "howpublished",
         note: "note",
         number: "number",
-    }
-    fields! {
         organization: "organization" => Vec<Chunks>,
         pages: "pages" => Vec<std::ops::Range<u32>>,
         publisher: "publisher" => Vec<Chunks>,
-    }
-    fields! {
         series: "series",
         title: "title",
-    }
-    fields! {
         type_: "type" => String,
         volume: "volume" => i64,
     }
@@ -712,12 +701,8 @@ impl Entry {
         eprint_type: "eprinttype" | "archiveprefix",
         journal: "journal" | "journaltitle",
         journal_title: "journaltitle" | "journal",
-    }
-    alias_fields! {
         sort_key: "key" | "sortkey" => String,
         file: "file" | "pdf" => String,
-    }
-    alias_fields! {
         school: "school" | "institution",
         institution: "institution" | "school",
     }
@@ -734,14 +719,12 @@ impl Entry {
     /// to four entries, one for each editorial role.
     ///
     /// The default `EditorType::Editor` is assumed if the type field is empty.
-    pub fn editors(&self) -> Result<Vec<(Vec<Person>, EditorType)>, MalformedError> {
+    pub fn editors(&self) -> Result<Vec<(Vec<Person>, EditorType)>, TypeError> {
         let mut editors = vec![];
 
-        let mut parse = |
-            name_field: &str,
-            editor_field: &str,
-        | -> Result<(), MalformedError> {
-            if let Some(persons) = self.get_as::<Vec<Person>>(name_field).transpose()? {
+        let mut parse = |name_field: &str, editor_field: &str| -> Result<(), TypeError> {
+            if let Some(persons) = convert_result(self.get_as::<Vec<Person>>(name_field))?
+            {
                 let editor_type = self
                     .get(editor_field)
                     .map(|chunks| chunks.parse::<EditorType>())
@@ -765,45 +748,25 @@ impl Entry {
     fields! {
         abstract_: "abstract",
         addendum: "addendum",
-    }
-    fields! {
         afterword: "afterword" => Vec<Person>,
         annotator: "annotator" => Vec<Person>,
         author_type: "authortype" => String,
         book_author: "bookauthor" => Vec<Person>,
         book_pagination: "bookpagination" => Pagination,
-    }
-    fields! {
         book_subtitle: "booksubtitle",
         book_title_addon: "booktitleaddon",
-    }
-    fields! {
         commentator: "commentator" => Vec<Person>,
         doi: "doi" => String,
-    }
-    fields! {
         eid: "eid",
         entry_subtype: "entrysubtype",
-    }
-    fields! {
         eprint: "eprint" => String,
-    }
-    fields! {
         eprint_class: "eprintclass",
         eventtitle: "eventtitle",
         eventtitle_addon: "eventtitleaddon",
-    }
-    fields! {
         foreword: "foreword" => Vec<Person>,
         holder: "holder" => Vec<Person>,
-    }
-    fields! {
         index_title: "indextitle",
-    }
-    fields! {
         introduction: "introduction" => Vec<Person>,
-    }
-    fields! {
         isan: "isan",
         isbn: "isbn",
         ismn: "ismn",
@@ -818,38 +781,22 @@ impl Entry {
         journal_title_addon: "journaltitleaddon",
         keywords: "keywords",
         label: "label",
-    }
-    fields! {
         language: "language" => String,
-    }
-    fields! {
         library: "library",
         main_subtitle: "mainsubtitle",
         main_title: "maintitle",
         main_title_addon: "maintitleaddon",
         name_addon: "nameaddon",
         options: "options",
-    }
-    fields! {
         orig_language: "origlanguage" => String,
-    }
-    fields! {
         orig_location: "origlocation",
         page_total: "pagetotal",
-    }
-    fields! {
         pagination: "pagination" => Pagination,
-    }
-    fields! {
         part: "part",
         pubstate: "pubstate",
         reprint_title: "reprinttitle",
-    }
-    fields! {
         short_author: "shortauthor" => Vec<Person>,
         short_editor: "shorteditor" => Vec<Person>,
-    }
-    fields! {
         shorthand: "shorthand",
         shorthand_intro: "shorthandintro",
         short_journal: "shortjournal",
@@ -857,16 +804,10 @@ impl Entry {
         short_title: "shorttitle",
         subtitle: "subtitle",
         title_addon: "titleaddon",
-    }
-    fields! {
         translator: "translator" => Vec<Person>,
         url: "url" => String,
-    }
-    fields! {
         venue: "venue",
         version: "version",
-    }
-    fields! {
         volumes: "volumes" => i64,
         gender: "gender" => Gender,
     }
@@ -935,7 +876,7 @@ mod tests {
         match bibliography {
             Ok(_) => panic!("Should return Err"),
             Err(s) => {
-                assert_eq!(s, BibliographyError::DuplicateKey("ishihara2012".into()));
+                assert_eq!(s.kind, ParseErrorKind::DuplicateKey("ishihara2012".into()));
             }
         };
     }
@@ -1052,20 +993,14 @@ mod tests {
         let bibliography = Bibliography::parse(&contents).unwrap();
 
         let e = bibliography.get_resolved("macmillan").unwrap();
-        assert_eq!(
-            e.publisher().unwrap().unwrap()[0].format_verbatim(),
-            "Macmillan"
-        );
+        assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
             e.location().unwrap().format_verbatim(),
             "New York and London"
         );
 
         let book = bibliography.get_resolved("recursive").unwrap();
-        assert_eq!(
-            book.publisher().unwrap().unwrap()[0].format_verbatim(),
-            "Macmillan"
-        );
+        assert_eq!(book.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
             book.location().unwrap().format_verbatim(),
             "New York and London"
@@ -1080,7 +1015,7 @@ mod tests {
         ]);
         let arrgh = bibliography.get_resolved("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
-        assert_eq!(arrgh.volume().unwrap().unwrap(), 115);
+        assert_eq!(arrgh.volume().unwrap(), 115);
         assert_eq!(arrgh.editors().unwrap()[0].0[0].name, "Uhlig");
         assert_eq!(arrgh.number().unwrap().format_verbatim(), "6");
         assert_eq!(
@@ -1106,7 +1041,7 @@ mod tests {
         println!("{}", bibliography.to_biblatex_string());
 
         for x in bibliography {
-            let authors = x.author().unwrap().unwrap_or_default();
+            let authors = x.author().unwrap_or_default();
             for a in authors {
                 print!("{}, ", a);
             }

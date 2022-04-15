@@ -4,8 +4,8 @@ use std::fmt::{self, Display, Formatter};
 use chrono::{Datelike, NaiveDate, NaiveTime};
 
 use crate::scanner::Scanner;
-use crate::{chunk::*, MalformKind};
-use crate::{MalformedError, Type};
+use crate::{chunk::*, FieldType};
+use crate::{Type, TypeError};
 
 /// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -52,7 +52,7 @@ pub struct Datetime {
 
 impl Date {
     /// Parse a date from chunks.
-    pub fn parse(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    pub fn parse(chunks: &[Chunk]) -> Result<Self, FieldType> {
         let date = chunks.format_verbatim().to_uppercase();
         let mut date_trimmed = date.trim_end();
 
@@ -86,7 +86,7 @@ impl Date {
                     }
                     (false, true) => DateValue::After(Datetime::parse(s1)?),
                     (true, false) => DateValue::Before(Datetime::parse(s2)?),
-                    (true, true) => return Err(MalformKind::Date),
+                    (true, true) => return Err(FieldType::Date),
                 }
             } else {
                 DateValue::At(Datetime::parse(date_trimmed)?)
@@ -105,9 +105,9 @@ impl Date {
         year: &[Chunk],
         month: Option<&[Chunk]>,
         day: Option<&[Chunk]>,
-    ) -> Result<Self, MalformedError> {
+    ) -> Result<Self, TypeError> {
         let year = get_year(&mut Scanner::new(&year.format_verbatim()))
-            .map_err(|k| MalformedError::new(0 .. 0, k))?;
+            .map_err(|k| TypeError::new(0 .. 0, k))?;
         let mut date_atom = Datetime { year, month: None, day: None, time: None };
 
         if let Some(month) = month {
@@ -125,9 +125,9 @@ impl Date {
                 let day: u8 = day
                     .trim()
                     .parse()
-                    .map_err(|_| MalformedError::new(0 .. 0, MalformKind::Date))?;
+                    .map_err(|_| TypeError::new(0 .. 0, FieldType::Date))?;
                 if day > 31 || day < 1 {
-                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
+                    return Err(TypeError::new(0 .. 0, FieldType::Date));
                 }
 
                 date_atom.day = Some(day - 1);
@@ -142,13 +142,13 @@ impl Date {
 
                 let day = s.eat_while(|c| c.is_ascii_digit());
                 if day.len() == 0 {
-                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
+                    return Err(TypeError::new(0 .. 0, FieldType::Date));
                 }
 
                 let day: u8 = day.parse().unwrap();
 
                 if day < 1 || day > 31 {
-                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
+                    return Err(TypeError::new(0 .. 0, FieldType::Date));
                 }
 
                 date_atom.day = Some(day - 1);
@@ -166,7 +166,7 @@ impl Date {
         }
     }
 
-    fn range_dates(source: &str) -> Result<(Datetime, Datetime), MalformedError> {
+    fn range_dates(source: &str) -> Result<(Datetime, Datetime), TypeError> {
         let mut s = Scanner::new(source);
         s.skip_ws();
 
@@ -175,7 +175,7 @@ impl Date {
         let mut variable = 10_i32.pow(4 - sure_digits as u32);
 
         if sure_digits < 2 || s.eat_while(|c| c == 'X').len() + sure_digits != 4 {
-            return Err(MalformedError::new(0 .. s.index(), MalformKind::Date));
+            return Err(TypeError::new(0 .. s.index(), FieldType::Date));
         }
 
         let year = year_part.parse::<i32>().unwrap() * variable;
@@ -203,7 +203,7 @@ impl Date {
                 if !s.eof() {
                     get_hyphen(&mut s)?;
                     if s.eat_while(|c| c == 'X').len() != 2 {
-                        return Err(MalformedError::new(s.here(), MalformKind::Date));
+                        return Err(TypeError::new(s.here(), FieldType::Date));
                     }
                 }
 
@@ -223,13 +223,13 @@ impl Date {
                 ));
             }
             _ => {
-                return Err(MalformedError::new(idx .. s.index(), MalformKind::Date));
+                return Err(TypeError::new(idx .. s.index(), FieldType::Date));
             }
         }
 
         let month = s.eat_while(|c| c.is_ascii_digit());
         if month.len() != 2 {
-            return Err(MalformedError::new(idx .. s.index(), MalformKind::Date));
+            return Err(TypeError::new(idx .. s.index(), FieldType::Date));
         }
         let month: Option<u8> = month.parse().ok();
 
@@ -238,7 +238,7 @@ impl Date {
         if s.eat_while(|c| c == 'X').len() == 2 {
             s.skip_ws();
             if !s.eof() {
-                return Err(MalformedError::new(s.here(), MalformKind::Date));
+                return Err(TypeError::new(s.here(), FieldType::Date));
             }
 
             return Ok((
@@ -247,7 +247,7 @@ impl Date {
             ));
         }
 
-        Err(MalformedError::new(s.here(), MalformKind::Date))
+        Err(TypeError::new(s.here(), FieldType::Date))
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -255,30 +255,30 @@ impl Date {
     }
 }
 
-fn get_year(s: &mut Scanner) -> Result<i32, MalformKind> {
+fn get_year(s: &mut Scanner) -> Result<i32, FieldType> {
     s.skip_ws();
     let year_idx = s.index();
     s.eat_if('-');
     s.skip_ws();
 
     if s.eat_while(|c| c.is_ascii_digit()).len() != 4 {
-        return Err(MalformKind::Date);
+        return Err(FieldType::Date);
     }
 
     Ok(i32::from_str_radix(s.eaten_from(year_idx), 10).unwrap())
 }
 
-fn get_hyphen(s: &mut Scanner) -> Result<(), MalformedError> {
+fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
     s.skip_ws();
     if s.eat_while(|c| c == '-').is_empty() {
-        return Err(MalformedError::new(s.here(), MalformKind::Date));
+        return Err(TypeError::new(s.here(), FieldType::Date));
     }
     s.skip_ws();
     Ok(())
 }
 
 impl Type for Date {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
         Date::parse(chunks)
     }
 
@@ -321,7 +321,7 @@ impl DateValue {
 
 impl Datetime {
     /// Parse a datetime from a string.
-    fn parse(mut src: &str) -> Result<Self, MalformKind> {
+    fn parse(mut src: &str) -> Result<Self, FieldType> {
         let time = if let Some(pos) = src.find('T') {
             if pos + 1 < src.len() {
                 let time_str = &src[pos + 1 ..];
@@ -354,7 +354,7 @@ impl Datetime {
                 s.skip_ws();
                 let month = s.eat_while(|c| c.is_ascii_digit());
                 if month.len() != 2 {
-                    return Err(MalformKind::Date);
+                    return Err(FieldType::Date);
                 }
 
                 Some(u8::from_str_radix(&month, 10).unwrap() - 1)
