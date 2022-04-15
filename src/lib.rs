@@ -12,7 +12,7 @@ Finding out the author of a work.
 let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
 let bibliography = Bibliography::parse(src).unwrap();
 let entry = bibliography.get("tolkien1937").unwrap();
-let author = entry.author().unwrap();
+let author = entry.author().unwrap().unwrap();
 assert_eq!(author[0].name, "Tolkien");
 # Ok(())
 # }
@@ -30,13 +30,13 @@ mod types;
 pub use chunk::{Chunk, Chunks, ChunksExt};
 use macros::*;
 pub use mechanics::{is_verbatim_field, EntryType};
-pub use raw::{RawBibliography, RawEntry};
+pub use raw::{ParseError, RawBibliography, RawEntry};
 pub use types::*;
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter, Write};
 
 use mechanics::{AuthorMode, PagesChapterMode};
 
@@ -148,19 +148,19 @@ impl Bibliography {
     ///
     /// If an entry with the same cite key is already present, the entry is
     /// updated and the old entry is returned.
-    pub fn insert(&mut self, entry: Entry) -> Option<Entry> {
+    pub fn insert(&mut self, entry: Entry) -> Result<Option<Entry>, MalformedError> {
         if let Some(prev) = self.get_mut(&entry.key) {
-            Some(std::mem::replace(prev, entry))
+            Ok(Some(std::mem::replace(prev, entry)))
         } else {
             let index = self.entries.len();
             self.keys.insert(entry.key.clone(), index);
             if let Some(ids) = entry.get_as::<Vec<String>>("ids") {
-                for alias in ids {
+                for alias in ids? {
                     self.keys.insert(alias, index);
                 }
             }
             self.entries.push(entry);
-            None
+            Ok(None)
         }
     }
 
@@ -238,7 +238,11 @@ impl Bibliography {
             if !first {
                 write!(sink, "\n")?;
             }
-            writeln!(sink, "{}", entry.to_bibtex_string())?;
+            writeln!(
+                sink,
+                "{}",
+                entry.to_bibtex_string().map_err(|_| fmt::Error)?
+            )?;
             first = false;
         }
         Ok(())
@@ -300,8 +304,8 @@ impl Entry {
     /// Parse the value of a field into a specific type.
     ///
     /// The field key must be lowercase.
-    pub fn get_as<T: Type>(&self, key: &str) -> Option<T> {
-        self.get(key)?.parse::<T>()
+    pub fn get_as<T: Type>(&self, key: &str) -> Option<Result<T, MalformedError>> {
+        self.get(key).map(|e| e.parse::<T>())
     }
 
     /// Set the chunk slice for a field.
@@ -324,18 +328,18 @@ impl Entry {
     }
 
     /// The parents of an entry in a semantic sense (`crossref` and `xref`).
-    pub fn parents(&self) -> Vec<String> {
+    pub fn parents(&self) -> Result<Vec<String>, MalformedError> {
         let mut parents = vec![];
 
         if let Some(crossref) = self.get_as::<String>("crossref") {
-            parents.push(crossref);
+            parents.push(crossref?);
         }
 
         if let Some(xrefs) = self.get_as::<Vec<String>>("xref") {
-            parents.extend(xrefs);
+            parents.extend(xrefs?);
         }
 
-        parents
+        Ok(parents)
     }
 
     /// Verify if the entry has the appropriate fields for its [`EntryType`].
@@ -348,7 +352,7 @@ impl Entry {
     /// _Note:_ This function will not resolve the entry. If you want to support
     /// / expect files using `crossref` and `xdata`, you will want to call this
     /// method only on entries obtained through [`Bibliography::get_resolved`].
-    pub fn verify(&self) -> (Vec<&str>, Vec<&str>) {
+    pub fn verify(&self) -> Result<(Vec<&str>, Vec<&str>), MalformedError> {
         let reqs = self.entry_type.requirements();
         let mut missing = vec![];
         let mut outlawed = vec![];
@@ -402,12 +406,12 @@ impl Entry {
 
         match reqs.author_eds_field {
             AuthorMode::OneRequired => {
-                if self.author().is_none() && self.editors().is_empty() {
+                if self.author().is_none() && self.editors()?.is_empty() {
                     missing.push("author");
                 }
             }
             AuthorMode::BothRequired => {
-                if self.editors().is_empty() {
+                if self.editors()?.is_empty() {
                     missing.push("editor");
                 }
                 if self.author().is_none() {
@@ -420,7 +424,7 @@ impl Entry {
                 }
             }
             AuthorMode::EditorRequiredAuthorForbidden => {
-                if self.editors().is_empty() {
+                if self.editors()?.is_empty() {
                     missing.push("editor");
                 }
                 if self.author().is_some() {
@@ -458,7 +462,7 @@ impl Entry {
             }
         }
 
-        (missing, outlawed)
+        Ok((missing, outlawed))
     }
 
     /// Serialize this entry into a BibLaTeX string.
@@ -490,7 +494,7 @@ impl Entry {
     }
 
     /// Serialize this entry into a BibTeX string.
-    pub fn to_bibtex_string(&self) -> String {
+    pub fn to_bibtex_string(&self) -> Result<String, MalformedError> {
         let mut bibtex = String::new();
         let ty = self.entry_type.to_bibtex();
         let thesis = matches!(ty, EntryType::PhdThesis | EntryType::MastersThesis);
@@ -500,7 +504,7 @@ impl Entry {
         for (key, value) in &self.fields {
             if key == "date" {
                 if let Some(date) = self.date() {
-                    for (key, value) in date.to_fieldset() {
+                    for (key, value) in date?.to_fieldset() {
                         let v = [Chunk::Normal(value)].to_biblatex_string(false);
                         writeln!(bibtex, "{} = {},", key, v).unwrap();
                     }
@@ -525,7 +529,7 @@ impl Entry {
         }
 
         bibtex.push('}');
-        bibtex
+        Ok(bibtex)
     }
 
     /// Get an entry but return None for empty chunk slices.
@@ -535,15 +539,15 @@ impl Entry {
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &Bibliography) {
+    fn resolve_crossrefs(&mut self, bib: &Bibliography) -> Result<(), MalformedError> {
         let mut refs = vec![];
 
         if let Some(crossref) = self.get_as::<String>("crossref") {
-            refs.extend(bib.get(&crossref).cloned());
+            refs.extend(bib.get(&crossref?).cloned());
         }
 
         if let Some(keys) = self.get_as::<Vec<String>>("xdata") {
-            for key in keys {
+            for key in keys? {
                 refs.extend(bib.get(&key).cloned());
             }
         }
@@ -555,10 +559,12 @@ impl Entry {
 
         self.remove("crossref");
         self.remove("xdata");
+
+        Ok(())
     }
 
     /// Resolve data dependencies using another entry.
-    fn resolve_single_crossref(&mut self, crossref: Entry) {
+    fn resolve_single_crossref(&mut self, crossref: Entry) -> Result<(), MalformedError> {
         let req = self.entry_type.requirements();
 
         let mut relevant = req.required;
@@ -654,14 +660,16 @@ impl Entry {
         }
 
         if self.entry_type == EntryType::XData {
-            return;
+            return Ok(());
         }
 
         if req.needs_date {
             if let Some(date) = crossref.date() {
-                self.set_date(date);
+                self.set_date(date?);
             }
         }
+
+        Ok(())
     }
 }
 
@@ -670,17 +678,29 @@ impl Entry {
     fields! {
         // Fields without a specified return type simply return `&[Chunk]`.
         author: "author" => Vec<Person>,
+    }
+    fields! {
         book_title: "booktitle",
         chapter: "chapter",
+    }
+    fields! {
         edition: "edition" => Edition,
+    }
+    fields! {
         how_published: "howpublished",
         note: "note",
         number: "number",
+    }
+    fields! {
         organization: "organization" => Vec<Chunks>,
         pages: "pages" => Vec<std::ops::Range<u32>>,
         publisher: "publisher" => Vec<Chunks>,
+    }
+    fields! {
         series: "series",
         title: "title",
+    }
+    fields! {
         type_: "type" => String,
         volume: "volume" => i64,
     }
@@ -692,8 +712,12 @@ impl Entry {
         eprint_type: "eprinttype" | "archiveprefix",
         journal: "journal" | "journaltitle",
         journal_title: "journaltitle" | "journal",
+    }
+    alias_fields! {
         sort_key: "key" | "sortkey" => String,
         file: "file" | "pdf" => String,
+    }
+    alias_fields! {
         school: "school" | "institution",
         institution: "institution" | "school",
     }
@@ -710,50 +734,76 @@ impl Entry {
     /// to four entries, one for each editorial role.
     ///
     /// The default `EditorType::Editor` is assumed if the type field is empty.
-    pub fn editors(&self) -> Vec<(Vec<Person>, EditorType)> {
+    pub fn editors(&self) -> Result<Vec<(Vec<Person>, EditorType)>, MalformedError> {
         let mut editors = vec![];
 
-        let mut parse = |name_field: &str, editor_field: &str| {
-            if let Some(persons) = self.get_as::<Vec<Person>>(name_field) {
+        let mut parse = |
+            name_field: &str,
+            editor_field: &str,
+        | -> Result<(), MalformedError> {
+            if let Some(persons) = self.get_as::<Vec<Person>>(name_field).transpose()? {
                 let editor_type = self
                     .get(editor_field)
-                    .and_then(|chunks| chunks.parse::<EditorType>())
+                    .map(|chunks| chunks.parse::<EditorType>())
+                    .transpose()?
                     .unwrap_or(EditorType::Editor);
                 editors.push((persons, editor_type));
             }
+
+            Ok(())
         };
 
-        parse("editor", "editortype");
-        parse("editora", "editoratype");
-        parse("editorb", "editorbtype");
-        parse("editorc", "editorctype");
+        parse("editor", "editortype")?;
+        parse("editora", "editoratype")?;
+        parse("editorb", "editorbtype")?;
+        parse("editorc", "editorctype")?;
 
-        editors
+        Ok(editors)
     }
 
     // BibLaTeX supplemental fields.
     fields! {
         abstract_: "abstract",
         addendum: "addendum",
+    }
+    fields! {
         afterword: "afterword" => Vec<Person>,
         annotator: "annotator" => Vec<Person>,
         author_type: "authortype" => String,
         book_author: "bookauthor" => Vec<Person>,
         book_pagination: "bookpagination" => Pagination,
+    }
+    fields! {
         book_subtitle: "booksubtitle",
         book_title_addon: "booktitleaddon",
+    }
+    fields! {
         commentator: "commentator" => Vec<Person>,
         doi: "doi" => String,
+    }
+    fields! {
         eid: "eid",
         entry_subtype: "entrysubtype",
+    }
+    fields! {
         eprint: "eprint" => String,
+    }
+    fields! {
         eprint_class: "eprintclass",
         eventtitle: "eventtitle",
         eventtitle_addon: "eventtitleaddon",
+    }
+    fields! {
         foreword: "foreword" => Vec<Person>,
         holder: "holder" => Vec<Person>,
+    }
+    fields! {
         index_title: "indextitle",
+    }
+    fields! {
         introduction: "introduction" => Vec<Person>,
+    }
+    fields! {
         isan: "isan",
         isbn: "isbn",
         ismn: "ismn",
@@ -768,22 +818,38 @@ impl Entry {
         journal_title_addon: "journaltitleaddon",
         keywords: "keywords",
         label: "label",
+    }
+    fields! {
         language: "language" => String,
+    }
+    fields! {
         library: "library",
         main_subtitle: "mainsubtitle",
         main_title: "maintitle",
         main_title_addon: "maintitleaddon",
         name_addon: "nameaddon",
         options: "options",
+    }
+    fields! {
         orig_language: "origlanguage" => String,
+    }
+    fields! {
         orig_location: "origlocation",
         page_total: "pagetotal",
+    }
+    fields! {
         pagination: "pagination" => Pagination,
+    }
+    fields! {
         part: "part",
         pubstate: "pubstate",
         reprint_title: "reprinttitle",
+    }
+    fields! {
         short_author: "shortauthor" => Vec<Person>,
         short_editor: "shorteditor" => Vec<Person>,
+    }
+    fields! {
         shorthand: "shorthand",
         shorthand_intro: "shorthandintro",
         short_journal: "shortjournal",
@@ -791,12 +857,61 @@ impl Entry {
         short_title: "shorttitle",
         subtitle: "subtitle",
         title_addon: "titleaddon",
+    }
+    fields! {
         translator: "translator" => Vec<Person>,
         url: "url" => String,
+    }
+    fields! {
         venue: "venue",
         version: "version",
+    }
+    fields! {
         volumes: "volumes" => i64,
         gender: "gender" => Gender,
+    }
+}
+
+type Span = std::ops::Range<usize>;
+
+/// A value with the span it corresponds to in the source code.
+#[derive(Clone, Eq, PartialEq)]
+pub struct Spanned<T> {
+    /// The spanned value.
+    pub v: T,
+    /// The location in source code of the value.
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    /// Create a new instance from a value and its span.
+    pub fn new(v: T, span: Span) -> Self {
+        Self { v, span }
+    }
+
+    /// Convert from `&Spanned<T>` to `Spanned<&T>`
+    pub fn as_ref(&self) -> Spanned<&T> {
+        Spanned { v: &self.v, span: self.span.clone() }
+    }
+
+    /// Map the value using a function keeping the span.
+    pub fn map<F, U>(self, f: F) -> Spanned<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Spanned { v: f(self.v), span: self.span }
+    }
+}
+
+impl<T: Debug> Debug for Spanned<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        self.v.fmt(f)?;
+        if f.alternate() {
+            f.write_str(" <")?;
+            self.span.fmt(f)?;
+            f.write_str(">")?;
+        }
+        Ok(())
     }
 }
 
@@ -895,7 +1010,8 @@ mod tests {
         let biblatex = bibliography.get_mut("haug2019").unwrap().to_biblatex_string();
         assert!(biblatex.contains("institution = {Technische Universität Berlin},"));
 
-        let bibtex = bibliography.get_mut("haug2019").unwrap().to_bibtex_string();
+        let bibtex =
+            bibliography.get_mut("haug2019").unwrap().to_bibtex_string().unwrap();
         assert!(bibtex.contains("school = {Technische Universität Berlin},"));
         assert!(bibtex.contains("year = {2019},"));
         assert!(bibtex.contains("month = {10},"));
@@ -909,11 +1025,17 @@ mod tests {
         let mut bibliography = Bibliography::parse(&contents).unwrap();
 
         let ok = (vec![], vec![]);
-        assert_eq!(bibliography.get_mut("haug2019").unwrap().verify(), ok);
-        assert_eq!(bibliography.get_mut("cannonfodder").unwrap().verify(), ok);
+        assert_eq!(
+            bibliography.get_mut("haug2019").unwrap().verify().unwrap(),
+            ok
+        );
+        assert_eq!(
+            bibliography.get_mut("cannonfodder").unwrap().verify().unwrap(),
+            ok
+        );
 
         let ill = bibliography.get("ill-defined").unwrap();
-        let (missing, outlawed) = ill.verify();
+        let (missing, outlawed) = ill.verify().unwrap();
         assert_eq!(missing.len(), 3);
         assert_eq!(outlawed.len(), 3);
         assert!(missing.contains(&"title"));
@@ -930,14 +1052,20 @@ mod tests {
         let bibliography = Bibliography::parse(&contents).unwrap();
 
         let e = bibliography.get_resolved("macmillan").unwrap();
-        assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
+        assert_eq!(
+            e.publisher().unwrap().unwrap()[0].format_verbatim(),
+            "Macmillan"
+        );
         assert_eq!(
             e.location().unwrap().format_verbatim(),
             "New York and London"
         );
 
         let book = bibliography.get_resolved("recursive").unwrap();
-        assert_eq!(book.publisher().unwrap()[0].format_verbatim(), "Macmillan");
+        assert_eq!(
+            book.publisher().unwrap().unwrap()[0].format_verbatim(),
+            "Macmillan"
+        );
         assert_eq!(
             book.location().unwrap().format_verbatim(),
             "New York and London"
@@ -947,13 +1075,13 @@ mod tests {
             "Recursive shennenigans and other important stuff"
         );
 
-        assert_eq!(bibliography.get("arrgh").unwrap().parents(), vec![
+        assert_eq!(bibliography.get("arrgh").unwrap().parents().unwrap(), vec![
             "polecon".to_string()
         ]);
         let arrgh = bibliography.get_resolved("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
-        assert_eq!(arrgh.volume().unwrap(), 115);
-        assert_eq!(arrgh.editors()[0].0[0].name, "Uhlig");
+        assert_eq!(arrgh.volume().unwrap().unwrap(), 115);
+        assert_eq!(arrgh.editors().unwrap()[0].0[0].name, "Uhlig");
         assert_eq!(arrgh.number().unwrap().format_verbatim(), "6");
         assert_eq!(
             arrgh.journal().unwrap().format_verbatim(),
@@ -978,7 +1106,7 @@ mod tests {
         println!("{}", bibliography.to_biblatex_string());
 
         for x in bibliography {
-            let authors = x.author().unwrap_or_default();
+            let authors = x.author().unwrap().unwrap_or_default();
             for a in authors {
                 print!("{}, ", a);
             }

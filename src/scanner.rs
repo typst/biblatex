@@ -61,6 +61,27 @@ impl<'s> Scanner<'s> {
         self.eat_until(|c| !f(c))
     }
 
+    /// Eat a limited number of chars while the condition is true. Returns if
+    /// the number of chars has been eaten.
+    #[inline]
+    pub fn eat_while_limited<F>(&mut self, mut f: F, limit: usize) -> bool
+    where
+        F: FnMut(char) -> bool,
+    {
+        for _ in 0 .. limit {
+            match self.peek() {
+                Some(c) if f(c) => {
+                    self.eat();
+                }
+                _ => {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     /// Eat chars until the condition is true.
     #[inline]
     pub fn eat_until<F>(&mut self, mut f: F) -> &'s str

@@ -220,7 +220,7 @@ fn resolve_abbreviation(
 
     if fields.is_err() {
         if let Some(month) = get_month_for_abbr(abbr) {
-            return Ok(vec![Chunk::Normal(month.0)]);
+            return Ok(vec![Chunk::Normal(month.0.to_string())]);
         }
     }
 
@@ -300,8 +300,6 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
             }
         }
     }
-
-    // TODO dump unused arguments, reject unknown commands
 }
 
 /// Simplifies a chunk vector by collapsing neighboring Normal or Verbatim chunks.

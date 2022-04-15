@@ -1,5 +1,6 @@
 use crate::resolve::is_escapable;
 use crate::types::Type;
+use crate::MalformedError;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,7 @@ impl Chunk {
 /// Additional methods for chunk slices.
 pub trait ChunksExt {
     /// Parse the chunks into a type.
-    fn parse<T: Type>(&self) -> Option<T>;
+    fn parse<T: Type>(&self) -> Result<T, MalformedError>;
 
     /// Format the chunks in sentence case.
     fn format_sentence(&self) -> String;
@@ -68,8 +69,8 @@ pub trait ChunksExt {
 }
 
 impl ChunksExt for [Chunk] {
-    fn parse<T: Type>(&self) -> Option<T> {
-        T::from_chunks(self)
+    fn parse<T: Type>(&self) -> Result<T, MalformedError> {
+        T::from_chunks(self).map_err(|k| MalformedError::new(0 .. 0, k))
     }
 
     fn format_sentence(&self) -> String {

@@ -2,28 +2,10 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
 use chrono::{Datelike, NaiveDate, NaiveTime};
-use lazy_static::lazy_static;
-use regex::Regex;
 
-use crate::chunk::*;
-use crate::Type;
-
-lazy_static! {
-    // Definite (i.e. non-range) date regexes.
-    static ref MONTH_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-+(?P<m>\d{2})").unwrap();
-    static ref YEAR_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})").unwrap();
-
-    // Date range regexes.
-    static ref CENTURY_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{2})XX").unwrap();
-    static ref DECADE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\d{3})X").unwrap();
-    static ref MONTH_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-+XX").unwrap();
-    static ref DAY_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-*(?P<m>\d{2})-*XX").unwrap();
-    static ref DAY_MONTH_UNSURE_REGEX: Regex = Regex::new(r"^(?P<y>(\+|-)?\s*\d{4})-*XX-*XX").unwrap();
-
-    // Date part Regexes
-    static ref MONTH_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)").unwrap();
-    static ref MONTH_DAY_PART_REGEX: Regex = Regex::new(r"^\s*(?P<m>\w+)(-|\u{00a0}|\s)+(?P<d>[0-9]+)").unwrap();
-}
+use crate::scanner::Scanner;
+use crate::{chunk::*, MalformKind};
+use crate::{MalformedError, Type};
 
 /// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -70,27 +52,29 @@ pub struct Datetime {
 
 impl Date {
     /// Parse a date from chunks.
-    pub fn parse(chunks: &[Chunk]) -> Option<Self> {
-        let mut date_str = chunks.format_verbatim().trim_end().to_string();
+    pub fn parse(chunks: &[Chunk]) -> Result<Self, MalformKind> {
+        let date = chunks.format_verbatim().to_uppercase();
+        let mut date_trimmed = date.trim_end();
 
-        let last_char = date_str.chars().last()?;
-        let (is_uncertain, is_approximate) = match last_char {
-            '?' => (true, false),
-            '~' => (false, true),
-            '%' => (true, true),
-            _ => (false, false),
-        };
+        let (is_uncertain, is_approximate) =
+            match &date_trimmed[date_trimmed.len() - 1 ..] {
+                "?" => (true, false),
+                "~" => (false, true),
+                "%" => (true, true),
+                _ => (false, false),
+            };
 
-        let value = if date_str.to_uppercase().contains('X') {
-            let (d1, d2) = Self::range_dates(date_str)?;
+        if is_uncertain || is_approximate {
+            date_trimmed = &date_trimmed[.. date_trimmed.len() - 1];
+        }
+
+        let value = if date_trimmed.contains('X') {
+            let (d1, d2) = Self::range_dates(date_trimmed).map_err(|e| e.kind)?;
             DateValue::Between(d1, d2)
         } else {
-            if date_str.contains('/') {
-                let (s1, s2) = split_at_normal_char(chunks, '/', true);
-                let (s1, mut s2) = (s1.format_verbatim(), s2.format_verbatim());
-                if is_uncertain || is_approximate {
-                    s2.pop();
-                }
+            if let Some(pos) = date_trimmed.find('/') {
+                let s1 = &date_trimmed[.. pos];
+                let s2 = &date_trimmed[pos + 1 ..];
 
                 fn is_open_range(s: &str) -> bool {
                     s.trim().is_empty() || s == ".."
@@ -102,18 +86,14 @@ impl Date {
                     }
                     (false, true) => DateValue::After(Datetime::parse(s1)?),
                     (true, false) => DateValue::Before(Datetime::parse(s2)?),
-                    (true, true) => return None,
+                    (true, true) => return Err(MalformKind::Date),
                 }
             } else {
-                if is_uncertain || is_approximate {
-                    date_str.pop();
-                }
-
-                DateValue::At(Datetime::parse(date_str)?)
+                DateValue::At(Datetime::parse(date_trimmed)?)
             }
         };
 
-        Some(Self {
+        Ok(Self {
             approximate: is_approximate,
             uncertain: is_uncertain,
             value,
@@ -125,51 +105,57 @@ impl Date {
         year: &[Chunk],
         month: Option<&[Chunk]>,
         day: Option<&[Chunk]>,
-    ) -> Option<Self> {
-        let mut year = year.format_verbatim();
-        year.retain(|c| !c.is_whitespace());
-
-        let capt = YEAR_REGEX.captures(&year)?;
-        let year: i32 = capt.name("y").unwrap().as_str().parse().unwrap();
+    ) -> Result<Self, MalformedError> {
+        let year = get_year(&mut Scanner::new(&year.format_verbatim()))
+            .map_err(|k| MalformedError::new(0 .. 0, k))?;
         let mut date_atom = Datetime { year, month: None, day: None, time: None };
 
         if let Some(month) = month {
             let month = month.format_verbatim();
+            let mut s = Scanner::new(&month);
+            s.skip_ws();
+            let month = s.eat_while(|c| c.is_ascii_alphabetic());
+
+            date_atom.month = get_month_for_name(month)
+                .or_else(|| get_month_for_abbr(month).map(|x| x.1));
+
             if let Some(day) = day {
-                let mut day = day.format_verbatim();
-                day.retain(|c| !c.is_whitespace());
-                let day: u8 = day.parse().ok()?;
+                let day = day.format_verbatim();
+
+                let day: u8 = day
+                    .trim()
+                    .parse()
+                    .map_err(|_| MalformedError::new(0 .. 0, MalformKind::Date))?;
                 if day > 31 || day < 1 {
-                    return None;
+                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
                 }
+
                 date_atom.day = Some(day - 1);
+            } else {
+                // Try to read the day from the month field.
+                if s.eat_while(|c| c.is_whitespace() || matches!(c, '-' | '\u{00a0}'))
+                    .len()
+                    == 0
+                {
+                    return Ok(Date::from_datetime(date_atom));
+                };
 
-                let capt = MONTH_PART_REGEX.captures(&month);
-                if let Some(capt) = capt {
-                    let name = capt.name("m").unwrap().as_str();
-                    date_atom.month = get_month_for_name(name)
-                        .or_else(|| get_month_for_abbr(name).map(|x| x.1));
+                let day = s.eat_while(|c| c.is_ascii_digit());
+                if day.len() == 0 {
+                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
                 }
-            } else if let Some(capt) = MONTH_DAY_PART_REGEX.captures(&month) {
-                let name = capt.name("m").unwrap().as_str();
-                date_atom.month = get_month_for_name(name)
-                    .or_else(|| get_month_for_abbr(name).map(|x| x.1));
-                if date_atom.month.is_some() {
-                    let day: u8 = capt.name("d").unwrap().as_str().parse().unwrap();
 
-                    if day > 31 || day < 1 {
-                        return None;
-                    }
-                    date_atom.day = Some(day - 1);
+                let day: u8 = day.parse().unwrap();
+
+                if day < 1 || day > 31 {
+                    return Err(MalformedError::new(0 .. 0, MalformKind::Date));
                 }
-            } else if let Some(capt) = MONTH_PART_REGEX.captures(&month) {
-                let name = capt.name("m").unwrap().as_str();
-                date_atom.month = get_month_for_name(name)
-                    .or_else(|| get_month_for_abbr(name).map(|x| x.1));
+
+                date_atom.day = Some(day - 1);
             }
         }
 
-        Some(Date::from_datetime(date_atom))
+        Ok(Date::from_datetime(date_atom))
     }
 
     fn from_datetime(atom: Datetime) -> Self {
@@ -180,105 +166,88 @@ impl Date {
         }
     }
 
-    fn range_dates(mut source: String) -> Option<(Datetime, Datetime)> {
-        source.retain(|c| !c.is_whitespace());
+    fn range_dates(source: &str) -> Result<(Datetime, Datetime), MalformedError> {
+        let mut s = Scanner::new(source);
+        s.skip_ws();
 
-        Some(if let Some(captures) = CENTURY_REGEX.captures(&source) {
-            let century: i32 = captures.name("y").unwrap().as_str().parse().unwrap();
-            (
+        let year_part = s.eat_while(|c| c.is_ascii_digit());
+        let sure_digits = year_part.len();
+        let mut variable = 10_i32.pow(4 - sure_digits as u32);
+
+        if sure_digits < 2 || s.eat_while(|c| c == 'X').len() + sure_digits != 4 {
+            return Err(MalformedError::new(0 .. s.index(), MalformKind::Date));
+        }
+
+        let year = year_part.parse::<i32>().unwrap() * variable;
+        variable -= 1;
+
+        if sure_digits != 4 {
+            return Ok((
+                Datetime { year, month: None, day: None, time: None },
                 Datetime {
-                    year: century * 100,
+                    year: year + variable,
                     month: None,
                     day: None,
                     time: None,
                 },
-                Datetime {
-                    year: century * 100 + 99,
-                    month: None,
-                    day: None,
-                    time: None,
-                },
-            )
-        } else if let Some(captures) = DECADE_REGEX.captures(&source) {
-            let decade: i32 = captures.name("y").unwrap().as_str().parse().unwrap();
-            (
-                Datetime {
-                    year: decade * 10,
-                    month: None,
-                    day: None,
-                    time: None,
-                },
-                Datetime {
-                    year: decade * 10 + 9,
-                    month: None,
-                    day: None,
-                    time: None,
-                },
-            )
-        } else if let Some(captures) = MONTH_UNSURE_REGEX.captures(&source) {
-            let year = captures.name("y").unwrap().as_str().parse().unwrap();
+            ));
+        }
 
-            (
-                Datetime {
-                    year,
-                    month: Some(0),
-                    day: None,
-                    time: None,
-                },
-                Datetime {
-                    year,
-                    month: Some(11),
-                    day: None,
-                    time: None,
-                },
-            )
-        } else if let Some(captures) = DAY_MONTH_UNSURE_REGEX.captures(&source) {
-            let year = captures.name("y").unwrap().as_str().parse().unwrap();
-            (
-                Datetime {
-                    year,
-                    month: Some(0),
-                    day: Some(0),
-                    time: None,
-                },
-                Datetime {
-                    year,
-                    month: Some(11),
-                    day: Some(30),
-                    time: None,
-                },
-            )
-        } else if let Some(captures) = DAY_UNSURE_REGEX.captures(&source) {
-            let year = captures.name("y").unwrap().as_str().parse().unwrap();
-            let month = captures.name("m").unwrap().as_str().parse::<u8>().unwrap();
+        get_hyphen(&mut s)?;
 
-            let date = if month == 12 {
-                NaiveDate::from_ymd(year + 1, 1, 1)
-            } else {
-                NaiveDate::from_ymd(year, month as u32 + 1, 1)
-            };
+        let idx = s.index();
+        match s.eat_while(|c| c == 'X').len() {
+            0 => {}
+            2 => {
+                s.skip_ws();
+                if !s.eof() {
+                    get_hyphen(&mut s)?;
+                    if s.eat_while(|c| c == 'X').len() != 2 {
+                        return Err(MalformedError::new(s.here(), MalformKind::Date));
+                    }
+                }
 
-            let days = date
-                .signed_duration_since(NaiveDate::from_ymd(year, month as u32, 1))
-                .num_days();
+                return Ok((
+                    Datetime {
+                        year,
+                        month: Some(0),
+                        day: None,
+                        time: None,
+                    },
+                    Datetime {
+                        year,
+                        month: Some(11),
+                        day: None,
+                        time: None,
+                    },
+                ));
+            }
+            _ => {
+                return Err(MalformedError::new(idx .. s.index(), MalformKind::Date));
+            }
+        }
 
-            (
-                Datetime {
-                    year,
-                    month: Some(month - 1),
-                    day: Some(0),
-                    time: None,
-                },
-                Datetime {
-                    year,
-                    month: Some(month - 1),
-                    day: Some(days as u8 - 1),
-                    time: None,
-                },
-            )
-        } else {
-            return None;
-        })
+        let month = s.eat_while(|c| c.is_ascii_digit());
+        if month.len() != 2 {
+            return Err(MalformedError::new(idx .. s.index(), MalformKind::Date));
+        }
+        let month: Option<u8> = month.parse().ok();
+
+        get_hyphen(&mut s)?;
+
+        if s.eat_while(|c| c == 'X').len() == 2 {
+            s.skip_ws();
+            if !s.eof() {
+                return Err(MalformedError::new(s.here(), MalformKind::Date));
+            }
+
+            return Ok((
+                Datetime { year, month, day: Some(0), time: None },
+                Datetime { year, month, day: Some(30), time: None },
+            ));
+        }
+
+        Err(MalformedError::new(s.here(), MalformKind::Date))
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -286,8 +255,30 @@ impl Date {
     }
 }
 
+fn get_year(s: &mut Scanner) -> Result<i32, MalformKind> {
+    s.skip_ws();
+    let year_idx = s.index();
+    s.eat_if('-');
+    s.skip_ws();
+
+    if s.eat_while(|c| c.is_ascii_digit()).len() != 4 {
+        return Err(MalformKind::Date);
+    }
+
+    Ok(i32::from_str_radix(s.eaten_from(year_idx), 10).unwrap())
+}
+
+fn get_hyphen(s: &mut Scanner) -> Result<(), MalformedError> {
+    s.skip_ws();
+    if s.eat_while(|c| c == '-').is_empty() {
+        return Err(MalformedError::new(s.here(), MalformKind::Date));
+    }
+    s.skip_ws();
+    Ok(())
+}
+
 impl Type for Date {
-    fn from_chunks(chunks: &[Chunk]) -> Option<Self> {
+    fn from_chunks(chunks: &[Chunk]) -> Result<Self, MalformKind> {
         Date::parse(chunks)
     }
 
@@ -330,13 +321,11 @@ impl DateValue {
 
 impl Datetime {
     /// Parse a datetime from a string.
-    fn parse(mut src: String) -> Option<Self> {
-        src.retain(|f| !f.is_whitespace());
-
+    fn parse(mut src: &str) -> Result<Self, MalformKind> {
         let time = if let Some(pos) = src.find('T') {
             if pos + 1 < src.len() {
-                let time_str = src.split_off(pos + 1);
-                src.pop();
+                let time_str = &src[pos + 1 ..];
+                src = &src[.. pos];
                 time_str.parse::<NaiveTime>().ok()
             } else {
                 None
@@ -347,31 +336,33 @@ impl Datetime {
 
         let full_date = src.parse::<NaiveDate>();
 
-        Some(if let Ok(ndate) = full_date {
+        Ok(if let Ok(ndate) = full_date {
             Datetime {
                 year: ndate.year(),
                 month: Some(ndate.month0() as u8),
                 day: Some(ndate.day0() as u8),
                 time,
             }
-        } else if let Some(captures) = MONTH_REGEX.captures(&src) {
-            Datetime {
-                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
-                month: Some(
-                    (captures.name("m").unwrap()).as_str().parse::<u8>().unwrap() - 1,
-                ),
-                day: None,
-                time,
-            }
-        } else if let Some(captures) = YEAR_REGEX.captures(&src) {
-            Datetime {
-                year: (captures.name("y").unwrap()).as_str().parse().unwrap(),
-                month: None,
-                day: None,
-                time,
-            }
         } else {
-            return None;
+            // This might be an incomplete date, missing day and possibly month.
+            let mut s = Scanner::new(&src);
+            s.skip_ws();
+            let year = get_year(&mut s)?;
+            s.skip_ws();
+
+            let month = if s.eat_while(|c| c == '-').len() > 0 {
+                s.skip_ws();
+                let month = s.eat_while(|c| c.is_ascii_digit());
+                if month.len() != 2 {
+                    return Err(MalformKind::Date);
+                }
+
+                Some(u8::from_str_radix(&month, 10).unwrap() - 1)
+            } else {
+                None
+            };
+
+            Datetime { year, month, day: None, time: None }
         })
     }
 
@@ -453,20 +444,20 @@ impl Display for Datetime {
 }
 
 /// Used to resolve month abbreviations to their respective values.
-pub(crate) fn get_month_for_abbr(month: &str) -> Option<(String, u8)> {
+pub(crate) fn get_month_for_abbr(month: &str) -> Option<(&'static str, u8)> {
     match month.to_lowercase().as_str() {
-        "jan" => Some(("January".to_string(), 0)),
-        "feb" => Some(("February".to_string(), 1)),
-        "mar" => Some(("March".to_string(), 2)),
-        "apr" => Some(("April".to_string(), 3)),
-        "may" => Some(("May".to_string(), 4)),
-        "jun" => Some(("June".to_string(), 5)),
-        "jul" => Some(("July".to_string(), 6)),
-        "aug" => Some(("August".to_string(), 7)),
-        "sep" => Some(("September".to_string(), 8)),
-        "oct" => Some(("October".to_string(), 9)),
-        "nov" => Some(("November".to_string(), 10)),
-        "dec" => Some(("December".to_string(), 11)),
+        "jan" => Some(("January", 0)),
+        "feb" => Some(("February", 1)),
+        "mar" => Some(("March", 2)),
+        "apr" => Some(("April", 3)),
+        "may" => Some(("May", 4)),
+        "jun" => Some(("June", 5)),
+        "jul" => Some(("July", 6)),
+        "aug" => Some(("August", 7)),
+        "sep" => Some(("September", 8)),
+        "oct" => Some(("October", 9)),
+        "nov" => Some(("November", 10)),
+        "dec" => Some(("December", 11)),
         _ => None,
     }
 }
@@ -611,7 +602,7 @@ mod tests {
 
     #[test]
     fn test_parse_datetime() {
-        let date1 = Datetime::parse("2017-10 -25".to_string()).unwrap();
+        let date1 = Datetime::parse("2017-10 -25").unwrap();
         assert_eq!(date1.to_string(), "2017-10-25");
         assert_eq!(date1, Datetime {
             year: 2017,
@@ -620,16 +611,16 @@ mod tests {
             time: None,
         });
 
-        let date2 = Datetime::parse("  2019 -- 03 ".to_string()).unwrap();
-        assert_eq!(date2.to_string(), "2019-03");
+        let date2 = Datetime::parse("  2019 -- 03 ").unwrap();
         assert_eq!(date2, Datetime {
             year: 2019,
             month: Some(2),
             day: None,
             time: None,
         });
+        assert_eq!(date2.to_string(), "2019-03");
 
-        let date3 = Datetime::parse("  -0006".to_string()).unwrap();
+        let date3 = Datetime::parse("  -0006").unwrap();
         assert_eq!(date3.to_string(), "-0006");
         assert_eq!(date3, Datetime {
             year: -6,
@@ -638,7 +629,7 @@ mod tests {
             time: None,
         });
 
-        let date4 = Datetime::parse("2020-09-06T13:39:00".to_string()).unwrap();
+        let date4 = Datetime::parse("2020-09-06T13:39:00").unwrap();
         assert_eq!(date4, Datetime {
             year: 2020,
             month: Some(8),
