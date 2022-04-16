@@ -117,22 +117,22 @@ impl Bibliography {
 
         for entry in raw.entries {
             // Check that the key is not repeated
-            if res.get(entry.key).is_some() {
+            if res.get(entry.v.key).is_some() {
                 return Err(ParseError::new(
-                    0 .. 0,
-                    ParseErrorKind::DuplicateKey(entry.key.to_string()),
+                    entry.span,
+                    ParseErrorKind::DuplicateKey(entry.v.key.to_string()),
                 ));
             }
 
             let mut fields = BTreeMap::new();
-            for (field_key, field_value) in entry.fields.into_iter() {
+            for (field_key, field_value) in entry.v.fields.into_iter() {
                 let field_key = field_key.to_string();
                 let parsed = resolve::parse_field(&field_key, &field_value, abbr)?;
                 fields.insert(field_key, parsed);
             }
             res.insert(Entry {
-                key: entry.key.to_string(),
-                entry_type: EntryType::new(entry.kind),
+                key: entry.v.key.to_string(),
+                entry_type: EntryType::new(entry.v.kind),
                 fields,
             })?;
         }
@@ -159,10 +159,10 @@ impl Bibliography {
 
     /// Try to find an entry with the given cite key and return a copy of that
     /// entry with all `crossref` and `xdata` dependencies resolved.
-    pub fn get_resolved(&self, key: &str) -> Option<Entry> {
-        let mut entry = self.get(key)?.clone();
-        entry.resolve_crossrefs(self);
-        Some(entry)
+    pub fn get_resolved(&self, key: &str) -> Result<Entry, RetrievalError> {
+        let mut entry = self.get(key).ok_or(RetrievalError::NotFound)?.clone();
+        entry.resolve_crossrefs(self).map_err(RetrievalError::from)?;
+        Ok(entry)
     }
 
     /// Insert an entry into the bibliography.
@@ -295,7 +295,7 @@ impl Entry {
     /// Get the chunk slice of a field.
     ///
     /// The field key must be lowercase.
-    pub fn get(&self, key: &str) -> Option<&[Chunk]> {
+    pub fn get(&self, key: &str) -> Option<&[Spanned<Chunk>]> {
         self.fields.get(key).map(AsRef::as_ref)
     }
 
@@ -320,7 +320,15 @@ impl Entry {
     ///
     /// The field key is lowercased before insertion.
     pub fn set_as<T: Type>(&mut self, key: &str, value: &T) {
-        self.set(key, value.to_chunks());
+        self.set(
+            key,
+            value.to_chunks(
+                self.get(key)
+                    .and_then(|c| c.first())
+                    .map(|c| c.span.start)
+                    .unwrap_or(0),
+            ),
+        );
     }
 
     /// Remove a field from the entry.
@@ -506,7 +514,8 @@ impl Entry {
             if key == "date" {
                 if let Some(date) = convert_result(self.date())? {
                     for (key, value) in date.to_fieldset() {
-                        let v = [Chunk::Normal(value)].to_biblatex_string(false);
+                        let v = [Spanned::zero(Chunk::Normal(value))]
+                            .to_biblatex_string(false);
                         writeln!(bibtex, "{} = {},", key, v).unwrap();
                     }
                 }
@@ -534,7 +543,7 @@ impl Entry {
     }
 
     /// Get an entry but return None for empty chunk slices.
-    fn get_non_empty(&self, key: &str) -> Option<&[Chunk]> {
+    fn get_non_empty(&self, key: &str) -> Option<&[Spanned<Chunk>]> {
         let entry = self.get(key)?;
         if !entry.is_empty() { Some(entry) } else { None }
     }
@@ -554,8 +563,8 @@ impl Entry {
         }
 
         for mut crossref in refs {
-            crossref.resolve_crossrefs(bib);
-            self.resolve_single_crossref(crossref);
+            crossref.resolve_crossrefs(bib)?;
+            self.resolve_single_crossref(crossref)?;
         }
 
         self.remove("crossref");
@@ -677,7 +686,7 @@ impl Entry {
 impl Entry {
     // BibTeX fields.
     fields! {
-        // Fields without a specified return type simply return `&[Chunk]`.
+        // Fields without a specified return type simply return `&[Spanned<Chunk>]`.
         author: "author" => Vec<Person>,
         book_title: "booktitle",
         chapter: "chapter",
@@ -828,6 +837,11 @@ impl<T> Spanned<T> {
     /// Create a new instance from a value and its span.
     pub fn new(v: T, span: Span) -> Self {
         Self { v, span }
+    }
+
+    /// Create a new instance with a value and a zero-length span.
+    pub fn zero(v: T) -> Self {
+        Self { v, span: 0 .. 0 }
     }
 
     /// Convert from `&Spanned<T>` to `Spanned<&T>`

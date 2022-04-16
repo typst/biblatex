@@ -4,9 +4,9 @@ use std::fmt;
 use std::{collections::HashMap, vec};
 
 use crate::scanner::{is_id_continue, is_id_start, Scanner};
-use crate::TypeError;
+use crate::{Spanned, TypeError};
 
-pub type Field<'s> = Vec<RawChunk<'s>>;
+pub type Field<'s> = Vec<Spanned<RawChunk<'s>>>;
 
 /// A literal representation of a bibliography file, with abbreviations not yet
 /// resolved.
@@ -15,9 +15,9 @@ pub struct RawBibliography<'s> {
     /// TeX commands to be prepended to the document, only supported by BibTeX.
     pub preamble: String,
     /// The collection of citation keys and bibliography entries.
-    pub entries: Vec<RawEntry<'s>>,
+    pub entries: Vec<Spanned<RawEntry<'s>>>,
     /// A map of reusable abbreviations, only supported by BibTeX.
-    pub abbreviations: HashMap<&'s str, Vec<RawChunk<'s>>>,
+    pub abbreviations: HashMap<&'s str, Field<'s>>,
 }
 
 /// A raw extracted entry, with abbreviations not yet resolved.
@@ -28,7 +28,7 @@ pub struct RawEntry<'s> {
     /// Denotes the type of bibliographic item (e.g. `article`).
     pub kind: &'s str,
     /// Maps from field names to their values.
-    pub fields: HashMap<&'s str, Vec<RawChunk<'s>>>,
+    pub fields: HashMap<&'s str, Field<'s>>,
 }
 
 /// A literal representation of a bibliography entry field.
@@ -220,7 +220,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat a string.
-    fn string(&mut self) -> Result<&'s str, ParseError> {
+    fn string(&mut self) -> Result<Spanned<&'s str>, ParseError> {
         self.quote()?;
         let idx = self.s.index();
 
@@ -228,8 +228,9 @@ impl<'s> BiblatexParser<'s> {
             match c {
                 '"' => {
                     let res = self.s.eaten_from(idx);
+                    let span = idx .. self.s.index();
                     self.quote()?;
-                    return Ok(res);
+                    return Ok(Spanned::new(res, span));
                 }
                 '\\' => {
                     self.s.eat_assert('\\');
@@ -282,7 +283,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat a braced value.
-    fn braced(&mut self) -> Result<RawChunk<'s>, ParseError> {
+    fn braced(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
         self.brace(true)?;
         let idx = self.s.index();
         let mut braces = 0;
@@ -295,9 +296,10 @@ impl<'s> BiblatexParser<'s> {
                 }
                 '}' => {
                     let res = self.s.eaten_from(idx);
+                    let span = idx .. self.s.index();
                     self.brace(false)?;
                     if braces == 0 {
-                        return Ok(RawChunk::Normal(res));
+                        return Ok(Spanned::new(RawChunk::Normal(res), span));
                     }
                     braces -= 1;
                 }
@@ -318,12 +320,19 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat an element of an abbreviation.
-    fn abbr_element(&mut self) -> Result<RawChunk<'s>, ParseError> {
-        match self.s.peek() {
+    fn abbr_element(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
+        let start = self.s.index();
+        let res = match self.s.peek() {
             Some(c) if is_id_start(c) => self.ident().map(|s| RawChunk::Abbreviation(s)),
             Some(c) if c.is_numeric() => self.number().map(|s| RawChunk::Normal(s)),
-            _ => self.string().map(|s| RawChunk::Normal(s)),
-        }
+            _ => {
+                return self
+                    .string()
+                    .map(|s| Spanned::new(RawChunk::Normal(s.v), s.span));
+            }
+        };
+
+        res.map(|v| Spanned::new(v, start .. self.s.index()))
     }
 
     /// Eat an abbreviation field.
@@ -421,6 +430,7 @@ impl<'s> BiblatexParser<'s> {
 
     /// Eat an entry.
     fn entry(&mut self) -> Result<(), ParseError> {
+        let start = self.s.index();
         self.s.eat_assert('@');
         let entry_type = self.ident()?;
         self.s.skip_trivia();
@@ -430,7 +440,7 @@ impl<'s> BiblatexParser<'s> {
         match entry_type.to_ascii_lowercase().as_str() {
             "string" => self.strings()?,
             "preamble" => self.preamble()?,
-            _ => self.body(entry_type)?,
+            _ => self.body(entry_type, start)?,
         }
 
         self.s.skip_trivia();
@@ -462,7 +472,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat the body of a entry.
-    fn body(&mut self, kind: &'s str) -> Result<(), ParseError> {
+    fn body(&mut self, kind: &'s str, start: usize) -> Result<(), ParseError> {
         let key = self.ident()?;
         self.s.skip_ws();
         self.comma()?;
@@ -470,7 +480,10 @@ impl<'s> BiblatexParser<'s> {
         self.s.skip_trivia();
         let fields = self.fields()?;
 
-        self.res.entries.push(RawEntry { key, kind, fields });
+        self.res.entries.push(Spanned::new(
+            RawEntry { key, kind, fields },
+            start .. self.s.index(),
+        ));
         Ok(())
     }
 }
@@ -482,7 +495,7 @@ mod tests {
 
     fn format(field: &Field<'_>) -> String {
         if field.len() == 1 {
-            if let Some(RawChunk::Normal(s)) = field.first() {
+            if let Some(RawChunk::Normal(s)) = field.first().map(|s| &s.v) {
                 return format!("{{{}}}", s);
             }
         }
@@ -497,7 +510,7 @@ mod tests {
                 first = false;
             }
 
-            match field {
+            match field.v {
                 RawChunk::Normal(s) => {
                     res.push('"');
                     res.push_str(s);
@@ -515,7 +528,7 @@ mod tests {
         let test = format!("@article{{test, {}={}}}", key, value);
         let bt = RawBibliography::parse(&test);
         let article = &bt.entries[0];
-        format(article.fields.get(key).expect("fail"))
+        format(article.v.fields.get(key).expect("fail"))
     }
 
     #[test]
@@ -528,16 +541,16 @@ mod tests {
         let bt = RawBibliography::parse(file);
         let article = &bt.entries[0];
 
-        assert_eq!(article.kind, "article");
-        assert_eq!(format(article.fields.get("title").unwrap()), "{Great proceedings\\{}");
-        assert_eq!(format(article.fields.get("year").unwrap()), "2002");
-        assert_eq!(format(article.fields.get("author").unwrap()), "{Haug, {Martin} and Haug, Gregor}");
+        assert_eq!(article.v.kind, "article");
+        assert_eq!(format(article.v.fields.get("title").unwrap()), "{Great proceedings\\{}");
+        assert_eq!(format(article.v.fields.get("year").unwrap()), "2002");
+        assert_eq!(format(article.v.fields.get("author").unwrap()), "{Haug, {Martin} and Haug, Gregor}");
     }
 
     #[test]
     fn test_resolve_string() {
         let bt = RawBibliography::parse("@string{BT = \"bibtex\"}");
-        assert_eq!(bt.abbreviations.get("BT"), Some(&vec![RawChunk::Normal("bibtex")]));
+        assert_eq!(bt.abbreviations.get("BT"), Some(&vec![Spanned::new(RawChunk::Normal("bibtex"), 14..20)]));
     }
 
     #[test]

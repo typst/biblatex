@@ -13,7 +13,7 @@ macro_rules! fields {
         })*
     };
 
-    (@ret) => {&[Chunk]};
+    (@ret) => {&[Spanned<Chunk>]};
     (@ret $ret:ty) => {$ret};
 
     (@set $name:ident => $field:literal, ) => {
@@ -28,7 +28,14 @@ macro_rules! fields {
         paste! {
             #[doc = "Set the value of the `" $field "` field."]
             pub fn [<set_ $name>](&mut self, item: $ty) {
-                self.set($field, item.to_chunks());
+                self.set($field, item.to_chunks(
+                    self
+                        .get($field)
+                        .and_then(|c| c.first())
+                        .map(|c| c.span.start)
+                        .unwrap_or(0)
+                    )
+                );
             }
         }
     };
@@ -77,7 +84,14 @@ macro_rules! date_fields {
                      `" $prefix "year`, `" $prefix "month`, and
                      `" $prefix "day` fields if present."]
             pub fn [<set_ $name>](&mut self, item: Date) {
-                self.set(concat!($prefix, "date"), item.to_chunks());
+                self.set(concat!($prefix, "date"), item.to_chunks(
+                    self
+                        .get(concat!($prefix, "date"))
+                        .and_then(|c| c.first())
+                        .map(|c| c.span.start)
+                        .unwrap_or(0)
+                    )
+                );
                 self.remove(concat!($prefix, "year"));
                 self.remove(concat!($prefix, "month"));
                 self.remove(concat!($prefix, "day"));

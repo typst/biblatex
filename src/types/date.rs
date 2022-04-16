@@ -3,9 +3,9 @@ use std::fmt::{self, Display, Formatter};
 
 use chrono::{Datelike, NaiveDate, NaiveTime};
 
+use crate::chunk::*;
 use crate::scanner::Scanner;
-use crate::{chunk::*, FieldType};
-use crate::{Type, TypeError};
+use crate::{FieldType, Spanned, Type, TypeError};
 
 /// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -52,7 +52,7 @@ pub struct Datetime {
 
 impl Date {
     /// Parse a date from chunks.
-    pub fn parse(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    pub fn parse(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         let date = chunks.format_verbatim().to_uppercase();
         let mut date_trimmed = date.trim_end();
 
@@ -102,9 +102,9 @@ impl Date {
 
     /// Create a new date from `year`, `month`, and `day` chunks.
     pub fn parse_three_fields(
-        year: &[Chunk],
-        month: Option<&[Chunk]>,
-        day: Option<&[Chunk]>,
+        year: &[Spanned<Chunk>],
+        month: Option<&[Spanned<Chunk>]>,
+        day: Option<&[Spanned<Chunk>]>,
     ) -> Result<Self, TypeError> {
         let year = get_year(&mut Scanner::new(&year.format_verbatim()))
             .map_err(|k| TypeError::new(0 .. 0, k))?;
@@ -278,11 +278,11 @@ fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
 }
 
 impl Type for Date {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Date::parse(chunks)
     }
 
-    fn to_chunks(&self) -> Chunks {
+    fn to_chunks(&self, start: usize) -> Chunks {
         let mut s = match self.value {
             DateValue::At(date) => format!("{}", date),
             DateValue::After(start) => format!("{}/..", start),
@@ -297,7 +297,9 @@ impl Type for Date {
             (false, false) => "",
         });
 
-        vec![Chunk::Normal(s)]
+        let span = start .. start + s.len();
+
+        vec![Spanned::new(Chunk::Normal(s), span)]
     }
 }
 
@@ -488,8 +490,8 @@ mod tests {
 
     #[test]
     fn test_parse_date() {
-        let date = Date::parse(&[N("2017-10 -25?")]).unwrap();
-        assert_eq!(date.to_chunks(), vec![N("2017-10-25?")]);
+        let date = Date::parse(&[s(N("2017-10 -25?"), 0 .. 12)]).unwrap();
+        assert_eq!(date.to_chunks(0), vec![s(N("2017-10-25?"), 0 .. 11)]);
         assert_eq!(date, Date {
             value: DateValue::At(Datetime {
                 year: 2017,
@@ -501,8 +503,8 @@ mod tests {
             approximate: false,
         });
 
-        let date = Date::parse(&[N("19XX~")]).unwrap();
-        assert_eq!(date.to_chunks(), vec![N("1900/1999~")]);
+        let date = Date::parse(&[s(N("19XX~"), 0 .. 5)]).unwrap();
+        assert_eq!(date.to_chunks(0), vec![s(N("1900/1999~"), 0 .. 10)]);
         assert_eq!(date, Date {
             value: DateValue::Between(
                 Datetime {
@@ -522,8 +524,8 @@ mod tests {
             approximate: true,
         });
 
-        let date = Date::parse(&[N("1948-03-02/1950")]).unwrap();
-        assert_eq!(date.to_chunks(), vec![N("1948-03-02/1950")]);
+        let date = Date::parse(&[s(N("1948-03-02/1950"), 1 .. 16)]).unwrap();
+        assert_eq!(date.to_chunks(1), vec![s(N("1948-03-02/1950"), 1 .. 16)]);
         assert_eq!(date, Date {
             value: DateValue::Between(
                 Datetime {
@@ -543,8 +545,8 @@ mod tests {
             approximate: false,
         });
 
-        let date = Date::parse(&[N("2020-04-04T18:30:31/")]).unwrap();
-        assert_eq!(date.to_chunks(), vec![N("2020-04-04/..")]);
+        let date = Date::parse(&[s(N("2020-04-04T18:30:31/"), 0 .. 20)]).unwrap();
+        assert_eq!(date.to_chunks(0), vec![s(N("2020-04-04/.."), 0 .. 13)]);
         assert_eq!(date, Date {
             value: DateValue::After(Datetime {
                 year: 2020,
@@ -556,8 +558,8 @@ mod tests {
             approximate: false,
         });
 
-        let date = Date::parse(&[N("/-0031-07%")]).unwrap();
-        assert_eq!(date.to_chunks(), vec![N("../-0031-07%")]);
+        let date = Date::parse(&[s(N("/-0031-07%"), 0 .. 10)]).unwrap();
+        assert_eq!(date.to_chunks(0), vec![s(N("../-0031-07%"), 0 .. 12)]);
         assert_eq!(date, Date {
             value: DateValue::Before(Datetime {
                 year: -31,
@@ -572,8 +574,8 @@ mod tests {
 
     #[test]
     fn test_parse_date_from_three_fields() {
-        let year = &[N("2020")];
-        let month = &[N("January\u{A0}12th")];
+        let year = &[s(N("2020"), 0 .. 4)];
+        let month = &[s(N("January\u{A0}12th"), 20 .. 32)];
         let date = Date::parse_three_fields(year, Some(month), None).unwrap();
         assert_eq!(
             date.value,
@@ -585,9 +587,9 @@ mod tests {
             })
         );
 
-        let year = &[N("-0004")];
-        let month = &[N("aug")];
-        let day = &[N("28")];
+        let year = &[s(N("-0004"), 0 .. 5)];
+        let month = &[s(N("aug"), 41 .. 44)];
+        let day = &[s(N("28"), 48 .. 50)];
         let date = Date::parse_three_fields(year, Some(month), Some(day)).unwrap();
         assert_eq!(
             date.value,

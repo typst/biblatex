@@ -1,12 +1,12 @@
 use crate::resolve::is_escapable;
 use crate::types::Type;
-use crate::TypeError;
+use crate::{Spanned, TypeError};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// A sequence of chunks.
-pub type Chunks = Vec<Chunk>;
+pub type Chunks = Vec<Spanned<Chunk>>;
 
 /// Represents one part of a field value.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -30,6 +30,14 @@ impl Chunk {
             Chunk::Normal(s) => s,
             Chunk::Verbatim(s) => s,
             Chunk::Math(s) => s,
+        }
+    }
+
+    pub fn get_and_verb(&self) -> (&str, bool) {
+        match self {
+            Chunk::Normal(s) => (s, false),
+            Chunk::Verbatim(s) => (s, true),
+            Chunk::Math(s) => (s, false),
         }
     }
 
@@ -68,7 +76,7 @@ pub trait ChunksExt {
     fn to_biblatex_string(&self, verbatim_mode: bool) -> String;
 }
 
-impl ChunksExt for [Chunk] {
+impl ChunksExt for [Spanned<Chunk>] {
     fn parse<T: Type>(&self) -> Result<T, TypeError> {
         T::from_chunks(self).map_err(|k| TypeError::new(0 .. 0, k))
     }
@@ -77,7 +85,7 @@ impl ChunksExt for [Chunk] {
         let mut out = String::new();
         let mut first = true;
         for val in self {
-            match val {
+            match &val.v {
                 Chunk::Normal(s) => {
                     for c in s.chars() {
                         if first {
@@ -107,7 +115,7 @@ impl ChunksExt for [Chunk] {
     fn format_verbatim(&self) -> String {
         let mut out = String::new();
         for val in self {
-            match val {
+            match &val.v {
                 Chunk::Normal(s) => out += s,
                 Chunk::Verbatim(s) => out += s,
                 Chunk::Math(s) => {
@@ -127,7 +135,7 @@ impl ChunksExt for [Chunk] {
         let mut extra_brace = false;
 
         for chunk in self.iter() {
-            match chunk {
+            match &chunk.v {
                 Chunk::Verbatim(_) if !extra_brace => {
                     res.push('{');
                     extra_brace = true;
@@ -142,9 +150,9 @@ impl ChunksExt for [Chunk] {
                 _ => {}
             }
 
-            res.push_str(&chunk.get_escaped(verbatim_mode));
+            res.push_str(&chunk.v.get_escaped(verbatim_mode));
 
-            if let Chunk::Math(_) = chunk {
+            if let Chunk::Math(_) = &chunk.v {
                 res.push('$');
             }
         }
@@ -159,30 +167,34 @@ impl ChunksExt for [Chunk] {
 
 /// An iterator over the characters in each chunk, indicating whether they are
 /// verbatim or not. Chunk types other than `Normal` or `Verbatim` are ommitted.
-pub(crate) fn chunk_chars(chunks: &[Chunk]) -> impl Iterator<Item = (char, bool)> + '_ {
+pub(crate) fn chunk_chars(
+    chunks: &[Spanned<Chunk>],
+) -> impl Iterator<Item = (char, bool)> + '_ {
     chunks.iter().flat_map(|chunk| {
-        let (s, verbatim) = match chunk {
-            Chunk::Normal(s) => (s, false),
-            Chunk::Verbatim(s) => (s, true),
-            Chunk::Math(s) => (s, false),
-        };
+        let (s, verbatim) = chunk.v.get_and_verb();
 
         s.chars().map(move |c| (c, verbatim))
     })
 }
 
 /// Combines the cunks, interlacing with the separator.
-pub(crate) fn join_chunk_list(chunks: &[Chunk], sep: &str) -> Chunks {
+pub(crate) fn join_chunk_list(chunks: &[Spanned<Chunk>], sep: &str) -> Chunks {
     let mut res = vec![];
-    let mut chunks = chunks.to_vec().into_iter();
-    if let Some(chunk) = chunks.next() {
-        res.push(chunk);
+    let mut first = true;
 
-        for chunk in chunks {
-            res.push(Chunk::Normal(sep.to_string()));
-            res.push(chunk);
+    for chunk in chunks {
+        if first {
+            first = false;
+        } else {
+            res.push(Spanned::new(
+                Chunk::Normal(sep.to_string()),
+                chunk.span.start .. chunk.span.start,
+            ));
         }
+
+        res.push(chunk.clone());
     }
+
     res
 }
 
@@ -190,23 +202,31 @@ pub(crate) fn join_chunk_list(chunks: &[Chunk], sep: &str) -> Chunks {
 /// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
 ///
 /// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
-pub(crate) fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Chunks> {
+pub(crate) fn split_token_lists(vals: &[Spanned<Chunk>], keyword: &str) -> Vec<Chunks> {
     let mut out = vec![];
     let mut latest = vec![];
 
     for val in vals {
-        if let Chunk::Normal(s) = val {
+        if let Chunk::Normal(s) = &val.v {
             let mut target = s.as_str();
+            let mut start = val.span.start;
 
             while let Some(pos) = target.find(keyword) {
                 let first = target[.. pos].trim_end();
-                latest.push(Chunk::Normal(first.to_string()));
-                out.push(latest);
-                latest = vec![];
+                latest.push(Spanned::new(
+                    Chunk::Normal(first.to_string()),
+                    start .. start + pos,
+                ));
+                out.push(std::mem::take(&mut latest));
+
                 target = target[pos + keyword.len() ..].trim_start();
+                start += pos + keyword.len();
             }
 
-            latest.push(Chunk::Normal(target.to_string()));
+            latest.push(Spanned::new(
+                Chunk::Normal(target.to_string()),
+                start .. val.span.end,
+            ));
         } else {
             latest.push(val.clone());
         }
@@ -219,66 +239,80 @@ pub(crate) fn split_token_lists(vals: &[Chunk], keyword: &str) -> Vec<Chunks> {
 /// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
 pub(crate) fn split_at_normal_char(
-    src: &[Chunk],
+    src: &[Spanned<Chunk>],
     c: char,
     omit: bool,
 ) -> (Chunks, Chunks) {
-    let mut found = false;
-    let mut len = src.len();
-    let mut si = 0;
-    for (index, val) in src.iter().enumerate() {
-        if let Chunk::Normal(s) = val {
-            if let Some(pos) = s.find(c) {
-                found = true;
-                si = pos;
-                len = index;
+    let mut search_result = None;
+
+    for (chunk_idx, val) in src.iter().enumerate() {
+        if let Chunk::Normal(s) = &val.v {
+            if let Some(str_idx) = s.find(c) {
+                search_result = Some((chunk_idx, str_idx));
+                break;
             }
-        } else {
-            continue;
         }
     }
 
-    let (v1, mut v2) = split_values(src, len, si);
+    if let Some((chunk_idx, str_idx)) = search_result {
+        let (v1, mut v2) = split_values(src, chunk_idx, str_idx);
 
-    if omit && found {
-        let first = v2[0].clone();
-        if let Chunk::Normal(mut s) = first {
-            s.remove(0);
-            s = s.trim_start().to_string();
-            v2[0] = Chunk::Normal(s);
+        if omit {
+            if let Chunk::Normal(s) = &mut v2[0].v {
+                s.remove(0);
+                *s = s.trim_start().to_string();
+            }
+
+            v2[0].span.start = v2[0].span.end - v2[0].v.get().len();
         }
-    }
 
-    (v1, v2)
+        (v1, v2)
+    } else {
+        (src.to_vec(), vec![])
+    }
 }
 
-/// Returns two chunk vectors with `src` split at chunk index `vi` and
-/// char index `si` within that chunk.
-pub(crate) fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Chunks, Chunks) {
+/// Returns two chunk vectors with `src` split at some chunk index and
+/// the string byte index `str_idx` within that chunk.
+pub(crate) fn split_values(
+    src: &[Spanned<Chunk>],
+    chunk_idx: usize,
+    str_idx: usize,
+) -> (Chunks, Chunks) {
     let mut src = src.to_vec();
-    if vi >= src.len() {
-        return (vec![], src);
-    }
-
     let mut new = vec![];
-    while src.len() > vi + 1 {
-        new.insert(0, src.pop().expect("index checked above"));
+    if chunk_idx >= src.len() {
+        return (src, new);
     }
 
-    let item = src.pop().expect("index checked above");
-    let (content, verb) = match item {
-        Chunk::Normal(s) => (s, false),
-        Chunk::Verbatim(s) => (s, true),
-        Chunk::Math(s) => (s, false),
-    };
+    if chunk_idx + 1 < src.len() {
+        new.extend(src.drain(chunk_idx + 1 ..));
+    }
 
-    let (s1, s2) = content.split_at(si);
-    if verb {
-        src.push(Chunk::Verbatim(s1.trim_end().to_string()));
-        new.insert(0, Chunk::Verbatim(s2.trim_start().to_string()));
-    } else {
-        src.push(Chunk::Normal(s1.trim_end().to_string()));
-        new.insert(0, Chunk::Normal(s2.trim_start().to_string()));
+    let item = src.last_mut().unwrap();
+    let content = item.v.get_mut();
+
+    let (s1, s2) = content.split_at(str_idx);
+
+    let boundry = item.span.start + str_idx;
+    item.span = item.span.start .. boundry;
+    let new_span = boundry .. boundry + s2.len();
+
+    let s1 = s1.trim_end().to_string();
+    let s2 = s2.trim_start().to_string();
+
+    *content = s1;
+
+    match &item.v {
+        Chunk::Normal(_) => {
+            new.insert(0, Spanned::new(Chunk::Normal(s2), new_span));
+        }
+        Chunk::Verbatim(_) => {
+            new.insert(0, Spanned::new(Chunk::Verbatim(s2), new_span));
+        }
+        Chunk::Math(_) => {
+            new.insert(0, Spanned::new(Chunk::Math(s2), new_span));
+        }
     }
 
     (src, new)
@@ -287,6 +321,8 @@ pub(crate) fn split_values(src: &[Chunk], vi: usize, si: usize) -> (Chunks, Chun
 #[cfg(test)]
 #[allow(non_snake_case)]
 pub(crate) mod tests {
+    use crate::Span;
+
     use super::*;
 
     pub fn N(s: &str) -> Chunk {
@@ -296,11 +332,20 @@ pub(crate) mod tests {
         Chunk::Verbatim(s.to_string())
     }
 
+    pub fn s<T>(v: T, span: Span) -> Spanned<T> {
+        Spanned::new(v, span)
+    }
+
     #[test]
     fn test_split() {
-        let vls = &[N("split "), V("exac^tly"), N("here")];
-        let ref1 = &[N("split "), V("exac^")];
-        let ref2 = &[V("tly"), N("here")];
+        let vls = &[
+            s(N("split "), 1 .. 7),
+            s(V("exac^tly"), 9 .. 17),
+            s(N("here"), 19 .. 23),
+        ];
+        let ref1 = &[s(N("split "), 1 .. 7), s(V("exac^"), 9 .. 14)];
+        let ref2 = &[s(V("tly"), 14 .. 17), s(N("here"), 19 .. 23)];
+
         let split = split_values(vls, 1, 5);
         assert_eq!(split.0, ref1);
         assert_eq!(split.1, ref2);
@@ -308,9 +353,18 @@ pub(crate) mod tests {
 
     #[test]
     fn test_split_at_normal_char() {
-        let vls = &[N("split "), V("not, "), N("but rather, here")];
-        let ref1 = &[N("split "), V("not, "), N("but rather")];
-        let ref2 = &[N("here")];
+        let vls = &[
+            s(N("split "), 1 .. 7),
+            s(V("not, "), 9 .. 14),
+            s(N("but rather, here"), 16 .. 32),
+        ];
+        let ref1 = &[
+            s(N("split "), 1 .. 7),
+            s(V("not, "), 9 .. 14),
+            s(N("but rather"), 16 .. 26),
+        ];
+        let ref2 = &[s(N("here"), 28 .. 32)];
+
         let split = split_at_normal_char(vls, ',', true);
         assert_eq!(split.0, ref1);
         assert_eq!(split.1, ref2);

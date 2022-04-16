@@ -7,7 +7,7 @@ use crate::mechanics::is_verbatim_field;
 use crate::raw::{Field, ParseError, ParseErrorKind, RawChunk, Token};
 use crate::scanner::{is_id_continue, is_newline, Scanner};
 use crate::types::get_month_for_abbr;
-use crate::ChunksExt;
+use crate::{ChunksExt, Span, Spanned};
 
 /// Fully parse a field, resolving abbreviations and LaTeX commands.
 pub fn parse_field(
@@ -17,9 +17,14 @@ pub fn parse_field(
 ) -> Result<Chunks, ParseError> {
     let mut chunks = vec![];
     for e in field {
-        match e {
+        match e.v {
             RawChunk::Abbreviation(s) => {
-                chunks.extend(resolve_abbreviation(key, s, abbreviations)?);
+                chunks.extend(resolve_abbreviation(
+                    key,
+                    s,
+                    e.span.clone(),
+                    abbreviations,
+                )?);
             }
             RawChunk::Normal(s) => {
                 chunks.extend(ContentParser::new(key, s).parse()?);
@@ -35,6 +40,9 @@ pub fn parse_field(
 struct ContentParser<'s> {
     s: Scanner<'s>,
     verb_field: bool,
+    current_chunk: Chunk,
+    result: Chunks,
+    start: usize,
 }
 
 impl<'s> ContentParser<'s> {
@@ -42,38 +50,35 @@ impl<'s> ContentParser<'s> {
         Self {
             s: Scanner::new(field),
             verb_field: is_verbatim_field(key),
+            current_chunk: Self::default_chunk(0),
+            result: vec![],
+            start: 0,
         }
     }
 
     fn parse(mut self) -> Result<Chunks, ParseError> {
         let mut depth = 0;
-        let default_chunk = |depth| {
-            if depth > 0 {
-                Chunk::Verbatim(String::new())
-            } else {
-                Chunk::Normal(String::new())
-            }
-        };
-        let mut current = default_chunk(depth);
-        let mut res = vec![];
 
-        loop {
-            match self.s.peek() {
-                Some('\\') => current.get_mut().push_str(&self.backslash()?),
-                Some('$') => {
-                    res.push(current);
-                    current = default_chunk(depth);
+        self.current_chunk = Self::default_chunk(depth);
 
-                    res.push(self.math()?);
+        while let Some(c) = self.s.peek() {
+            match c {
+                '\\' => {
+                    let sequence = self.backslash()?;
+                    self.current_chunk.get_mut().push_str(&sequence)
                 }
-                Some('{') => {
-                    res.push(current);
+                '$' => {
+                    self.turnaround(depth);
+                    let math = self.math()?;
+                    self.result.push(math);
+                }
+                '{' => {
                     depth += 1;
-                    current = default_chunk(depth);
+                    self.turnaround(depth);
 
                     self.s.eat();
                 }
-                Some('}') => {
+                '}' => {
                     if depth == 0 {
                         let idx = self.s.index();
                         self.s.eat();
@@ -83,27 +88,32 @@ impl<'s> ContentParser<'s> {
                         ));
                     }
 
-                    res.push(current);
                     depth -= 1;
-                    current = default_chunk(depth);
+                    self.turnaround(depth);
 
                     self.s.eat();
                 }
-                Some(_) => current.get_mut().push(self.s.eat().unwrap()),
-                None => break,
+                _ => self.current_chunk.get_mut().push(self.s.eat().unwrap()),
             }
         }
 
-        if !current.get().is_empty() {
-            res.push(current);
+        if !self.current_chunk.get().is_empty() {
+            self.turnaround(depth);
         }
 
-        Ok(res)
+        Ok(self.result)
+    }
+
+    fn turnaround(&mut self, depth: usize) {
+        self.result.push(Spanned::new(
+            std::mem::replace(&mut self.current_chunk, Self::default_chunk(depth)),
+            self.start .. self.s.index(),
+        ));
+        self.start = self.s.index();
     }
 
     fn backslash(&mut self) -> Result<String, ParseError> {
         self.s.eat_assert('\\');
-        // TODO fix escaping for file field
         match self.s.peek() {
             Some(c) if is_escapable(c, self.verb_field) => {
                 self.s.eat_assert(c);
@@ -191,9 +201,11 @@ impl<'s> ContentParser<'s> {
         Ok(execute_command(command, arg.as_deref()))
     }
 
-    fn math(&mut self) -> Result<Chunk, ParseError> {
+    fn math(&mut self) -> Result<Spanned<Chunk>, ParseError> {
         self.s.eat_assert('$');
+        let idx = self.s.index();
         let res = self.s.eat_until(|c| c == '$');
+        let span = idx .. self.s.index();
 
         if self.s.eof() {
             return Err(ParseError::new(
@@ -203,7 +215,15 @@ impl<'s> ContentParser<'s> {
         }
 
         self.s.eat();
-        Ok(Chunk::Math(res.into()))
+        Ok(Spanned::new(Chunk::Math(res.into()), span))
+    }
+
+    fn default_chunk(depth: usize) -> Chunk {
+        if depth > 0 {
+            Chunk::Verbatim(String::new())
+        } else {
+            Chunk::Normal(String::new())
+        }
     }
 }
 
@@ -211,6 +231,7 @@ impl<'s> ContentParser<'s> {
 fn resolve_abbreviation(
     key: &str,
     abbr: &str,
+    span: Span,
     map: &HashMap<&str, Field<'_>>,
 ) -> Result<Chunks, ParseError> {
     let fields = map.get(abbr).ok_or(ParseError::new(
@@ -220,7 +241,7 @@ fn resolve_abbreviation(
 
     if fields.is_err() {
         if let Some(month) = get_month_for_abbr(abbr) {
-            return Ok(vec![Chunk::Normal(month.0.to_string())]);
+            return Ok(vec![Spanned::new(Chunk::Normal(month.0.to_string()), span)]);
         }
     }
 
@@ -311,16 +332,19 @@ fn flatten(chunks: &mut Chunks) {
             break;
         }
 
-        let merge = match (&chunks[i - 1], &chunks[i]) {
+        let merge = match (&chunks[i - 1].v, &chunks[i].v) {
             (Chunk::Normal(_), Chunk::Normal(_)) => true,
             (Chunk::Verbatim(_), Chunk::Verbatim(_)) => true,
             _ => false,
         };
 
         if merge {
-            let redundant =
-                std::mem::replace(&mut chunks[i], Chunk::Normal("".to_string()));
-            chunks[i - 1].get_mut().push_str(redundant.get());
+            let redundant = std::mem::replace(
+                &mut chunks[i],
+                Spanned::new(Chunk::Normal("".to_string()), 0 .. 0),
+            );
+            chunks[i - 1].v.get_mut().push_str(redundant.v.get());
+            chunks[i - 1].span.end = redundant.span.end;
             chunks.remove(i);
         } else {
             i += 1;
@@ -352,7 +376,7 @@ fn is_single_char_func(c: char) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{parse_field, Chunk, RawChunk};
+    use super::{parse_field, Chunk, RawChunk, Spanned};
 
     fn N(s: &str) -> Chunk {
         Chunk::Normal(s.to_string())
@@ -364,61 +388,65 @@ mod tests {
         Chunk::Math(s.to_string())
     }
 
+    fn z(c: RawChunk) -> Spanned<RawChunk> {
+        Spanned::new(c, 0 .. 0)
+    }
+
     #[test]
     fn test_process() {
         let mut map = HashMap::new();
-        map.insert("abc", vec![RawChunk::Normal("ABC")]);
-        map.insert("hi", vec![RawChunk::Normal("hello")]);
-        map.insert("you", vec![RawChunk::Normal("person")]);
+        map.insert("abc", vec![z(RawChunk::Normal("ABC"))]);
+        map.insert("hi", vec![z(RawChunk::Normal("hello"))]);
+        map.insert("you", vec![z(RawChunk::Normal("person"))]);
 
         let field = vec![
-            RawChunk::Abbreviation("abc"),
-            RawChunk::Normal("good {TIMES}"),
-            RawChunk::Abbreviation("hi"),
-            RawChunk::Abbreviation("you"),
-            RawChunk::Normal("last"),
+            z(RawChunk::Abbreviation("abc")),
+            z(RawChunk::Normal("good {TIMES}")),
+            z(RawChunk::Abbreviation("hi")),
+            z(RawChunk::Abbreviation("you")),
+            z(RawChunk::Normal("last")),
         ];
 
         let res = parse_field("", &field, &map).unwrap();
-        assert_eq!(res[0], N("ABCgood "));
-        assert_eq!(res[1], V("TIMES"));
-        assert_eq!(res[2], N("hellopersonlast"));
+        assert_eq!(res[0].v, N("ABCgood "));
+        assert_eq!(res[1].v, V("TIMES"));
+        assert_eq!(res[2].v, N("hellopersonlast"));
         assert_eq!(res.len(), 3);
     }
 
     #[test]
     fn test_resolve_commands_and_escape() {
-        let field = vec![RawChunk::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}")];
+        let field = vec![z(RawChunk::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}"))];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
-        assert_eq!(res[0], N("Äther und "));
-        assert_eq!(res[1], V("\"LaTeX\""));
-        assert_eq!(res[2], N(" "));
-        assert_eq!(res[3], V("\\relax for you}"));
+        assert_eq!(res[0].v, N("Äther und "));
+        assert_eq!(res[1].v, V("\"LaTeX\""));
+        assert_eq!(res[2].v, N(" "));
+        assert_eq!(res[3].v, V("\\relax for you}"));
         assert_eq!(res.len(), 4);
 
-        let field = vec![RawChunk::Normal("M\\\"etal S\\= ound")];
+        let field = vec![z(RawChunk::Normal("M\\\"etal S\\= ound"))];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
-        assert_eq!(res[0], N("Mëtal Sōund"));
+        assert_eq!(res[0].v, N("Mëtal Sōund"));
     }
 
     #[test]
     fn test_math() {
-        let field = vec![RawChunk::Normal("The $11^{th}$ International Conference on How To Make \\$\\$")];
+        let field = vec![z(RawChunk::Normal("The $11^{th}$ International Conference on How To Make \\$\\$"))];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
-        assert_eq!(res[0], N("The "));
-        assert_eq!(res[1], M("11^{th}"));
-        assert_eq!(res[2], N(" International Conference on How To Make $$"));
+        assert_eq!(res[0].v, N("The "));
+        assert_eq!(res[1].v, M("11^{th}"));
+        assert_eq!(res[2].v, N(" International Conference on How To Make $$"));
         assert_eq!(res.len(), 3);
     }
 
     #[test]
     fn test_commands() {
-        let field = vec![RawChunk::Normal("Bose\\textendash{}Einstein")];
+        let field = vec![z(RawChunk::Normal("Bose\\textendash{}Einstein"))];
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
-        assert_eq!(res[0], N("Bose–Einstein"));
+        assert_eq!(res[0].v, N("Bose–Einstein"));
     }
 }

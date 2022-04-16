@@ -14,7 +14,7 @@ use numerals::roman::Roman;
 use strum::{AsRefStr, Display, EnumString};
 
 use crate::scanner::Scanner;
-use crate::{chunk::*, Span};
+use crate::{chunk::*, Span, Spanned};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeError {
@@ -38,6 +38,42 @@ impl fmt::Display for TypeError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct TempTypeError {
+    span: Option<Span>,
+    kind: FieldType,
+}
+
+impl TempTypeError {
+    fn bare(kind: FieldType) -> Self {
+        Self { span: None, kind }
+    }
+
+    fn new(span: Span, kind: FieldType) -> Self {
+        Self { span: Some(span), kind }
+    }
+
+    fn into_type_err(self, base_span: Span) -> TypeError {
+        let span = match self.span {
+            Some(span) => span.start + base_span.start .. span.end + base_span.start,
+            None => base_span,
+        };
+        TypeError::new(span, self.kind)
+    }
+}
+
+impl fmt::Display for TempTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "malformed {}", self.kind)?;
+
+        if let Some(span) = &self.span {
+            write!(f, ": {}-{}", span.start, span.end)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Display, Copy, Clone, PartialEq)]
 #[strum(serialize_all = "snake_case")]
 pub enum FieldType {
@@ -52,14 +88,14 @@ pub enum FieldType {
 /// Convert Bib(La)TeX data types from and to chunk slices.
 pub trait Type: Sized {
     /// Parse the type from chunks.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType>;
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType>;
 
     /// Serialize the type into chunks.
-    fn to_chunks(&self) -> Chunks;
+    fn to_chunks(&self, start: usize) -> Chunks;
 }
 
 impl Type for i64 {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         let s = chunks.format_verbatim();
         let s = s.trim();
 
@@ -72,23 +108,28 @@ impl Type for i64 {
         }
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(self.to_string())]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let str = self.to_string();
+        let span = start .. start + str.len();
+        vec![Spanned::new(Chunk::Normal(str), span)]
     }
 }
 
 impl Type for String {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Ok(chunks.format_verbatim())
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Verbatim(self.clone())]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        vec![Spanned::new(
+            Chunk::Verbatim(self.clone()),
+            start .. start + self.len(),
+        )]
     }
 }
 
 impl Type for Range<u32> {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         chunks
             .parse::<Vec<Range<u32>>>()
             .map_err(|e| e.kind)?
@@ -97,28 +138,38 @@ impl Type for Range<u32> {
             .ok_or(FieldType::IntegerRange)
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(format!("{}-{}", self.start, self.end))]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let str = format!("{}-{}", self.start, self.end);
+        let span = start .. start + str.len();
+        vec![Spanned::new(Chunk::Normal(str), span)]
     }
 }
 
 impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Ok(split_token_lists(chunks, " and "))
     }
 
-    fn to_chunks(&self) -> Chunks {
+    fn to_chunks(&self, start: usize) -> Chunks {
         let mut merged = vec![];
+        let mut first = true;
 
-        let mut chunks = self.iter();
-        if let Some(chunk) = chunks.next() {
-            merged.extend(chunk.iter().cloned());
-
-            for chunk in chunks {
-                merged.push(Chunk::Normal(" and ".to_string()));
-                merged.extend(chunk.iter().cloned());
+        for chunk in self {
+            if first {
+                first = false;
+            } else {
+                merged.push(Spanned::new(
+                    Chunk::Normal(" and ".to_string()),
+                    if let Some(chunk) = chunk.first() {
+                        chunk.span.start .. chunk.span.start
+                    } else {
+                        start .. start
+                    },
+                ));
             }
+
+            merged.extend(chunk.clone());
         }
 
         merged
@@ -127,22 +178,33 @@ impl Type for Vec<Chunks> {
 
 impl Type for Vec<String> {
     /// Splits the chunks at commas.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Ok(split_token_lists(chunks, ",")
             .into_iter()
             .map(|chunks| chunks.format_verbatim())
             .collect::<Vec<String>>())
     }
 
-    fn to_chunks(&self) -> Chunks {
-        let chunks: Vec<_> = self.iter().map(|s| Chunk::Normal(s.clone())).collect();
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let mut len = 0;
+        let chunks: Vec<_> = self
+            .iter()
+            .map(|s| {
+                let res = Spanned::new(
+                    Chunk::Normal(s.clone()),
+                    start + len .. start + len + s.len(),
+                );
+                len += s.len();
+                res
+            })
+            .collect();
         join_chunk_list(&chunks, ",")
     }
 }
 
 impl Type for Vec<Range<u32>> {
     /// Splits the ranges at commas.
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         let range_vecs = split_token_lists(chunks, ",");
         let mut res = vec![];
 
@@ -179,10 +241,17 @@ impl Type for Vec<Range<u32>> {
         Ok(res)
     }
 
-    fn to_chunks(&self) -> Chunks {
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let mut len = 0;
+
         let chunks = self
             .iter()
-            .map(|range| Chunk::Normal(format!("{}-{}", range.start, range.end)))
+            .map(|range| {
+                let str = format!("{}-{}", range.start, range.end);
+                let span = start + len .. start + len + str.len();
+                len += str.len();
+                Spanned::new(Chunk::Normal(str), span)
+            })
             .collect::<Chunks>();
 
         join_chunk_list(&chunks, ",")
@@ -199,7 +268,7 @@ pub enum Edition {
 }
 
 impl Type for Edition {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Ok(if let Ok(int) = chunks.parse() {
             Edition::Int(int)
         } else {
@@ -207,9 +276,13 @@ impl Type for Edition {
         })
     }
 
-    fn to_chunks(&self) -> Chunks {
+    fn to_chunks(&self, start: usize) -> Chunks {
         match self {
-            Edition::Int(int) => vec![Chunk::Normal(int.to_string())],
+            Edition::Int(int) => {
+                let res = int.to_string();
+                let span = start .. start + res.len();
+                vec![Spanned::new(Chunk::Normal(res), span)]
+            }
             Edition::Chunks(chunks) => chunks.clone(),
         }
     }
@@ -228,13 +301,15 @@ pub enum Pagination {
 }
 
 impl Type for Pagination {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         Pagination::from_str(&chunks.format_verbatim().to_lowercase())
             .map_err(|_| FieldType::Pagination)
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(self.to_string())]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let res = self.to_string();
+        let span = start .. start + res.len();
+        vec![Spanned::new(Chunk::Normal(res), span)]
     }
 }
 
@@ -255,13 +330,15 @@ pub enum EditorType {
 }
 
 impl Type for EditorType {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         EditorType::from_str(&chunks.format_verbatim().to_lowercase())
             .map_err(|_| FieldType::EditorType)
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(self.to_string())]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let res = self.to_string();
+        let span = start .. start + res.len();
+        vec![Spanned::new(Chunk::Normal(res), span)]
     }
 }
 
@@ -330,7 +407,7 @@ impl Gender {
 }
 
 impl Type for Gender {
-    fn from_chunks(chunks: &[Chunk]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
         // Two-letter gender serialization in accordance with the BibLaTeX standard.
         match chunks.format_verbatim().to_lowercase().as_ref() {
             "sf" => Ok(Gender::SingularFemale),
@@ -343,8 +420,10 @@ impl Type for Gender {
         }
     }
 
-    fn to_chunks(&self) -> Chunks {
-        vec![Chunk::Normal(self.to_string())]
+    fn to_chunks(&self, start: usize) -> Chunks {
+        let res = self.to_string();
+        let span = start .. start + res.len();
+        vec![Spanned::new(Chunk::Normal(res), span)]
     }
 }
 
@@ -355,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_ranges() {
-        let ranges = &[N("31--43,21:4-21:6,  194 --- 245")];
+        let ranges = &[Spanned::zero(N("31--43,21:4-21:6,  194 --- 245"))];
         let res = ranges.parse::<Vec<Range<u32>>>().unwrap();
         assert_eq!(res[0], 31 .. 43);
         assert_eq!(res[1], 4 .. 6);
