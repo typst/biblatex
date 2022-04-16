@@ -19,12 +19,17 @@ use crate::{chunk::*, Span, Spanned};
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeError {
     pub span: Span,
-    pub kind: FieldType,
+    pub kind: DefectAtom,
 }
 
 impl TypeError {
-    pub(crate) fn new(span: Span, kind: FieldType) -> Self {
+    pub(crate) fn new(span: Span, kind: DefectAtom) -> Self {
         Self { span, kind }
+    }
+
+    fn offset(&mut self, amount: usize) {
+        self.span.start += amount;
+        self.span.end += amount;
     }
 }
 
@@ -39,45 +44,8 @@ impl fmt::Display for TypeError {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct TempTypeError {
-    span: Option<Span>,
-    kind: FieldType,
-}
-
-impl TempTypeError {
-    fn bare(kind: FieldType) -> Self {
-        Self { span: None, kind }
-    }
-
-    fn new(span: Span, kind: FieldType) -> Self {
-        Self { span: Some(span), kind }
-    }
-
-    fn into_type_err(self, base_span: Span) -> TypeError {
-        let span = match self.span {
-            Some(span) => span.start + base_span.start .. span.end + base_span.start,
-            None => base_span,
-        };
-        TypeError::new(span, self.kind)
-    }
-}
-
-impl fmt::Display for TempTypeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "malformed {}", self.kind)?;
-
-        if let Some(span) = &self.span {
-            write!(f, ": {}-{}", span.start, span.end)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Debug, Display, Copy, Clone, PartialEq)]
-#[strum(serialize_all = "snake_case")]
-pub enum FieldType {
-    Date,
+pub enum DefectAtom {
+    Date(Option<String>),
     Gender,
     Integer,
     IntegerRange,
@@ -85,17 +53,32 @@ pub enum FieldType {
     EditorType,
 }
 
+impl fmt::Display for DefectAtom {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Date(None) => write!(f, "date"),
+            Self::Date(Some(s)) => write!(f, "date ({})", s),
+            Self::Gender => write!(f, "gender"),
+            Self::Integer => write!(f, "integer"),
+            Self::IntegerRange => write!(f, "integer range"),
+            Self::Pagination => write!(f, "pagination"),
+            Self::EditorType => write!(f, "editor type"),
+        }
+    }
+}
+
 /// Convert Bib(La)TeX data types from and to chunk slices.
 pub trait Type: Sized {
     /// Parse the type from chunks.
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType>;
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError>;
 
     /// Serialize the type into chunks.
     fn to_chunks(&self, start: usize) -> Chunks;
 }
 
 impl Type for i64 {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+        let span = chunks.span();
         let s = chunks.format_verbatim();
         let s = s.trim();
 
@@ -104,7 +87,7 @@ impl Type for i64 {
         } else if let Some(roman) = Roman::parse(s) {
             Ok(roman.value() as i64)
         } else {
-            Err(FieldType::Integer)
+            Err(TypeError::new(span, DefectAtom::Integer))
         }
     }
 
@@ -116,7 +99,7 @@ impl Type for i64 {
 }
 
 impl Type for String {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Ok(chunks.format_verbatim())
     }
 
@@ -129,13 +112,13 @@ impl Type for String {
 }
 
 impl Type for Range<u32> {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+        let span = chunks.span();
         chunks
-            .parse::<Vec<Range<u32>>>()
-            .map_err(|e| e.kind)?
+            .parse::<Vec<Range<u32>>>()?
             .into_iter()
             .next()
-            .ok_or(FieldType::IntegerRange)
+            .ok_or(TypeError::new(span, DefectAtom::IntegerRange))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -147,7 +130,7 @@ impl Type for Range<u32> {
 
 impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Ok(split_token_lists(chunks, " and "))
     }
 
@@ -178,7 +161,7 @@ impl Type for Vec<Chunks> {
 
 impl Type for Vec<String> {
     /// Splits the chunks at commas.
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Ok(split_token_lists(chunks, ",")
             .into_iter()
             .map(|chunks| chunks.format_verbatim())
@@ -204,17 +187,19 @@ impl Type for Vec<String> {
 
 impl Type for Vec<Range<u32>> {
     /// Splits the ranges at commas.
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         let range_vecs = split_token_lists(chunks, ",");
         let mut res = vec![];
 
-        let number = |s: &mut Scanner| -> Result<u32, FieldType> {
+        let number = |s: &mut Scanner| -> Result<u32, TypeError> {
             s.skip_ws();
+            let idx = s.index();
             let num = s.eat_while(|c| c.is_digit(10));
-            u32::from_str(num).map_err(|_| FieldType::IntegerRange)
+            u32::from_str(num)
+                .map_err(|_| TypeError::new(idx .. s.index(), DefectAtom::Integer))
         };
 
-        let component = |s: &mut Scanner| -> Result<u32, FieldType> {
+        let component = |s: &mut Scanner| -> Result<u32, TypeError> {
             loop {
                 let num = number(s)?;
                 s.skip_ws();
@@ -268,7 +253,7 @@ pub enum Edition {
 }
 
 impl Type for Edition {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Ok(if let Ok(int) = chunks.parse() {
             Edition::Int(int)
         } else {
@@ -301,9 +286,10 @@ pub enum Pagination {
 }
 
 impl Type for Pagination {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+        let span = chunks.span();
         Pagination::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| FieldType::Pagination)
+            .map_err(|_| TypeError::new(span, DefectAtom::Pagination))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -330,9 +316,10 @@ pub enum EditorType {
 }
 
 impl Type for EditorType {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+        let span = chunks.span();
         EditorType::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| FieldType::EditorType)
+            .map_err(|_| TypeError::new(span, DefectAtom::EditorType))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -407,8 +394,9 @@ impl Gender {
 }
 
 impl Type for Gender {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         // Two-letter gender serialization in accordance with the BibLaTeX standard.
+        let span = chunks.span();
         match chunks.format_verbatim().to_lowercase().as_ref() {
             "sf" => Ok(Gender::SingularFemale),
             "sm" => Ok(Gender::SingularMale),
@@ -416,7 +404,7 @@ impl Type for Gender {
             "pf" => Ok(Gender::PluralFemale),
             "pm" => Ok(Gender::PluralMale),
             "pn" => Ok(Gender::PluralNeuter),
-            _ => Err(FieldType::Gender),
+            _ => Err(TypeError::new(span, DefectAtom::Gender)),
         }
     }
 

@@ -27,7 +27,7 @@ pub fn parse_field(
                 )?);
             }
             RawChunk::Normal(s) => {
-                chunks.extend(ContentParser::new(key, s).parse()?);
+                chunks.extend(ContentParser::new(key, s, e.span.start).parse()?);
             }
         }
     }
@@ -43,20 +43,40 @@ struct ContentParser<'s> {
     current_chunk: Chunk,
     result: Chunks,
     start: usize,
+    offset: usize,
 }
 
 impl<'s> ContentParser<'s> {
-    fn new(key: &'s str, field: &'s str) -> Self {
+    fn new(key: &'s str, field: &'s str, offset: usize) -> Self {
         Self {
             s: Scanner::new(field),
             verb_field: is_verbatim_field(key),
             current_chunk: Self::default_chunk(0),
             result: vec![],
             start: 0,
+            offset,
         }
     }
 
-    fn parse(mut self) -> Result<Chunks, ParseError> {
+    fn parse(self) -> Result<Chunks, ParseError> {
+        let offset = self.offset;
+        self.parse_impl()
+            .map_err(|mut e| {
+                e.span.start += offset;
+                e.span.end += offset;
+                e
+            })
+            .map(|mut chunks| {
+                for chunk in &mut chunks {
+                    chunk.span.start += offset;
+                    chunk.span.end += offset;
+                }
+
+                chunks
+            })
+    }
+
+    fn parse_impl(mut self) -> Result<Chunks, ParseError> {
         let mut depth = 0;
 
         self.current_chunk = Self::default_chunk(depth);
@@ -75,8 +95,8 @@ impl<'s> ContentParser<'s> {
                 '{' => {
                     depth += 1;
                     self.turnaround(depth);
-
                     self.s.eat();
+                    self.start += 1;
                 }
                 '}' => {
                     if depth == 0 {
@@ -90,6 +110,7 @@ impl<'s> ContentParser<'s> {
 
                     depth -= 1;
                     self.turnaround(depth);
+                    self.start += 1;
 
                     self.s.eat();
                 }
@@ -189,7 +210,7 @@ impl<'s> ContentParser<'s> {
             let brace = '}'.len_utf8();
             let arg = self.s.eaten_from(idx);
 
-            let arg = ContentParser::new("", &arg[.. arg.len() - brace])
+            let arg = ContentParser::new("", &arg[.. arg.len() - brace], idx)
                 .parse()?
                 .format_verbatim();
 
@@ -215,6 +236,7 @@ impl<'s> ContentParser<'s> {
         }
 
         self.s.eat();
+        self.start = self.s.index();
         Ok(Spanned::new(Chunk::Math(res.into()), span))
     }
 
@@ -235,7 +257,7 @@ fn resolve_abbreviation(
     map: &HashMap<&str, Field<'_>>,
 ) -> Result<Chunks, ParseError> {
     let fields = map.get(abbr).ok_or(ParseError::new(
-        0 .. 0,
+        span.clone(),
         ParseErrorKind::UnknownAbbreviation(abbr.into()),
     ));
 

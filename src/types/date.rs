@@ -5,7 +5,7 @@ use chrono::{Datelike, NaiveDate, NaiveTime};
 
 use crate::chunk::*;
 use crate::scanner::Scanner;
-use crate::{FieldType, Spanned, Type, TypeError};
+use crate::{DefectAtom, Spanned, Type, TypeError};
 
 /// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -52,7 +52,8 @@ pub struct Datetime {
 
 impl Date {
     /// Parse a date from chunks.
-    pub fn parse(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    pub fn parse(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+        let span = chunks.span();
         let date = chunks.format_verbatim().to_uppercase();
         let mut date_trimmed = date.trim_end();
 
@@ -69,7 +70,10 @@ impl Date {
         }
 
         let value = if date_trimmed.contains('X') {
-            let (d1, d2) = Self::range_dates(date_trimmed).map_err(|e| e.kind)?;
+            let (d1, d2) = Self::range_dates(date_trimmed).map_err(|mut e| {
+                e.offset(span.start);
+                e
+            })?;
             DateValue::Between(d1, d2)
         } else {
             if let Some(pos) = date_trimmed.find('/') {
@@ -81,15 +85,42 @@ impl Date {
                 }
 
                 match (is_open_range(&s1), is_open_range(&s2)) {
-                    (false, false) => {
-                        DateValue::Between(Datetime::parse(s1)?, Datetime::parse(s2)?)
+                    (false, false) => DateValue::Between(
+                        Datetime::parse(s1).map_err(|mut e| {
+                            e.offset(span.start);
+                            e
+                        })?,
+                        Datetime::parse(s2).map_err(|mut e| {
+                            e.offset(span.start + pos + 1);
+                            e
+                        })?,
+                    ),
+                    (false, true) => {
+                        DateValue::After(Datetime::parse(s1).map_err(|mut e| {
+                            e.offset(span.start);
+                            e
+                        })?)
                     }
-                    (false, true) => DateValue::After(Datetime::parse(s1)?),
-                    (true, false) => DateValue::Before(Datetime::parse(s2)?),
-                    (true, true) => return Err(FieldType::Date),
+                    (true, false) => {
+                        DateValue::Before(Datetime::parse(s2).map_err(|mut e| {
+                            e.offset(span.start + pos + 1);
+                            e
+                        })?)
+                    }
+                    (true, true) => {
+                        return Err(TypeError::new(
+                            span,
+                            DefectAtom::Date(Some(
+                                "range must not be open on both sides".to_string(),
+                            )),
+                        ));
+                    }
                 }
             } else {
-                DateValue::At(Datetime::parse(date_trimmed)?)
+                DateValue::At(Datetime::parse(date_trimmed).map_err(|mut e| {
+                    e.offset(span.start);
+                    e
+                })?)
             }
         };
 
@@ -106,8 +137,11 @@ impl Date {
         month: Option<&[Spanned<Chunk>]>,
         day: Option<&[Spanned<Chunk>]>,
     ) -> Result<Self, TypeError> {
-        let year = get_year(&mut Scanner::new(&year.format_verbatim()))
-            .map_err(|k| TypeError::new(0 .. 0, k))?;
+        let year =
+            get_year(&mut Scanner::new(&year.format_verbatim())).map_err(|mut e| {
+                e.offset(year.span().start);
+                e
+            })?;
         let mut date_atom = Datetime { year, month: None, day: None, time: None };
 
         if let Some(month) = month {
@@ -120,14 +154,20 @@ impl Date {
                 .or_else(|| get_month_for_abbr(month).map(|x| x.1));
 
             if let Some(day) = day {
+                let span = day.span();
                 let day = day.format_verbatim();
 
                 let day: u8 = day
                     .trim()
                     .parse()
-                    .map_err(|_| TypeError::new(0 .. 0, FieldType::Date))?;
+                    .map_err(|_| TypeError::new(span.clone(), DefectAtom::Integer))?;
                 if day > 31 || day < 1 {
-                    return Err(TypeError::new(0 .. 0, FieldType::Date));
+                    return Err(TypeError::new(
+                        span,
+                        DefectAtom::Date(Some(
+                            "day must be between 1 and 31".to_string(),
+                        )),
+                    ));
                 }
 
                 date_atom.day = Some(day - 1);
@@ -140,15 +180,25 @@ impl Date {
                     return Ok(Date::from_datetime(date_atom));
                 };
 
+                let day_start = s.index();
                 let day = s.eat_while(|c| c.is_ascii_digit());
+                let day_span = day_start .. s.index();
                 if day.len() == 0 {
-                    return Err(TypeError::new(0 .. 0, FieldType::Date));
+                    return Err(TypeError::new(
+                        day_span,
+                        DefectAtom::Date(Some("invalid day".to_string())),
+                    ));
                 }
 
                 let day: u8 = day.parse().unwrap();
 
                 if day < 1 || day > 31 {
-                    return Err(TypeError::new(0 .. 0, FieldType::Date));
+                    return Err(TypeError::new(
+                        day_span,
+                        DefectAtom::Date(Some(
+                            "day must be between 1 and 31".to_string(),
+                        )),
+                    ));
                 }
 
                 date_atom.day = Some(day - 1);
@@ -175,7 +225,7 @@ impl Date {
         let mut variable = 10_i32.pow(4 - sure_digits as u32);
 
         if sure_digits < 2 || s.eat_while(|c| c == 'X').len() + sure_digits != 4 {
-            return Err(TypeError::new(0 .. s.index(), FieldType::Date));
+            return Err(TypeError::new(0 .. s.index(), DefectAtom::Date(None)));
         }
 
         let year = year_part.parse::<i32>().unwrap() * variable;
@@ -203,7 +253,7 @@ impl Date {
                 if !s.eof() {
                     get_hyphen(&mut s)?;
                     if s.eat_while(|c| c == 'X').len() != 2 {
-                        return Err(TypeError::new(s.here(), FieldType::Date));
+                        return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
                     }
                 }
 
@@ -223,13 +273,13 @@ impl Date {
                 ));
             }
             _ => {
-                return Err(TypeError::new(idx .. s.index(), FieldType::Date));
+                return Err(TypeError::new(idx .. s.index(), DefectAtom::Date(None)));
             }
         }
 
         let month = s.eat_while(|c| c.is_ascii_digit());
         if month.len() != 2 {
-            return Err(TypeError::new(idx .. s.index(), FieldType::Date));
+            return Err(TypeError::new(idx .. s.index(), DefectAtom::Date(None)));
         }
         let month: Option<u8> = month.parse().ok();
 
@@ -238,7 +288,7 @@ impl Date {
         if s.eat_while(|c| c == 'X').len() == 2 {
             s.skip_ws();
             if !s.eof() {
-                return Err(TypeError::new(s.here(), FieldType::Date));
+                return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
             }
 
             return Ok((
@@ -247,7 +297,7 @@ impl Date {
             ));
         }
 
-        Err(TypeError::new(s.here(), FieldType::Date))
+        Err(TypeError::new(s.here(), DefectAtom::Date(None)))
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -255,14 +305,17 @@ impl Date {
     }
 }
 
-fn get_year(s: &mut Scanner) -> Result<i32, FieldType> {
+fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
     s.skip_ws();
     let year_idx = s.index();
     s.eat_if('-');
     s.skip_ws();
 
     if s.eat_while(|c| c.is_ascii_digit()).len() != 4 {
-        return Err(FieldType::Date);
+        return Err(TypeError::new(
+            year_idx .. s.index(),
+            DefectAtom::Date(Some("invalid year".to_string())),
+        ));
     }
 
     Ok(i32::from_str_radix(s.eaten_from(year_idx), 10).unwrap())
@@ -271,14 +324,14 @@ fn get_year(s: &mut Scanner) -> Result<i32, FieldType> {
 fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
     s.skip_ws();
     if s.eat_while(|c| c == '-').is_empty() {
-        return Err(TypeError::new(s.here(), FieldType::Date));
+        return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
     }
     s.skip_ws();
     Ok(())
 }
 
 impl Type for Date {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Date::parse(chunks)
     }
 
@@ -323,7 +376,7 @@ impl DateValue {
 
 impl Datetime {
     /// Parse a datetime from a string.
-    fn parse(mut src: &str) -> Result<Self, FieldType> {
+    fn parse(mut src: &str) -> Result<Self, TypeError> {
         let time = if let Some(pos) = src.find('T') {
             if pos + 1 < src.len() {
                 let time_str = &src[pos + 1 ..];
@@ -354,9 +407,13 @@ impl Datetime {
 
             let month = if s.eat_while(|c| c == '-').len() > 0 {
                 s.skip_ws();
+                let month_start = s.index();
                 let month = s.eat_while(|c| c.is_ascii_digit());
                 if month.len() != 2 {
-                    return Err(FieldType::Date);
+                    return Err(TypeError::new(
+                        month_start .. s.index(),
+                        DefectAtom::Date(Some("invalid month".to_string())),
+                    ));
                 }
 
                 Some(u8::from_str_radix(&month, 10).unwrap() - 1)

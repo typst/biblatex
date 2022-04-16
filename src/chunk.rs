@@ -1,6 +1,6 @@
 use crate::resolve::is_escapable;
 use crate::types::Type;
-use crate::{Spanned, TypeError};
+use crate::{Span, Spanned, TypeError};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -72,18 +72,22 @@ pub trait ChunksExt {
     /// Format the chunks verbatim.
     fn format_verbatim(&self) -> String;
 
+    /// Output a span for all chunks in the collection.
+    fn span(&self) -> Span;
+
     /// Serialize the chunks into a BibLaTeX string.
     fn to_biblatex_string(&self, verbatim_mode: bool) -> String;
 }
 
 impl ChunksExt for [Spanned<Chunk>] {
     fn parse<T: Type>(&self) -> Result<T, TypeError> {
-        T::from_chunks(self).map_err(|k| TypeError::new(0 .. 0, k))
+        T::from_chunks(self)
     }
 
     fn format_sentence(&self) -> String {
         let mut out = String::new();
         let mut first = true;
+
         for val in self {
             match &val.v {
                 Chunk::Normal(s) => {
@@ -127,6 +131,12 @@ impl ChunksExt for [Spanned<Chunk>] {
         }
 
         out
+    }
+
+    fn span(&self) -> Span {
+        let start = self.first().map(|c| c.span.start).unwrap_or(0);
+        let end = self.last().map(|c| c.span.end).unwrap_or(start);
+        start .. end
     }
 
     fn to_biblatex_string(&self, verbatim_mode: bool) -> String {

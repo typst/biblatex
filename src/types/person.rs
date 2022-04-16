@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::Type;
-use crate::{chunk::*, FieldType, Spanned};
+use crate::{chunk::*, Spanned};
+use crate::{Type, TypeError};
 
 /// An author, editor, or some other person affiliated with a cited work.
 ///
@@ -219,7 +219,7 @@ impl Person {
 }
 
 impl Type for Vec<Person> {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, FieldType> {
+    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         Ok(split_token_lists(chunks, " and ")
             .into_iter()
             .map(|subchunks| Person::parse(&subchunks))
