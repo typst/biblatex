@@ -225,7 +225,12 @@ impl Date {
         let mut variable = 10_i32.pow(4 - sure_digits as u32);
 
         if sure_digits < 2 || s.eat_while(|c| c == 'X').len() + sure_digits != 4 {
-            return Err(TypeError::new(0 .. s.index(), DefectAtom::Date(None)));
+            return Err(TypeError::new(
+                0 .. s.index(),
+                DefectAtom::Date(Some(
+                    "year must have four digits, including 'X'".to_string(),
+                )),
+            ));
         }
 
         let year = year_part.parse::<i32>().unwrap() * variable;

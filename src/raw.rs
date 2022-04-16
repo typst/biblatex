@@ -42,8 +42,8 @@ pub enum RawChunk<'s> {
 
 impl<'s> RawBibliography<'s> {
     /// Parse a raw bibliography from a source string.
-    pub fn parse(src: &'s str) -> Self {
-        BiblatexParser::new(src).parse().0
+    pub fn parse(src: &'s str) -> Result<Self, ParseError> {
+        BiblatexParser::new(src).parse()
     }
 }
 
@@ -53,7 +53,7 @@ struct BiblatexParser<'s> {
     res: RawBibliography<'s>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub span: std::ops::Range<usize>,
     pub kind: ParseErrorKind,
@@ -141,17 +141,11 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Parses the file, consuming the parser in the process.
-    pub fn parse(mut self) -> (RawBibliography<'s>, Vec<ParseError>) {
-        let mut errors = vec![];
-
+    pub fn parse(mut self) -> Result<RawBibliography<'s>, ParseError> {
         while !self.s.eof() {
             self.s.skip_trivia();
             match self.s.peek() {
-                Some('@') => {
-                    if let Err(e) = self.entry() {
-                        errors.push(e);
-                    }
-                }
+                Some('@') => self.entry()?,
                 Some(_) => {
                     self.s.eat();
                 }
@@ -159,7 +153,7 @@ impl<'s> BiblatexParser<'s> {
             }
         }
 
-        (self.res, errors)
+        Ok(self.res)
     }
 
     /// Eat a comma.
@@ -526,7 +520,7 @@ mod tests {
     #[track_caller]
     fn test_prop(key: &str, value: &str) -> String {
         let test = format!("@article{{test, {}={}}}", key, value);
-        let bt = RawBibliography::parse(&test);
+        let bt = RawBibliography::parse(&test).unwrap();
         let article = &bt.entries[0];
         format(article.v.fields.get(key).expect("fail"))
     }
@@ -538,7 +532,7 @@ mod tests {
             year=2002,
             author={Haug, {Martin} and Haug, Gregor}}";
 
-        let bt = RawBibliography::parse(file);
+        let bt = RawBibliography::parse(file).unwrap();
         let article = &bt.entries[0];
 
         assert_eq!(article.v.kind, "article");
@@ -549,7 +543,7 @@ mod tests {
 
     #[test]
     fn test_resolve_string() {
-        let bt = RawBibliography::parse("@string{BT = \"bibtex\"}");
+        let bt = RawBibliography::parse("@string{BT = \"bibtex\"}").unwrap();
         assert_eq!(bt.abbreviations.get("BT"), Some(&vec![Spanned::new(RawChunk::Normal("bibtex"), 14..20)]));
     }
 

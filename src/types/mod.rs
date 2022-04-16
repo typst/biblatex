@@ -191,17 +191,18 @@ impl Type for Vec<Range<u32>> {
         let range_vecs = split_token_lists(chunks, ",");
         let mut res = vec![];
 
-        let number = |s: &mut Scanner| -> Result<u32, TypeError> {
+        let number = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
             s.skip_ws();
             let idx = s.index();
             let num = s.eat_while(|c| c.is_digit(10));
-            u32::from_str(num)
-                .map_err(|_| TypeError::new(idx .. s.index(), DefectAtom::Integer))
+            u32::from_str(num).map_err(|_| {
+                TypeError::new(idx + offset .. s.index() + offset, DefectAtom::Integer)
+            })
         };
 
-        let component = |s: &mut Scanner| -> Result<u32, TypeError> {
+        let component = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
             loop {
-                let num = number(s)?;
+                let num = number(s, offset)?;
                 s.skip_ws();
                 if !s.eat_if(':') {
                     return Ok(num);
@@ -209,9 +210,11 @@ impl Type for Vec<Range<u32>> {
             }
         };
 
-        for range_candidate in range_vecs.iter().map(|f| f.format_verbatim()) {
+        for (range_candidate, span) in
+            range_vecs.iter().map(|f| (f.format_verbatim(), f.span()))
+        {
             let mut s = Scanner::new(&range_candidate);
-            let start = component(&mut s)?;
+            let start = component(&mut s, span.start)?;
             s.skip_ws();
             if !s.eat_if('-') {
                 res.push(start .. start);
@@ -219,7 +222,7 @@ impl Type for Vec<Range<u32>> {
             }
             s.eat_while(|c| c == '-');
             s.skip_ws();
-            let end = component(&mut s)?;
+            let end = component(&mut s, span.start)?;
             res.push(start .. end);
         }
 

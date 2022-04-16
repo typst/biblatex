@@ -377,7 +377,7 @@ fn flatten(chunks: &mut Chunks) {
 /// Characters that can be escaped.
 pub fn is_escapable(c: char, verb: bool) -> bool {
     match c {
-        '{' | '}' | '\\' => true,
+        '{' | '}' | '\\' | ':' => true,
         '&' | '%' | '$' | '_' if !verb => true,
         _ => false,
     }

@@ -107,7 +107,7 @@ impl Bibliography {
 
     /// Parse a bibliography from a source string.
     pub fn parse(src: &str) -> Result<Self, ParseError> {
-        Self::from_raw(RawBibliography::parse(src))
+        Self::from_raw(RawBibliography::parse(src)?)
     }
 
     /// Construct a bibliography from a raw bibliography.
@@ -875,6 +875,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::raw::Token;
 
     #[test]
     fn test_correct_bib() {
@@ -895,27 +896,81 @@ mod tests {
         };
     }
 
-    // #[test]
-    // fn test_parse_incorrect_result() {
-    //     let contents = fs::read_to_string("tests/incorrect.bib").unwrap();
+    #[test]
+    fn test_parse_incorrect_result() {
+        let contents = fs::read_to_string("tests/incorrect_syntax.bib").unwrap();
 
-    //     let bibliography = Bibliography::parse(&contents);
-    //     match bibliography {
-    //         Ok(r) => {
-    //             dbg!(r);
-    //             panic!("Should return Err")
-    //         }
-    //         Err(s) => {
-    //             assert_eq!(
-    //                 s,
-    //                 BibliographyError::MalformedField(
-    //                     "conigliocorbalan".into(),
-    //                     "author".into()
-    //                 )
-    //             );
-    //         }
-    //     };
-    // }
+        let bibliography = Bibliography::parse(&contents);
+        match bibliography {
+            Ok(_) => {
+                panic!("Should return Err")
+            }
+            Err(s) => {
+                assert_eq!(
+                    s,
+                    ParseError::new(380 .. 380, ParseErrorKind::Expected(Token::Equals))
+                );
+            }
+        };
+    }
+
+    #[test]
+    fn test_parse_incorrect_types() {
+        let contents = fs::read_to_string("tests/incorrect_data.bib").unwrap();
+
+        let bibliography = Bibliography::parse(&contents).unwrap();
+        let rashid = bibliography.get("rashid2016").unwrap();
+        match rashid.pagination() {
+            Err(RetrievalError::TypeError(s)) => {
+                assert_eq!(s, TypeError::new(360 .. 367, DefectAtom::Pagination));
+            }
+            _ => {
+                panic!()
+            }
+        };
+
+        match rashid.date() {
+            Err(RetrievalError::TypeError(s)) => {
+                assert_eq!(
+                    s,
+                    TypeError::new(
+                        301 .. 306,
+                        DefectAtom::Date(Some(
+                            "year must have four digits, including 'X'".to_string()
+                        ))
+                    )
+                );
+            }
+            _ => {
+                panic!()
+            }
+        };
+
+        let coniglio = bibliography.get("conigliocorbalan").unwrap();
+        match coniglio.date() {
+            Err(RetrievalError::TypeError(s)) => {
+                assert_eq!(
+                    s,
+                    TypeError::new(
+                        799 .. 799,
+                        DefectAtom::Date(Some("invalid month".to_string()))
+                    )
+                );
+            }
+            _ => {
+                panic!()
+            }
+        };
+
+        match coniglio.pages() {
+            Err(RetrievalError::TypeError(s)) => {
+                assert_eq!(s, TypeError::new(774 .. 774, DefectAtom::Integer));
+            }
+            _ => {
+                panic!()
+            }
+        };
+    }
 
     #[test]
     fn test_gral_paper() {
@@ -1063,15 +1118,15 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_verbatim_fields() {
-    //     let contents = fs::read_to_string("tests/libra.bib").unwrap();
-    //     let bibliography = Bibliography::parse(&contents).unwrap();
-    //     let e = bibliography.get("dierksmeierJustHODLMoral2018").unwrap();
-    //     assert_eq!(e.doi().unwrap(), "10.1007/s41463-018-0036-z");
-    //     assert_eq!(
-    //         e.file().unwrap(),
-    //         "C:\\Users\\mhaug\\Zotero\\storage\\DTPR7TES\\Dierksmeier - 2018 - Just HODL On the Moral Claims of Bitcoin and Ripp.pdf"
-    //     );
-    // }
+    #[test]
+    fn test_verbatim_fields() {
+        let contents = fs::read_to_string("tests/libra.bib").unwrap();
+        let bibliography = Bibliography::parse(&contents).unwrap();
+        let e = bibliography.get("dierksmeierJustHODLMoral2018").unwrap();
+        assert_eq!(e.doi().unwrap(), "10.1007/s41463-018-0036-z");
+        assert_eq!(
+            e.file().unwrap(),
+            "C:\\Users\\mhaug\\Zotero\\storage\\DTPR7TES\\Dierksmeier - 2018 - Just HODL On the Moral Claims of Bitcoin and Ripp.pdf"
+        );
+    }
 }
