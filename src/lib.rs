@@ -27,16 +27,17 @@ mod resolve;
 mod types;
 
 pub use chunk::{Chunk, Chunks, ChunksExt};
-use macros::*;
-pub use mechanics::{is_verbatim_field, EntryType};
-pub use raw::{ParseError, ParseErrorKind, RawBibliography, RawEntry, Token};
+pub use mechanics::EntryType;
+pub use raw::{ParseError, ParseErrorKind, Token};
 pub use types::*;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
-use mechanics::{AuthorMode, PagesChapterMode};
+use macros::*;
+use mechanics::{is_verbatim_field, AuthorMode, PagesChapterMode};
+use raw::RawBibliography;
 
 use paste::paste;
 
@@ -111,7 +112,7 @@ impl Bibliography {
 
     /// Construct a bibliography from a raw bibliography, with the `xdata` and
     /// `crossref` links resolved.
-    pub fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
+    fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 

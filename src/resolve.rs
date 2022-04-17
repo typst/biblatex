@@ -182,7 +182,7 @@ impl<'s> ContentParser<'s> {
             let idx = self.s.cursor();
 
             loop {
-                self.s.eat_until(|c| c == '}' || c == '{');
+                self.s.eat_until(['{', '}']);
 
                 match self.s.eat() {
                     Some('{') => {
