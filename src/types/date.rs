@@ -4,8 +4,8 @@ use std::fmt::{self, Display, Formatter};
 use chrono::{Datelike, NaiveDate, NaiveTime};
 
 use crate::chunk::*;
-use crate::scanner::Scanner;
-use crate::{DefectAtom, Spanned, Type, TypeError};
+use crate::{DefectAtom, Span, Spanned, Type, TypeError};
+use unscanny::Scanner;
 
 /// A date or a range of dates and their certainty and exactness.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -147,8 +147,8 @@ impl Date {
         if let Some(month) = month {
             let month = month.format_verbatim();
             let mut s = Scanner::new(&month);
-            s.skip_ws();
-            let month = s.eat_while(|c| c.is_ascii_alphabetic());
+            s.eat_whitespace();
+            let month = s.eat_while(char::is_ascii_alphabetic);
 
             date_atom.month = get_month_for_name(month)
                 .or_else(|| get_month_for_abbr(month).map(|x| x.1));
@@ -173,16 +173,18 @@ impl Date {
                 date_atom.day = Some(day - 1);
             } else {
                 // Try to read the day from the month field.
-                if s.eat_while(|c| c.is_whitespace() || matches!(c, '-' | '\u{00a0}'))
-                    .len()
+                if s.eat_while(|c: char| {
+                    c.is_whitespace() || matches!(c, '-' | '\u{00a0}')
+                })
+                .len()
                     == 0
                 {
                     return Ok(Date::from_datetime(date_atom));
                 };
 
-                let day_start = s.index();
-                let day = s.eat_while(|c| c.is_ascii_digit());
-                let day_span = day_start .. s.index();
+                let day_start = s.cursor();
+                let day = s.eat_while(char::is_ascii_digit);
+                let day_span = day_start .. s.cursor();
                 if day.len() == 0 {
                     return Err(TypeError::new(
                         day_span,
@@ -218,15 +220,15 @@ impl Date {
 
     fn range_dates(source: &str) -> Result<(Datetime, Datetime), TypeError> {
         let mut s = Scanner::new(source);
-        s.skip_ws();
+        s.eat_whitespace();
 
-        let year_part = s.eat_while(|c| c.is_ascii_digit());
+        let year_part = s.eat_while(char::is_ascii_digit);
         let sure_digits = year_part.len();
         let mut variable = 10_i32.pow(4 - sure_digits as u32);
 
-        if sure_digits < 2 || s.eat_while(|c| c == 'X').len() + sure_digits != 4 {
+        if sure_digits < 2 || s.eat_while('X').len() + sure_digits != 4 {
             return Err(TypeError::new(
-                0 .. s.index(),
+                0 .. s.cursor(),
                 DefectAtom::Date(Some(
                     "year must have four digits, including 'X'".to_string(),
                 )),
@@ -250,15 +252,15 @@ impl Date {
 
         get_hyphen(&mut s)?;
 
-        let idx = s.index();
-        match s.eat_while(|c| c == 'X').len() {
+        let idx = s.cursor();
+        match s.eat_while('X').len() {
             0 => {}
             2 => {
-                s.skip_ws();
-                if !s.eof() {
+                s.eat_whitespace();
+                if !s.done() {
                     get_hyphen(&mut s)?;
-                    if s.eat_while(|c| c == 'X').len() != 2 {
-                        return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
+                    if s.eat_while('X').len() != 2 {
+                        return Err(TypeError::new(here(&s), DefectAtom::Date(None)));
                     }
                 }
 
@@ -278,22 +280,22 @@ impl Date {
                 ));
             }
             _ => {
-                return Err(TypeError::new(idx .. s.index(), DefectAtom::Date(None)));
+                return Err(TypeError::new(idx .. s.cursor(), DefectAtom::Date(None)));
             }
         }
 
-        let month = s.eat_while(|c| c.is_ascii_digit());
+        let month = s.eat_while(char::is_ascii_digit);
         if month.len() != 2 {
-            return Err(TypeError::new(idx .. s.index(), DefectAtom::Date(None)));
+            return Err(TypeError::new(idx .. s.cursor(), DefectAtom::Date(None)));
         }
         let month: Option<u8> = month.parse().ok();
 
         get_hyphen(&mut s)?;
 
-        if s.eat_while(|c| c == 'X').len() == 2 {
-            s.skip_ws();
-            if !s.eof() {
-                return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
+        if s.eat_while('X').len() == 2 {
+            s.eat_whitespace();
+            if !s.done() {
+                return Err(TypeError::new(here(&s), DefectAtom::Date(None)));
             }
 
             return Ok((
@@ -302,7 +304,7 @@ impl Date {
             ));
         }
 
-        Err(TypeError::new(s.here(), DefectAtom::Date(None)))
+        Err(TypeError::new(here(&s), DefectAtom::Date(None)))
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -311,28 +313,32 @@ impl Date {
 }
 
 fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
-    s.skip_ws();
-    let year_idx = s.index();
+    s.eat_whitespace();
+    let year_idx = s.cursor();
     s.eat_if('-');
-    s.skip_ws();
+    s.eat_whitespace();
 
-    if s.eat_while(|c| c.is_ascii_digit()).len() != 4 {
+    if s.eat_while(char::is_ascii_digit).len() != 4 {
         return Err(TypeError::new(
-            year_idx .. s.index(),
+            year_idx .. s.cursor(),
             DefectAtom::Date(Some("invalid year".to_string())),
         ));
     }
 
-    Ok(i32::from_str_radix(s.eaten_from(year_idx), 10).unwrap())
+    Ok(i32::from_str_radix(s.from(year_idx), 10).unwrap())
 }
 
 fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
-    s.skip_ws();
-    if s.eat_while(|c| c == '-').is_empty() {
-        return Err(TypeError::new(s.here(), DefectAtom::Date(None)));
+    s.eat_whitespace();
+    if s.eat_while('-').is_empty() {
+        return Err(TypeError::new(here(s), DefectAtom::Date(None)));
     }
-    s.skip_ws();
+    s.eat_whitespace();
     Ok(())
+}
+
+fn here(s: &Scanner) -> Span {
+    s.cursor() .. s.cursor()
 }
 
 impl Type for Date {
@@ -406,17 +412,17 @@ impl Datetime {
         } else {
             // This might be an incomplete date, missing day and possibly month.
             let mut s = Scanner::new(&src);
-            s.skip_ws();
+            s.eat_whitespace();
             let year = get_year(&mut s)?;
-            s.skip_ws();
+            s.eat_whitespace();
 
-            let month = if s.eat_while(|c| c == '-').len() > 0 {
-                s.skip_ws();
-                let month_start = s.index();
-                let month = s.eat_while(|c| c.is_ascii_digit());
+            let month = if s.eat_while('-').len() > 0 {
+                s.eat_whitespace();
+                let month_start = s.cursor();
+                let month = s.eat_while(char::is_ascii_digit);
                 if month.len() != 2 {
                     return Err(TypeError::new(
-                        month_start .. s.index(),
+                        month_start .. s.cursor(),
                         DefectAtom::Date(Some("invalid month".to_string())),
                     ));
                 }

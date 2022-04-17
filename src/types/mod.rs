@@ -13,8 +13,8 @@ use std::str::FromStr;
 use numerals::roman::Roman;
 use strum::{AsRefStr, Display, EnumString};
 
-use crate::scanner::Scanner;
 use crate::{chunk::*, Span, Spanned};
+use unscanny::Scanner;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeError {
@@ -192,18 +192,18 @@ impl Type for Vec<Range<u32>> {
         let mut res = vec![];
 
         let number = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
-            s.skip_ws();
-            let idx = s.index();
-            let num = s.eat_while(|c| c.is_digit(10));
+            s.eat_whitespace();
+            let idx = s.cursor();
+            let num = s.eat_while(|c: char| c.is_digit(10));
             u32::from_str(num).map_err(|_| {
-                TypeError::new(idx + offset .. s.index() + offset, DefectAtom::Integer)
+                TypeError::new(idx + offset .. s.cursor() + offset, DefectAtom::Integer)
             })
         };
 
         let component = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
             loop {
                 let num = number(s, offset)?;
-                s.skip_ws();
+                s.eat_whitespace();
                 if !s.eat_if(':') {
                     return Ok(num);
                 }
@@ -215,13 +215,13 @@ impl Type for Vec<Range<u32>> {
         {
             let mut s = Scanner::new(&range_candidate);
             let start = component(&mut s, span.start)?;
-            s.skip_ws();
+            s.eat_whitespace();
             if !s.eat_if('-') {
                 res.push(start .. start);
                 continue;
             }
-            s.eat_while(|c| c == '-');
-            s.skip_ws();
+            s.eat_while('-');
+            s.eat_whitespace();
             let end = component(&mut s, span.start)?;
             res.push(start .. end);
         }

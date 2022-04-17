@@ -24,7 +24,6 @@ mod macros;
 mod mechanics;
 mod raw;
 mod resolve;
-mod scanner;
 mod types;
 
 pub use chunk::{Chunk, Chunks, ChunksExt};

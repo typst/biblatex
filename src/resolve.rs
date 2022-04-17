@@ -4,10 +4,10 @@ use unicode_normalization::char;
 
 use crate::chunk::{Chunk, Chunks};
 use crate::mechanics::is_verbatim_field;
-use crate::raw::{Field, ParseError, ParseErrorKind, RawChunk, Token};
-use crate::scanner::{is_id_continue, is_newline, Scanner};
+use crate::raw::{is_id_continue, Field, ParseError, ParseErrorKind, RawChunk, Token};
 use crate::types::get_month_for_abbr;
 use crate::{ChunksExt, Span, Spanned};
+use unscanny::Scanner;
 
 /// Fully parse a field, resolving abbreviations and LaTeX commands.
 pub fn parse_field(
@@ -100,10 +100,10 @@ impl<'s> ContentParser<'s> {
                 }
                 '}' => {
                     if depth == 0 {
-                        let idx = self.s.index();
+                        let idx = self.s.cursor();
                         self.s.eat();
                         return Err(ParseError::new(
-                            idx .. self.s.index(),
+                            idx .. self.s.cursor(),
                             ParseErrorKind::Unexpected(Token::ClosingBrace),
                         ));
                     }
@@ -128,16 +128,16 @@ impl<'s> ContentParser<'s> {
     fn turnaround(&mut self, depth: usize) {
         self.result.push(Spanned::new(
             std::mem::replace(&mut self.current_chunk, Self::default_chunk(depth)),
-            self.start .. self.s.index(),
+            self.start .. self.s.cursor(),
         ));
-        self.start = self.s.index();
+        self.start = self.s.cursor();
     }
 
     fn backslash(&mut self) -> Result<String, ParseError> {
-        self.s.eat_assert('\\');
+        self.eat_assert('\\');
         match self.s.peek() {
             Some(c) if is_escapable(c, self.verb_field) => {
-                self.s.eat_assert(c);
+                self.s.eat();
                 Ok(c.to_string())
             }
             _ if self.verb_field => {
@@ -145,44 +145,41 @@ impl<'s> ContentParser<'s> {
             }
             Some(c) if !c.is_whitespace() && !c.is_control() => self.command(),
             Some(c) => Ok(format!("\\{}", c)),
-            None => Err(ParseError::new(
-                self.s.here(),
-                ParseErrorKind::UnexpectedEof,
-            )),
+            None => Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof)),
         }
     }
 
     fn command(&mut self) -> Result<String, ParseError> {
-        let pos = self.s.index();
+        let pos = self.s.cursor();
         let valid_start = self
             .s
             .peek()
-            .map(|c| !c.is_whitespace() && !c.is_control() && !is_newline(c))
+            .map(|c| !c.is_whitespace() && !c.is_control())
             .unwrap_or_default();
         if !valid_start {
             return Err(ParseError::new(
-                pos .. self.s.index(),
+                pos .. self.s.cursor(),
                 ParseErrorKind::MalformedCommand,
             ));
         }
 
         if !is_single_char_func(self.s.eat().unwrap()) {
-            self.s.eat_while(|c| is_id_continue(c));
+            self.s.eat_while(is_id_continue);
         }
 
-        let command = self.s.eaten_from(pos);
-        let ws = !self.s.eat_while(|c| c.is_whitespace()).is_empty();
+        let command = self.s.from(pos);
+        let ws = !self.s.eat_whitespace().is_empty();
 
         let arg = if self.s.peek() != Some('{')
             && command.chars().count() == 1
             && is_single_char_func(command.chars().next().unwrap())
         {
-            let idx = self.s.index();
+            let idx = self.s.cursor();
             self.s.eat();
-            Some(self.s.eaten_from(idx).into())
+            Some(self.s.from(idx).into())
         } else if !ws && self.s.eat_if('{') {
             let mut depth = 1;
-            let idx = self.s.index();
+            let idx = self.s.cursor();
 
             loop {
                 self.s.eat_until(|c| c == '}' || c == '{');
@@ -200,7 +197,7 @@ impl<'s> ContentParser<'s> {
                     Some(_) => unreachable!(),
                     None => {
                         return Err(ParseError::new(
-                            self.s.here(),
+                            self.here(),
                             ParseErrorKind::UnexpectedEof,
                         ));
                     }
@@ -208,7 +205,7 @@ impl<'s> ContentParser<'s> {
             }
 
             let brace = '}'.len_utf8();
-            let arg = self.s.eaten_from(idx);
+            let arg = self.s.from(idx);
 
             let arg = ContentParser::new("", &arg[.. arg.len() - brace], idx)
                 .parse()?
@@ -223,21 +220,29 @@ impl<'s> ContentParser<'s> {
     }
 
     fn math(&mut self) -> Result<Spanned<Chunk>, ParseError> {
-        self.s.eat_assert('$');
-        let idx = self.s.index();
+        self.eat_assert('$');
+        let idx = self.s.cursor();
         let res = self.s.eat_until(|c| c == '$');
-        let span = idx .. self.s.index();
+        let span = idx .. self.s.cursor();
 
-        if self.s.eof() {
-            return Err(ParseError::new(
-                self.s.here(),
-                ParseErrorKind::UnexpectedEof,
-            ));
+        if self.s.done() {
+            return Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof));
         }
 
         self.s.eat();
-        self.start = self.s.index();
+        self.start = self.s.cursor();
         Ok(Spanned::new(Chunk::Math(res.into()), span))
+    }
+
+    #[track_caller]
+    fn eat_assert(&mut self, c: char) {
+        if self.s.eat() != Some(c) {
+            panic!("assertion failed: expected '{}'", c);
+        }
+    }
+
+    fn here(&self) -> Span {
+        self.s.cursor() .. self.s.cursor()
     }
 
     fn default_chunk(depth: usize) -> Chunk {

@@ -3,8 +3,9 @@
 use std::fmt;
 use std::{collections::HashMap, vec};
 
-use crate::scanner::{is_id_continue, is_id_start, Scanner};
-use crate::{Spanned, TypeError};
+use crate::{Span, Spanned, TypeError};
+
+use unscanny::Scanner;
 
 pub type Field<'s> = Vec<Spanned<RawChunk<'s>>>;
 
@@ -142,8 +143,8 @@ impl<'s> BiblatexParser<'s> {
 
     /// Parses the file, consuming the parser in the process.
     pub fn parse(mut self) -> Result<RawBibliography<'s>, ParseError> {
-        while !self.s.eof() {
-            self.s.skip_trivia();
+        while !self.s.done() {
+            self.s.eat_whitespace();
             match self.s.peek() {
                 Some('@') => self.entry()?,
                 Some(_) => {
@@ -160,7 +161,7 @@ impl<'s> BiblatexParser<'s> {
     fn comma(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if(',') {
             return Err(ParseError::new(
-                self.s.here(),
+                self.here(),
                 ParseErrorKind::Expected(Token::Comma),
             ));
         }
@@ -183,7 +184,7 @@ impl<'s> BiblatexParser<'s> {
             Ok(())
         } else {
             Err(ParseError::new(
-                self.s.here(),
+                self.here(),
                 ParseErrorKind::Expected(token),
             ))
         }
@@ -193,7 +194,7 @@ impl<'s> BiblatexParser<'s> {
     fn quote(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if('"') {
             Err(ParseError::new(
-                self.s.here(),
+                self.here(),
                 ParseErrorKind::Expected(Token::QuotationMark),
             ))
         } else {
@@ -205,7 +206,7 @@ impl<'s> BiblatexParser<'s> {
     fn equals(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if('=') {
             Err(ParseError::new(
-                self.s.here(),
+                self.here(),
                 ParseErrorKind::Expected(Token::Equals),
             ))
         } else {
@@ -216,18 +217,18 @@ impl<'s> BiblatexParser<'s> {
     /// Eat a string.
     fn string(&mut self) -> Result<Spanned<&'s str>, ParseError> {
         self.quote()?;
-        let idx = self.s.index();
+        let idx = self.s.cursor();
 
         while let Some(c) = self.s.peek() {
             match c {
                 '"' => {
-                    let res = self.s.eaten_from(idx);
-                    let span = idx .. self.s.index();
+                    let res = self.s.from(idx);
+                    let span = idx .. self.s.cursor();
                     self.quote()?;
                     return Ok(Spanned::new(res, span));
                 }
                 '\\' => {
-                    self.s.eat_assert('\\');
+                    self.s.eat();
                     self.s.eat();
                 }
                 _ => {
@@ -236,19 +237,16 @@ impl<'s> BiblatexParser<'s> {
             }
         }
 
-        Err(ParseError::new(
-            self.s.here(),
-            ParseErrorKind::UnexpectedEof,
-        ))
+        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
     }
 
     /// Eat a number.
     fn number(&mut self) -> Result<&'s str, ParseError> {
-        let idx = self.s.index();
+        let idx = self.s.cursor();
         let mut has_dot = false;
 
         while let Some(c) = self.s.peek() {
-            let start = self.s.index();
+            let start = self.s.cursor();
             match c {
                 '0' ..= '9' => {
                     self.s.eat();
@@ -259,27 +257,24 @@ impl<'s> BiblatexParser<'s> {
                         has_dot = true;
                     } else {
                         return Err(ParseError::new(
-                            start .. self.s.index(),
+                            start .. self.s.cursor(),
                             ParseErrorKind::Unexpected(Token::DecimalPoint),
                         ));
                     }
                 }
                 _ => {
-                    return Ok(self.s.eaten_from(idx));
+                    return Ok(self.s.from(idx));
                 }
             }
         }
 
-        Err(ParseError::new(
-            self.s.here(),
-            ParseErrorKind::UnexpectedEof,
-        ))
+        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
     }
 
     /// Eat a braced value.
     fn braced(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
         self.brace(true)?;
-        let idx = self.s.index();
+        let idx = self.s.cursor();
         let mut braces = 0;
 
         while let Some(c) = self.s.peek() {
@@ -289,8 +284,8 @@ impl<'s> BiblatexParser<'s> {
                     braces += 1;
                 }
                 '}' => {
-                    let res = self.s.eaten_from(idx);
-                    let span = idx .. self.s.index();
+                    let res = self.s.from(idx);
+                    let span = idx .. self.s.cursor();
                     self.brace(false)?;
                     if braces == 0 {
                         return Ok(Spanned::new(RawChunk::Normal(res), span));
@@ -298,7 +293,7 @@ impl<'s> BiblatexParser<'s> {
                     braces -= 1;
                 }
                 '\\' => {
-                    self.s.eat_assert('\\');
+                    self.s.eat();
                     self.s.eat();
                 }
                 _ => {
@@ -307,26 +302,21 @@ impl<'s> BiblatexParser<'s> {
             }
         }
 
-        Err(ParseError::new(
-            self.s.here(),
-            ParseErrorKind::UnexpectedEof,
-        ))
+        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
     }
 
     /// Eat an element of an abbreviation.
     fn abbr_element(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
-        let start = self.s.index();
+        let start = self.s.cursor();
         let res = match self.s.peek() {
             Some(c) if is_id_start(c) => self.ident().map(|s| RawChunk::Abbreviation(s)),
             Some(c) if c.is_numeric() => self.number().map(|s| RawChunk::Normal(s)),
             _ => {
-                return self
-                    .string()
-                    .map(|s| Spanned::new(RawChunk::Normal(s.v), s.span));
+                return self.single_field();
             }
         };
 
-        res.map(|v| Spanned::new(v, start .. self.s.index()))
+        res.map(|v| Spanned::new(v, start .. self.s.cursor()))
     }
 
     /// Eat an abbreviation field.
@@ -335,11 +325,11 @@ impl<'s> BiblatexParser<'s> {
 
         loop {
             elems.push(self.abbr_element()?);
-            self.s.skip_ws();
+            self.s.eat_whitespace();
             if !self.s.eat_if('#') {
                 break;
             }
-            self.s.skip_ws();
+            self.s.eat_whitespace();
         }
 
         Ok(elems)
@@ -348,32 +338,36 @@ impl<'s> BiblatexParser<'s> {
     /// Eat a field.
     fn field(&mut self) -> Result<(&'s str, Field<'s>), ParseError> {
         let key = self.ident()?;
-        self.s.skip_ws();
+        self.s.eat_whitespace();
         self.equals()?;
-        self.s.skip_ws();
+        self.s.eat_whitespace();
 
         let value = match self.s.peek() {
-            Some('{') => vec![self.braced()?],
-            Some(_) => self.abbr_field()?,
-            None => {
-                return Err(ParseError::new(
-                    self.s.here(),
-                    ParseErrorKind::UnexpectedEof,
-                ));
-            }
+            Some(c) if c != '{' && c != '"' => self.abbr_field()?,
+            _ => vec![self.single_field()?],
         };
 
-        self.s.skip_ws();
+        self.s.eat_whitespace();
 
         Ok((key, value))
+    }
+
+    fn single_field(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
+        match self.s.peek() {
+            Some('{') => self.braced(),
+            Some('"') => {
+                self.string().map(|s| Spanned::new(RawChunk::Normal(s.v), s.span))
+            }
+            _ => Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof)),
+        }
     }
 
     /// Eat fields.
     fn fields(&mut self) -> Result<HashMap<&'s str, Field<'s>>, ParseError> {
         let mut fields = HashMap::new();
 
-        while !self.s.eof() {
-            self.s.skip_ws();
+        while !self.s.done() {
+            self.s.eat_whitespace();
 
             if self.s.peek() == Some('}') {
                 return Ok(fields);
@@ -381,7 +375,7 @@ impl<'s> BiblatexParser<'s> {
 
             let (key, value) = self.field()?;
 
-            self.s.skip_trivia();
+            self.s.eat_whitespace();
 
             fields.insert(key, value);
 
@@ -392,31 +386,28 @@ impl<'s> BiblatexParser<'s> {
                 }
                 _ => {
                     return Err(ParseError::new(
-                        self.s.here(),
+                        self.here(),
                         ParseErrorKind::Expected(Token::Comma),
                     ));
                 }
             }
         }
 
-        Err(ParseError::new(
-            self.s.here(),
-            ParseErrorKind::UnexpectedEof,
-        ))
+        Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
     }
 
     /// Eat an identifier.
     fn ident(&mut self) -> Result<&'s str, ParseError> {
-        let idx = self.s.index();
-        let is_start = self.s.peek().map(|c| is_id_start(c)).unwrap_or_default();
+        let idx = self.s.cursor();
+        let is_start = self.s.peek().map(is_id_start).unwrap_or_default();
 
         if is_start {
             self.s.eat();
-            self.s.eat_while(|c| is_id_continue(c));
-            Ok(self.s.eaten_from(idx))
+            self.s.eat_while(is_id_continue);
+            Ok(self.s.from(idx))
         } else {
             Err(ParseError::new(
-                self.s.here(),
+                self.here(),
                 ParseErrorKind::Expected(Token::Identifier),
             ))
         }
@@ -424,12 +415,15 @@ impl<'s> BiblatexParser<'s> {
 
     /// Eat an entry.
     fn entry(&mut self) -> Result<(), ParseError> {
-        let start = self.s.index();
-        self.s.eat_assert('@');
+        let start = self.s.cursor();
+        if self.s.eat() != Some('@') {
+            panic!("must not call entry when not at an '@'");
+        }
+
         let entry_type = self.ident()?;
-        self.s.skip_trivia();
+        self.s.eat_whitespace();
         self.brace(true)?;
-        self.s.skip_trivia();
+        self.s.eat_whitespace();
 
         match entry_type.to_ascii_lowercase().as_str() {
             "string" => self.strings()?,
@@ -437,7 +431,7 @@ impl<'s> BiblatexParser<'s> {
             _ => self.body(entry_type, start)?,
         }
 
-        self.s.skip_trivia();
+        self.s.eat_whitespace();
         self.brace(false)?;
 
         Ok(())
@@ -452,9 +446,9 @@ impl<'s> BiblatexParser<'s> {
 
     /// Eat the body of a preamble entry.
     fn preamble(&mut self) -> Result<(), ParseError> {
-        let idx = self.s.index();
+        let idx = self.s.cursor();
         self.string()?;
-        let string = self.s.eaten_from(idx);
+        let string = self.s.from(idx);
 
         if !self.res.preamble.is_empty() {
             self.res.preamble.push_str(" # ");
@@ -468,18 +462,38 @@ impl<'s> BiblatexParser<'s> {
     /// Eat the body of a entry.
     fn body(&mut self, kind: &'s str, start: usize) -> Result<(), ParseError> {
         let key = self.ident()?;
-        self.s.skip_ws();
+        self.s.eat_whitespace();
         self.comma()?;
 
-        self.s.skip_trivia();
+        self.s.eat_whitespace();
         let fields = self.fields()?;
 
         self.res.entries.push(Spanned::new(
             RawEntry { key, kind, fields },
-            start .. self.s.index(),
+            start .. self.s.cursor(),
         ));
         Ok(())
     }
+
+    fn here(&self) -> Span {
+        self.s.cursor() .. self.s.cursor()
+    }
+}
+
+/// Whether a character can start an identifier.
+#[inline]
+pub fn is_id_start(c: char) -> bool {
+    !matches!(c, ':' | '<' | '-' | '>' | '_') && is_id_continue(c)
+}
+
+/// Whether a character can continue an identifier.
+#[inline]
+pub fn is_id_continue(c: char) -> bool {
+    !matches!(
+        c,
+        '@' | '{' | '}' | '"' | '#' | '\'' | '(' | ')' | ',' | '=' | '%' | '\\' | '~'
+    ) && !c.is_control()
+        && !c.is_whitespace()
 }
 
 #[cfg(test)]
@@ -550,5 +564,10 @@ mod tests {
     #[test]
     fn test_escape() {
         assert_eq!(test_prop("author", "{Mister A\\}\"B\"}"), "{Mister A\\}\"B\"}");
+    }
+
+    #[test]
+    fn test_abbr() {
+        assert_eq!(test_prop("author", "dec # {~12}"), "dec # \"~12\"");
     }
 }
