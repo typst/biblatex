@@ -5,7 +5,7 @@ macro_rules! fields {
             pub fn $name(&self) -> Result<fields!(@ret $($ret)?), RetrievalError> {
                 self
                     .get($field)
-                    .ok_or(RetrievalError::NotFound)
+                    .ok_or_else(|| RetrievalError::Missing($field.to_string()))
                     $(?.parse::<$ret>().map_err(Into::into))?
             }
 
@@ -13,7 +13,7 @@ macro_rules! fields {
         })*
     };
 
-    (@ret) => {&[Spanned<Chunk>]};
+    (@ret) => {ChunksRef};
     (@ret $ret:ty) => {$ret};
 
     (@set $name:ident => $field:literal, ) => {
@@ -28,14 +28,7 @@ macro_rules! fields {
         paste! {
             #[doc = "Set the value of the `" $field "` field."]
             pub fn [<set_ $name>](&mut self, item: $ty) {
-                self.set($field, item.to_chunks(
-                    self
-                        .get($field)
-                        .and_then(|c| c.first())
-                        .map(|c| c.span.start)
-                        .unwrap_or(0)
-                    )
-                );
+                self.set($field, item.to_chunks());
             }
         }
     };
@@ -51,7 +44,7 @@ macro_rules! alias_fields {
             pub fn $name(&self) -> Result<fields!(@ret $($ret)?), RetrievalError> {
                 self.get($field)
                     .or_else(|| self.get($alias))
-                    .ok_or(RetrievalError::NotFound)
+                    .ok_or_else(|| RetrievalError::Missing($field.to_string()))
                     $(?.parse::<$ret>().map_err(Into::into))?
             }
 
@@ -73,7 +66,7 @@ macro_rules! date_fields {
                     chunks.parse::<Date>()
                 } else {
                     Date::parse_three_fields(
-                        self.get(concat!($prefix, "year")).ok_or(RetrievalError::NotFound)?,
+                        self.get(concat!($prefix, "year")).ok_or_else(|| RetrievalError::Missing("year".to_string()))?,
                         self.get(concat!($prefix, "month")),
                         self.get(concat!($prefix, "day")),
                     )
@@ -84,14 +77,7 @@ macro_rules! date_fields {
                      `" $prefix "year`, `" $prefix "month`, and
                      `" $prefix "day` fields if present."]
             pub fn [<set_ $name>](&mut self, item: Date) {
-                self.set(concat!($prefix, "date"), item.to_chunks(
-                    self
-                        .get(concat!($prefix, "date"))
-                        .and_then(|c| c.first())
-                        .map(|c| c.span.start)
-                        .unwrap_or(0)
-                    )
-                );
+                self.set(concat!($prefix, "date"), item.to_chunks());
                 self.remove(concat!($prefix, "year"));
                 self.remove(concat!($prefix, "month"));
                 self.remove(concat!($prefix, "day"));

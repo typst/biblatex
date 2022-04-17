@@ -5,8 +5,11 @@ use crate::{Span, Spanned, TypeError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A sequence of chunks.
+/// A vector of chunks.
 pub type Chunks = Vec<Spanned<Chunk>>;
+
+/// A slice of chunks.
+pub type ChunksRef<'a> = &'a [Spanned<Chunk>];
 
 /// Represents one part of a field value.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -53,10 +56,15 @@ impl Chunk {
     }
 
     /// Get the string contained in the chunk with the characters escaped.
-    pub fn get_escaped(&self, verbatim_mode: bool) -> String {
+    ///
+    /// There is no difference for BibTeX and BibLaTeX here, so there is only one function applicable to both.
+    ///
+    /// The `is_verbatim` argument indicates whether this string is intended for
+    /// a verbatim field like `file` with limited escapes.
+    pub fn to_biblatex_string(&self, is_verbatim: bool) -> String {
         let mut s = String::new();
         for c in self.get().chars() {
-            if is_escapable(c, verbatim_mode) {
+            if is_escapable(c, is_verbatim) {
                 s.push('\\');
             }
             s.push(c);
@@ -80,7 +88,9 @@ pub trait ChunksExt {
     fn span(&self) -> Span;
 
     /// Serialize the chunks into a BibLaTeX string.
-    fn to_biblatex_string(&self, verbatim_mode: bool) -> String;
+    ///
+    /// There is no difference for BibTeX and BibLaTeX here, so there is only one function applicable to both.
+    fn to_biblatex_string(&self, is_verbatim: bool) -> String;
 }
 
 impl ChunksExt for [Spanned<Chunk>] {
@@ -143,7 +153,7 @@ impl ChunksExt for [Spanned<Chunk>] {
         start .. end
     }
 
-    fn to_biblatex_string(&self, verbatim_mode: bool) -> String {
+    fn to_biblatex_string(&self, is_verbatim: bool) -> String {
         let mut res = String::new();
         res.push('{');
         let mut extra_brace = false;
@@ -164,7 +174,7 @@ impl ChunksExt for [Spanned<Chunk>] {
                 _ => {}
             }
 
-            res.push_str(&chunk.v.get_escaped(verbatim_mode));
+            res.push_str(&chunk.v.to_biblatex_string(is_verbatim));
 
             if let Chunk::Math(_) = &chunk.v {
                 res.push('$');
@@ -181,9 +191,7 @@ impl ChunksExt for [Spanned<Chunk>] {
 
 /// An iterator over the characters in each chunk, indicating whether they are
 /// verbatim or not. Chunk types other than `Normal` or `Verbatim` are ommitted.
-pub(crate) fn chunk_chars(
-    chunks: &[Spanned<Chunk>],
-) -> impl Iterator<Item = (char, bool)> + '_ {
+pub(crate) fn chunk_chars(chunks: ChunksRef) -> impl Iterator<Item = (char, bool)> + '_ {
     chunks.iter().flat_map(|chunk| {
         let (s, verbatim) = chunk.v.get_and_verb();
 
@@ -192,7 +200,7 @@ pub(crate) fn chunk_chars(
 }
 
 /// Combines the cunks, interlacing with the separator.
-pub(crate) fn join_chunk_list(chunks: &[Spanned<Chunk>], sep: &str) -> Chunks {
+pub(crate) fn join_chunk_list(chunks: ChunksRef, sep: &str) -> Chunks {
     let mut res = vec![];
     let mut first = true;
 
@@ -216,7 +224,7 @@ pub(crate) fn join_chunk_list(chunks: &[Spanned<Chunk>], sep: &str) -> Chunks {
 /// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
 ///
 /// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
-pub(crate) fn split_token_lists(vals: &[Spanned<Chunk>], keyword: &str) -> Vec<Chunks> {
+pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     let mut out = vec![];
     let mut latest = vec![];
 
@@ -253,7 +261,7 @@ pub(crate) fn split_token_lists(vals: &[Spanned<Chunk>], keyword: &str) -> Vec<C
 /// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
 pub(crate) fn split_at_normal_char(
-    src: &[Spanned<Chunk>],
+    src: ChunksRef,
     c: char,
     omit: bool,
 ) -> (Chunks, Chunks) {
@@ -289,7 +297,7 @@ pub(crate) fn split_at_normal_char(
 /// Returns two chunk vectors with `src` split at some chunk index and
 /// the string byte index `str_idx` within that chunk.
 pub(crate) fn split_values(
-    src: &[Spanned<Chunk>],
+    src: ChunksRef,
     chunk_idx: usize,
     str_idx: usize,
 ) -> (Chunks, Chunks) {
@@ -348,6 +356,10 @@ pub(crate) mod tests {
 
     pub fn s<T>(v: T, span: Span) -> Spanned<T> {
         Spanned::new(v, span)
+    }
+
+    pub fn d<T>(v: T) -> Spanned<T> {
+        Spanned::detached(v)
     }
 
     #[test]

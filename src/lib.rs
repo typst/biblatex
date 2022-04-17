@@ -26,7 +26,7 @@ mod raw;
 mod resolve;
 mod types;
 
-pub use chunk::{Chunk, Chunks, ChunksExt};
+pub use chunk::{Chunk, Chunks, ChunksExt, ChunksRef};
 pub use mechanics::EntryType;
 pub use raw::{ParseError, ParseErrorKind, Token};
 pub use types::*;
@@ -70,8 +70,8 @@ pub struct Entry {
 /// Errors that can occur when retrieving a field of an [`Entry`].
 #[derive(Debug, Clone)]
 pub enum RetrievalError {
-    /// The entry has no such field.
-    NotFound,
+    /// The entry has no field with this name.
+    Missing(String),
     /// The field contains malformed data.
     TypeError(TypeError),
 }
@@ -79,7 +79,7 @@ pub enum RetrievalError {
 impl Display for RetrievalError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Self::NotFound => write!(f, "entry not found"),
+            Self::Missing(s) => write!(f, "field {} is missing", s),
             Self::TypeError(err) => write!(f, "{}", err),
         }
     }
@@ -94,7 +94,7 @@ impl From<TypeError> for RetrievalError {
 fn convert_result<T>(err: Result<T, RetrievalError>) -> Result<Option<T>, TypeError> {
     match err {
         Ok(val) => Ok(Some(val)),
-        Err(RetrievalError::NotFound) => Ok(None),
+        Err(RetrievalError::Missing(_)) => Ok(None),
         Err(RetrievalError::TypeError(err)) => Err(err),
     }
 }
@@ -300,7 +300,7 @@ impl Entry {
     /// Get the chunk slice of a field.
     ///
     /// The field key must be lowercase.
-    pub fn get(&self, key: &str) -> Option<&[Spanned<Chunk>]> {
+    pub fn get(&self, key: &str) -> Option<ChunksRef> {
         self.fields.get(key).map(AsRef::as_ref)
     }
 
@@ -309,7 +309,7 @@ impl Entry {
     /// The field key must be lowercase.
     pub fn get_as<T: Type>(&self, key: &str) -> Result<T, RetrievalError> {
         self.get(key)
-            .ok_or(RetrievalError::NotFound)?
+            .ok_or_else(|| RetrievalError::Missing(key.to_string()))?
             .parse::<T>()
             .map_err(Into::into)
     }
@@ -325,15 +325,7 @@ impl Entry {
     ///
     /// The field key is lowercased before insertion.
     pub fn set_as<T: Type>(&mut self, key: &str, value: &T) {
-        self.set(
-            key,
-            value.to_chunks(
-                self.get(key)
-                    .and_then(|c| c.first())
-                    .map(|c| c.span.start)
-                    .unwrap_or(0),
-            ),
-        );
+        self.set(key, value.to_chunks());
     }
 
     /// Remove a field from the entry.
@@ -357,15 +349,10 @@ impl Entry {
     }
 
     /// Verify if the entry has the appropriate fields for its [`EntryType`].
-    ///
-    /// This function returns two vectors: The first indicating fields that
-    /// should have been present but were not, the second indicating fields that
-    /// were set but are forbidden by the [`EntryType`]. Consequently, the entry
-    /// is well-formed if both vectors are empty.
-    pub fn verify(&self) -> Result<(Vec<&str>, Vec<&str>), TypeError> {
+    pub fn verify(&self) -> Report {
         let reqs = self.entry_type.requirements();
         let mut missing = vec![];
-        let mut outlawed = vec![];
+        let mut superfluous = vec![];
 
         for field in reqs.required {
             match field {
@@ -410,18 +397,19 @@ impl Entry {
 
         for field in reqs.forbidden {
             if self.get_non_empty(field).is_some() {
-                outlawed.push(field);
+                superfluous.push(field);
             }
         }
 
         match reqs.author_eds_field {
             AuthorMode::OneRequired => {
-                if self.author().is_err() && self.editors()?.is_empty() {
+                if self.author().is_err() && self.editors().unwrap_or_default().is_empty()
+                {
                     missing.push("author");
                 }
             }
             AuthorMode::BothRequired => {
-                if self.editors()?.is_empty() {
+                if self.editors().unwrap_or_default().is_empty() {
                     missing.push("editor");
                 }
                 if self.author().is_err() {
@@ -434,11 +422,11 @@ impl Entry {
                 }
             }
             AuthorMode::EditorRequiredAuthorForbidden => {
-                if self.editors()?.is_empty() {
+                if self.editors().unwrap_or_default().is_empty() {
                     missing.push("editor");
                 }
                 if self.author().is_ok() {
-                    outlawed.push("author");
+                    superfluous.push("author");
                 }
             }
             _ => {}
@@ -452,10 +440,10 @@ impl Entry {
             }
             PagesChapterMode::BothForbidden => {
                 if self.pages().is_ok() {
-                    outlawed.push("pages");
+                    superfluous.push("pages");
                 }
                 if self.chapter().is_ok() {
-                    outlawed.push("chapter");
+                    superfluous.push("chapter");
                 }
             }
             PagesChapterMode::PagesRequired => {
@@ -466,13 +454,53 @@ impl Entry {
             _ => {}
         }
 
+        let mut malformed = vec![];
+
+        for (key, chunks) in &self.fields {
+            let error = match key.as_str() {
+                "edition" => chunks.parse::<Edition>().err(),
+                "organization" => chunks.parse::<Vec<Chunks>>().err(),
+                "pages" => chunks.parse::<Vec<std::ops::Range<u32>>>().err(),
+                "publisher" => chunks.parse::<Vec<Chunks>>().err(),
+                "volume" => chunks.parse::<i64>().err(),
+                "bookpagination" => chunks.parse::<Pagination>().err(),
+                "pagination" => chunks.parse::<Pagination>().err(),
+                "volumes" => chunks.parse::<i64>().err(),
+                "gender" => chunks.parse::<Gender>().err(),
+                "editortype" => chunks.parse::<EditorType>().err(),
+                "editoratype" => chunks.parse::<EditorType>().err(),
+                "editorbtype" => chunks.parse::<EditorType>().err(),
+                "editorctype" => chunks.parse::<EditorType>().err(),
+                "xref" => chunks.parse::<Vec<String>>().err(),
+                "xdata" => chunks.parse::<Vec<String>>().err(),
+                "ids" => chunks.parse::<Vec<String>>().err(),
+                _ => continue,
+            };
+
+            match error {
+                Some(t) => malformed.push((key.clone(), t)),
+                None => {}
+            }
+        }
+
+        for (key, err) in [
+            ("date", self.date().err()),
+            ("urldate", self.url_date().err()),
+            ("origdate", self.orig_date().err()),
+            ("eventdate", self.event_date().err()),
+        ] {
+            if let Some(RetrievalError::TypeError(t)) = err {
+                malformed.push((key.to_string(), t));
+            }
+        }
+
         if reqs.needs_date {
-            if self.date().is_err() {
+            if let Err(RetrievalError::Missing(_)) = self.date() {
                 missing.push("year");
             }
         }
 
-        Ok((missing, outlawed))
+        Report { missing, superfluous, malformed }
     }
 
     /// Serialize this entry into a BibLaTeX string.
@@ -504,6 +532,8 @@ impl Entry {
     }
 
     /// Serialize this entry into a BibTeX string.
+    ///
+    /// This function can return an error if there is a malformed date field.
     pub fn to_bibtex_string(&self) -> Result<String, TypeError> {
         let mut bibtex = String::new();
         let ty = self.entry_type.to_bibtex();
@@ -544,7 +574,7 @@ impl Entry {
     }
 
     /// Get an entry but return None for empty chunk slices.
-    fn get_non_empty(&self, key: &str) -> Option<&[Spanned<Chunk>]> {
+    fn get_non_empty(&self, key: &str) -> Option<ChunksRef> {
         let entry = self.get(key)?;
         if !entry.is_empty() { Some(entry) } else { None }
     }
@@ -683,10 +713,29 @@ impl Entry {
     }
 }
 
+/// A report of the validity of an `Entry`. Can be obtained by calling [`Entry::verify`].
+pub struct Report {
+    /// These fields were missing although they are required for the entry type.
+    pub missing: Vec<&'static str>,
+    /// These fields were present but are not allowed for the entry type.
+    pub superfluous: Vec<&'static str>,
+    /// These fields were present but contained malformed data.
+    pub malformed: Vec<(String, TypeError)>,
+}
+
+impl Report {
+    /// Whether the report is empty and contains no errors.
+    pub fn is_ok(&self) -> bool {
+        self.missing.is_empty()
+            && self.superfluous.is_empty()
+            && self.malformed.is_empty()
+    }
+}
+
 impl Entry {
     // BibTeX fields.
     fields! {
-        // Fields without a specified return type simply return `&[Spanned<Chunk>]`.
+        // Fields without a specified return type simply return `ChunksRef`.
         author: "author" => Vec<Person>,
         book_title: "booktitle",
         chapter: "chapter",
@@ -825,7 +874,15 @@ impl Entry {
 type Span = std::ops::Range<usize>;
 
 /// A value with the span it corresponds to in the source code.
+///
+/// Spans can be _detatched,_ this means that they deliberately do not point
+/// into the source code. Such spans are created when manually setting fields
+/// with an empty bibliography or after parsing a file. Detached spans do not
+/// indicate valid index ranges in the source files and must not be used as
+/// such. A spanned item can be checked for detachment by calling
+/// [`Self::is_detached`].
 #[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Spanned<T> {
     /// The spanned value.
     pub v: T,
@@ -842,6 +899,16 @@ impl<T> Spanned<T> {
     /// Create a new instance with a value and a zero-length span.
     pub fn zero(v: T) -> Self {
         Self { v, span: 0 .. 0 }
+    }
+
+    /// Create a new instance with a detached span.
+    pub fn detached(v: T) -> Self {
+        Self { v, span: usize::MAX .. usize::MAX }
+    }
+
+    /// Whether the span is detached.
+    pub fn is_detached(&self) -> bool {
+        self.span.start == usize::MAX
     }
 
     /// Convert from `&Spanned<T>` to `Spanned<&T>`
@@ -908,7 +975,7 @@ mod tests {
             Err(s) => {
                 assert_eq!(
                     s,
-                    ParseError::new(380 .. 380, ParseErrorKind::Expected(Token::Equals))
+                    ParseError::new(369 .. 369, ParseErrorKind::Expected(Token::Equals))
                 );
             }
         };
@@ -924,7 +991,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(360 .. 367, TypeErrorKind::UnknownPagination)
+                    TypeError::new(352 .. 359, TypeErrorKind::UnknownPagination)
                 );
             }
             _ => {
@@ -936,7 +1003,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(301 .. 306, TypeErrorKind::WrongNumberOfDigits)
+                    TypeError::new(295 .. 300, TypeErrorKind::WrongNumberOfDigits)
                 );
             }
             _ => {
@@ -949,7 +1016,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(799 .. 801, TypeErrorKind::MonthOutOfRange)
+                    TypeError::new(783 .. 785, TypeErrorKind::MonthOutOfRange)
                 );
             }
             _ => {
@@ -959,7 +1026,7 @@ mod tests {
 
         match coniglio.pages() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(774 .. 774, TypeErrorKind::InvalidNumber));
+                assert_eq!(s, TypeError::new(759 .. 759, TypeErrorKind::InvalidNumber));
             }
             _ => {
                 panic!()
@@ -1029,26 +1096,27 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
 
-        let ok = (vec![], vec![]);
         assert_eq!(
-            bibliography.get_mut("haug2019").unwrap().verify().unwrap(),
-            ok
+            bibliography.get_mut("haug2019").unwrap().verify().is_ok(),
+            true
         );
         assert_eq!(
-            bibliography.get_mut("cannonfodder").unwrap().verify().unwrap(),
-            ok
+            bibliography.get_mut("cannonfodder").unwrap().verify().is_ok(),
+            true
         );
 
         let ill = bibliography.get("ill-defined").unwrap();
-        let (missing, outlawed) = ill.verify().unwrap();
-        assert_eq!(missing.len(), 3);
-        assert_eq!(outlawed.len(), 3);
-        assert!(missing.contains(&"title"));
-        assert!(missing.contains(&"year"));
-        assert!(missing.contains(&"editor"));
-        assert!(outlawed.contains(&"maintitle"));
-        assert!(outlawed.contains(&"author"));
-        assert!(outlawed.contains(&"chapter"));
+        let report = ill.verify();
+        assert_eq!(report.missing.len(), 3);
+        assert_eq!(report.superfluous.len(), 3);
+        assert_eq!(report.malformed.len(), 1);
+        assert!(report.missing.contains(&"title"));
+        assert!(report.missing.contains(&"year"));
+        assert!(report.missing.contains(&"editor"));
+        assert!(report.superfluous.contains(&"maintitle"));
+        assert!(report.superfluous.contains(&"author"));
+        assert!(report.superfluous.contains(&"chapter"));
+        assert_eq!(report.malformed[0].0.as_str(), "gender");
     }
 
     #[test]

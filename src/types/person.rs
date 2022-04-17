@@ -25,7 +25,7 @@ impl Person {
     /// [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
-    pub fn parse(chunks: &[Spanned<Chunk>]) -> Self {
+    pub fn parse(chunks: ChunksRef) -> Self {
         let num_commas: usize = chunks
             .iter()
             .map(|val| {
@@ -53,7 +53,7 @@ impl Person {
 
     /// Constructs new person from a chunk slice if in the
     /// form `<First> <Prefix> <Last>`.
-    fn parse_unified(chunks: &[Spanned<Chunk>]) -> Self {
+    fn parse_unified(chunks: ChunksRef) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
         // lowercase word), start of last capitalized seqence.
         // If there is no subsequent capitalized word, take last one.
@@ -135,7 +135,7 @@ impl Person {
     /// - `s2` to the part behind it.
     ///
     /// The arguments should not contain the comma.
-    fn parse_single_comma(s1: &[Spanned<Chunk>], s2: &[Spanned<Chunk>]) -> Self {
+    fn parse_single_comma(s1: ChunksRef, s2: ChunksRef) -> Self {
         if s2.is_empty() || (s2.len() == 1 && s2.format_verbatim().is_empty()) {
             let formatted = s1.format_verbatim();
             let last_space = formatted.rfind(' ').unwrap_or(0);
@@ -207,11 +207,7 @@ impl Person {
     /// value respectively.
     ///
     /// The arguments should not contain the comma.
-    fn parse_two_commas(
-        s1: &[Spanned<Chunk>],
-        s2: &[Spanned<Chunk>],
-        s3: &[Spanned<Chunk>],
-    ) -> Self {
+    fn parse_two_commas(s1: ChunksRef, s2: ChunksRef, s3: ChunksRef) -> Self {
         let mut p = Self::parse_single_comma(s1, s3);
         p.suffix = s2.format_verbatim();
         p
@@ -219,24 +215,20 @@ impl Person {
 }
 
 impl Type for Vec<Person> {
-    fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
+    fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
         Ok(split_token_lists(chunks, " and ")
             .into_iter()
             .map(|subchunks| Person::parse(&subchunks))
             .collect())
     }
 
-    fn to_chunks(&self, mut start: usize) -> Chunks {
-        let original_start = start;
-
+    fn to_chunks(&self) -> Chunks {
         self.iter()
             .map(|p| {
                 let prefix = if let Some(c) = p.prefix.chars().next() {
                     if c.is_uppercase() {
-                        let span = start .. start + p.prefix.len();
-                        start += p.prefix.len();
                         (
-                            Some(Spanned::new(Chunk::Verbatim(p.prefix.clone()), span)),
+                            Some(Spanned::detached(Chunk::Verbatim(p.prefix.clone()))),
                             " ".to_string(),
                         )
                     } else {
@@ -252,10 +244,7 @@ impl Type for Vec<Person> {
                     format!("{}{}, {}", prefix.1, p.name, p.given_name)
                 };
 
-                let span = start .. start + name_str.len();
-                start += name_str.len();
-
-                let mut res = vec![Spanned::new(Chunk::Normal(name_str), span)];
+                let mut res = vec![Spanned::detached(Chunk::Normal(name_str))];
                 if let Some(pre_chunk) = prefix.0 {
                     res.insert(0, pre_chunk);
                 }
@@ -263,7 +252,7 @@ impl Type for Vec<Person> {
                 res
             })
             .collect::<Vec<Chunks>>()
-            .to_chunks(original_start)
+            .to_chunks()
     }
 }
 
@@ -298,36 +287,27 @@ mod tests {
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "jean de la");
         assert_eq!(p.given_name, "");
-        assert_eq!(vec![p].to_chunks(0), vec![s(
-            N("jean de la fontaine, "),
-            0 .. 21
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![d(N("jean de la fontaine, "),)]);
 
         let p = Person::parse(&[Spanned::zero(N("de la fontaine, Jean"))]);
         assert_eq!(p.name, "fontaine");
         assert_eq!(p.prefix, "de la");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks(0), vec![s(
-            N("de la fontaine, Jean"),
-            0 .. 20
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![d(N("de la fontaine, Jean"),)]);
 
         let p = Person::parse(&[Spanned::zero(N("De La Fontaine, Jean"))]);
         assert_eq!(p.name, "De La Fontaine");
         assert_eq!(p.prefix, "");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks(0), vec![s(
-            N("De La Fontaine, Jean"),
-            0 .. 20
-        )]);
+        assert_eq!(vec![p].to_chunks(), vec![d(N("De La Fontaine, Jean"),)]);
 
         let p = Person::parse(&[s(V("De La"), 2 .. 6), s(N(" Fontaine, Jean"), 7 .. 15)]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De La");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks(0), vec![
-            s(V("De La"), 0 .. 5),
-            s(N(" Fontaine, Jean"), 5 .. 20)
+        assert_eq!(vec![p].to_chunks(), vec![
+            d(V("De La")),
+            d(N(" Fontaine, Jean"))
         ]);
 
         let p = Person::parse(&[Spanned::zero(N("De la Fontaine, Jean"))]);
