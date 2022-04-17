@@ -45,7 +45,7 @@ impl fmt::Display for TypeError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DefectAtom {
-    Date(Option<String>),
+    Date(DateError),
     Gender,
     Integer,
     IntegerRange,
@@ -56,8 +56,7 @@ pub enum DefectAtom {
 impl fmt::Display for DefectAtom {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Date(None) => write!(f, "date"),
-            Self::Date(Some(s)) => write!(f, "date ({})", s),
+            Self::Date(s) => write!(f, "date ({})", s),
             Self::Gender => write!(f, "gender"),
             Self::Integer => write!(f, "integer"),
             Self::IntegerRange => write!(f, "integer range"),

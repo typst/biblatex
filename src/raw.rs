@@ -3,7 +3,7 @@
 use std::fmt;
 use std::{collections::HashMap, vec};
 
-use crate::{Span, Spanned, TypeError};
+use crate::{DefectAtom, Span, Spanned, TypeError};
 
 use unscanny::Scanner;
 
@@ -80,7 +80,8 @@ pub enum ParseErrorKind {
     UnknownAbbreviation(String),
     MalformedCommand,
     DuplicateKey(String),
-    TypeError(TypeError),
+    TypeError(DefectAtom),
+    ResolutionError(DefectAtom),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -104,13 +105,16 @@ impl fmt::Display for ParseErrorKind {
             Self::MalformedCommand => write!(f, "malformed command"),
             Self::DuplicateKey(s) => write!(f, "duplicate key {:?}", s),
             Self::TypeError(e) => write!(f, "{}", e),
+            Self::ResolutionError(e) => {
+                write!(f, "type error occurred during crossref resolution: {}", e)
+            }
         }
     }
 }
 
 impl From<TypeError> for ParseError {
     fn from(e: TypeError) -> Self {
-        Self::new(e.span.clone(), ParseErrorKind::TypeError(e))
+        Self::new(e.span, ParseErrorKind::TypeError(e.kind))
     }
 }
 

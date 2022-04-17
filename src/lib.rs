@@ -29,7 +29,7 @@ mod types;
 pub use chunk::{Chunk, Chunks, ChunksExt};
 use macros::*;
 pub use mechanics::{is_verbatim_field, EntryType};
-pub use raw::{ParseError, ParseErrorKind, RawBibliography, RawEntry};
+pub use raw::{ParseError, ParseErrorKind, RawBibliography, RawEntry, Token};
 pub use types::*;
 
 use std::collections::{BTreeMap, HashMap};
@@ -109,7 +109,8 @@ impl Bibliography {
         Self::from_raw(RawBibliography::parse(src)?)
     }
 
-    /// Construct a bibliography from a raw bibliography.
+    /// Construct a bibliography from a raw bibliography, with the `xdata` and
+    /// `crossref` links resolved.
     pub fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
@@ -136,6 +137,14 @@ impl Bibliography {
             })?;
         }
 
+        let mut entries = res.entries.clone();
+        for entry in &mut entries {
+            entry.resolve_crossrefs(&res).map_err(|e| {
+                ParseError::new(e.span, ParseErrorKind::ResolutionError(e.kind))
+            })?;
+        }
+        res.entries = entries;
+
         Ok(res)
     }
 
@@ -154,14 +163,6 @@ impl Bibliography {
     pub fn get_mut(&mut self, key: &str) -> Option<&mut Entry> {
         let index = *self.keys.get(key)?;
         self.entries.get_mut(index)
-    }
-
-    /// Try to find an entry with the given cite key and return a copy of that
-    /// entry with all `crossref` and `xdata` dependencies resolved.
-    pub fn get_resolved(&self, key: &str) -> Result<Entry, RetrievalError> {
-        let mut entry = self.get(key).ok_or(RetrievalError::NotFound)?.clone();
-        entry.resolve_crossrefs(self).map_err(RetrievalError::from)?;
-        Ok(entry)
     }
 
     /// Insert an entry into the bibliography.
@@ -356,10 +357,6 @@ impl Entry {
     /// should have been present but were not, the second indicating fields that
     /// were set but are forbidden by the [`EntryType`]. Consequently, the entry
     /// is well-formed if both vectors are empty.
-    ///
-    /// _Note:_ This function will not resolve the entry. If you want to support
-    /// / expect files using `crossref` and `xdata`, you will want to call this
-    /// method only on entries obtained through [`Bibliography::get_resolved`].
     pub fn verify(&self) -> Result<(Vec<&str>, Vec<&str>), TypeError> {
         let reqs = self.entry_type.requirements();
         let mut missing = vec![];
@@ -566,7 +563,6 @@ impl Entry {
             self.resolve_single_crossref(crossref)?;
         }
 
-        self.remove("crossref");
         self.remove("xdata");
 
         Ok(())
@@ -934,9 +930,7 @@ mod tests {
                     s,
                     TypeError::new(
                         301 .. 306,
-                        DefectAtom::Date(Some(
-                            "year must have four digits, including 'X'".to_string()
-                        ))
+                        DefectAtom::Date(DateError::WrongNumberOfDigits)
                     )
                 );
             }
@@ -951,8 +945,8 @@ mod tests {
                 assert_eq!(
                     s,
                     TypeError::new(
-                        799 .. 799,
-                        DefectAtom::Date(Some("invalid month".to_string()))
+                        799 .. 801,
+                        DefectAtom::Date(DateError::MonthOutOfRange)
                     )
                 );
             }
@@ -1060,14 +1054,14 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let bibliography = Bibliography::parse(&contents).unwrap();
 
-        let e = bibliography.get_resolved("macmillan").unwrap();
+        let e = bibliography.get("macmillan").unwrap();
         assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
             e.location().unwrap().format_verbatim(),
             "New York and London"
         );
 
-        let book = bibliography.get_resolved("recursive").unwrap();
+        let book = bibliography.get("recursive").unwrap();
         assert_eq!(book.publisher().unwrap()[0].format_verbatim(), "Macmillan");
         assert_eq!(
             book.location().unwrap().format_verbatim(),
@@ -1081,7 +1075,7 @@ mod tests {
         assert_eq!(bibliography.get("arrgh").unwrap().parents().unwrap(), vec![
             "polecon".to_string()
         ]);
-        let arrgh = bibliography.get_resolved("arrgh").unwrap();
+        let arrgh = bibliography.get("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
         assert_eq!(arrgh.volume().unwrap(), 115);
         assert_eq!(arrgh.editors().unwrap()[0].0[0].name, "Uhlig");

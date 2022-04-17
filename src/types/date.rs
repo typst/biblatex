@@ -50,6 +50,35 @@ pub struct Datetime {
     pub time: Option<NaiveTime>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum DateError {
+    UndefinedRange,
+    DayOutOfRange,
+    MonthOutOfRange,
+    InvalidNumber,
+    WrongNumberOfDigits,
+    InvalidFormat,
+}
+
+impl fmt::Display for DateError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DateError::UndefinedRange => {
+                write!(f, "range must not be open on both sides")
+            }
+            DateError::DayOutOfRange => {
+                write!(f, "day out of range (must be between 1 and 31)")
+            }
+            DateError::MonthOutOfRange => {
+                write!(f, "month out of range (must be between 1 and 12)")
+            }
+            DateError::InvalidNumber => write!(f, "invalid number"),
+            DateError::WrongNumberOfDigits => write!(f, "wrong number of digits"),
+            DateError::InvalidFormat => write!(f, "invalid format"),
+        }
+    }
+}
+
 impl Date {
     /// Parse a date from chunks.
     pub fn parse(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
@@ -110,9 +139,7 @@ impl Date {
                     (true, true) => {
                         return Err(TypeError::new(
                             span,
-                            DefectAtom::Date(Some(
-                                "range must not be open on both sides".to_string(),
-                            )),
+                            DefectAtom::Date(DateError::UndefinedRange),
                         ));
                     }
                 }
@@ -164,9 +191,7 @@ impl Date {
                 if day > 31 || day < 1 {
                     return Err(TypeError::new(
                         span,
-                        DefectAtom::Date(Some(
-                            "day must be between 1 and 31".to_string(),
-                        )),
+                        DefectAtom::Date(DateError::DayOutOfRange),
                     ));
                 }
 
@@ -188,7 +213,7 @@ impl Date {
                 if day.len() == 0 {
                     return Err(TypeError::new(
                         day_span,
-                        DefectAtom::Date(Some("invalid day".to_string())),
+                        DefectAtom::Date(DateError::InvalidNumber),
                     ));
                 }
 
@@ -197,9 +222,7 @@ impl Date {
                 if day < 1 || day > 31 {
                     return Err(TypeError::new(
                         day_span,
-                        DefectAtom::Date(Some(
-                            "day must be between 1 and 31".to_string(),
-                        )),
+                        DefectAtom::Date(DateError::DayOutOfRange),
                     ));
                 }
 
@@ -229,9 +252,7 @@ impl Date {
         if sure_digits < 2 || s.eat_while('X').len() + sure_digits != 4 {
             return Err(TypeError::new(
                 0 .. s.cursor(),
-                DefectAtom::Date(Some(
-                    "year must have four digits, including 'X'".to_string(),
-                )),
+                DefectAtom::Date(DateError::WrongNumberOfDigits),
             ));
         }
 
@@ -260,7 +281,10 @@ impl Date {
                 if !s.done() {
                     get_hyphen(&mut s)?;
                     if s.eat_while('X').len() != 2 {
-                        return Err(TypeError::new(here(&s), DefectAtom::Date(None)));
+                        return Err(TypeError::new(
+                            here(&s),
+                            DefectAtom::Date(DateError::InvalidFormat),
+                        ));
                     }
                 }
 
@@ -280,31 +304,61 @@ impl Date {
                 ));
             }
             _ => {
-                return Err(TypeError::new(idx .. s.cursor(), DefectAtom::Date(None)));
+                return Err(TypeError::new(
+                    idx .. s.cursor(),
+                    DefectAtom::Date(DateError::WrongNumberOfDigits),
+                ));
             }
         }
 
+        let month_start = s.cursor();
         let month = s.eat_while(char::is_ascii_digit);
         if month.len() != 2 {
-            return Err(TypeError::new(idx .. s.cursor(), DefectAtom::Date(None)));
+            return Err(TypeError::new(
+                idx .. s.cursor(),
+                DefectAtom::Date(DateError::WrongNumberOfDigits),
+            ));
         }
-        let month: Option<u8> = month.parse().ok();
+        let month: u8 = month.parse::<u8>().unwrap() - 1;
+
+        if month > 11 {
+            return Err(TypeError::new(
+                month_start .. s.cursor(),
+                DefectAtom::Date(DateError::MonthOutOfRange),
+            ));
+        }
 
         get_hyphen(&mut s)?;
 
         if s.eat_while('X').len() == 2 {
             s.eat_whitespace();
             if !s.done() {
-                return Err(TypeError::new(here(&s), DefectAtom::Date(None)));
+                return Err(TypeError::new(
+                    here(&s),
+                    DefectAtom::Date(DateError::InvalidFormat),
+                ));
             }
 
             return Ok((
-                Datetime { year, month, day: Some(0), time: None },
-                Datetime { year, month, day: Some(30), time: None },
+                Datetime {
+                    year,
+                    month: Some(month),
+                    day: Some(0),
+                    time: None,
+                },
+                Datetime {
+                    year,
+                    month: Some(month),
+                    day: Some(30),
+                    time: None,
+                },
             ));
         }
 
-        Err(TypeError::new(here(&s), DefectAtom::Date(None)))
+        Err(TypeError::new(
+            here(&s),
+            DefectAtom::Date(DateError::InvalidFormat),
+        ))
     }
 
     pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
@@ -321,7 +375,7 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
     if s.eat_while(char::is_ascii_digit).len() != 4 {
         return Err(TypeError::new(
             year_idx .. s.cursor(),
-            DefectAtom::Date(Some("invalid year".to_string())),
+            DefectAtom::Date(DateError::WrongNumberOfDigits),
         ));
     }
 
@@ -331,7 +385,10 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
 fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
     s.eat_whitespace();
     if s.eat_while('-').is_empty() {
-        return Err(TypeError::new(here(s), DefectAtom::Date(None)));
+        return Err(TypeError::new(
+            here(s),
+            DefectAtom::Date(DateError::InvalidFormat),
+        ));
     }
     s.eat_whitespace();
     Ok(())
@@ -423,11 +480,19 @@ impl Datetime {
                 if month.len() != 2 {
                     return Err(TypeError::new(
                         month_start .. s.cursor(),
-                        DefectAtom::Date(Some("invalid month".to_string())),
+                        DefectAtom::Date(DateError::WrongNumberOfDigits),
                     ));
                 }
 
-                Some(u8::from_str_radix(&month, 10).unwrap() - 1)
+                let month = u8::from_str_radix(&month, 10).unwrap() - 1;
+                if month > 11 {
+                    return Err(TypeError::new(
+                        month_start .. s.cursor(),
+                        DefectAtom::Date(DateError::MonthOutOfRange),
+                    ));
+                }
+
+                Some(month)
             } else {
                 None
             };
