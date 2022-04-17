@@ -16,14 +16,18 @@ use strum::{AsRefStr, Display, EnumString};
 use crate::{chunk::*, Span, Spanned};
 use unscanny::Scanner;
 
+/// An error that may occur while parsing the chunks in a field into a specific
+/// [`Type`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeError {
+    /// Where in the source the error occurred.
     pub span: Span,
-    pub kind: DefectAtom,
+    /// What kind of error occurred.
+    pub kind: TypeErrorKind,
 }
 
 impl TypeError {
-    pub(crate) fn new(span: Span, kind: DefectAtom) -> Self {
+    pub(crate) fn new(span: Span, kind: TypeErrorKind) -> Self {
         Self { span, kind }
     }
 
@@ -35,34 +39,52 @@ impl TypeError {
 
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "malformed {}: {}-{}",
-            self.kind, self.span.start, self.span.end
-        )
+        write!(f, "{}: {}-{}", self.kind, self.span.start, self.span.end)
     }
 }
 
+/// Error conditions that might occur while parsing the chunks in a field into a specific
+/// [`Type`].
+///
+/// Also see [`TypeError`].
 #[derive(Debug, Clone, PartialEq)]
-pub enum DefectAtom {
-    Date(DateError),
-    Gender,
-    Integer,
-    IntegerRange,
-    Pagination,
-    EditorType,
+pub enum TypeErrorKind {
+    /// The date range was open on both sides.
+    UndefinedRange,
+    /// The day in a date was out of range (1-31).
+    DayOutOfRange,
+    /// The month in a date was out of range (1-12).
+    MonthOutOfRange,
+    /// The given input did not contain a valid number.
+    InvalidNumber,
+    /// A number did not have the right number of digits.
+    WrongNumberOfDigits,
+    /// The entry was not in a format valid for that type.
+    InvalidFormat,
+    /// There is no [`Gender`] variant for this input.
+    UnknownGender,
+    /// There was no integer range.
+    InvalidIntegerRange,
+    /// There is no [`Pagination`] variant for this input.
+    UnknownPagination,
+    /// There is no [`EditorType`] variant for this input.
+    UnknownEditorType,
 }
 
-impl fmt::Display for DefectAtom {
+impl fmt::Display for TypeErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Date(s) => write!(f, "date ({})", s),
-            Self::Gender => write!(f, "gender"),
-            Self::Integer => write!(f, "integer"),
-            Self::IntegerRange => write!(f, "integer range"),
-            Self::Pagination => write!(f, "pagination"),
-            Self::EditorType => write!(f, "editor type"),
-        }
+        f.write_str(match self {
+            Self::UndefinedRange => "range must not be open on both sides",
+            Self::DayOutOfRange => "day out of range (must be between 1 and 31)",
+            Self::MonthOutOfRange => "month out of range (must be between 1 and 12)",
+            Self::InvalidNumber => "invalid number",
+            Self::WrongNumberOfDigits => "wrong number of digits",
+            Self::InvalidFormat => "invalid format",
+            Self::UnknownGender => "unknown gender",
+            Self::InvalidIntegerRange => "invalid integer range",
+            Self::UnknownPagination => "unknown pagination",
+            Self::UnknownEditorType => "unknown editor type",
+        })
     }
 }
 
@@ -86,7 +108,7 @@ impl Type for i64 {
         } else if let Some(roman) = Roman::parse(s) {
             Ok(roman.value() as i64)
         } else {
-            Err(TypeError::new(span, DefectAtom::Integer))
+            Err(TypeError::new(span, TypeErrorKind::InvalidNumber))
         }
     }
 
@@ -117,7 +139,7 @@ impl Type for Range<u32> {
             .parse::<Vec<Range<u32>>>()?
             .into_iter()
             .next()
-            .ok_or(TypeError::new(span, DefectAtom::IntegerRange))
+            .ok_or(TypeError::new(span, TypeErrorKind::InvalidIntegerRange))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -195,7 +217,10 @@ impl Type for Vec<Range<u32>> {
             let idx = s.cursor();
             let num = s.eat_while(|c: char| c.is_digit(10));
             u32::from_str(num).map_err(|_| {
-                TypeError::new(idx + offset .. s.cursor() + offset, DefectAtom::Integer)
+                TypeError::new(
+                    idx + offset .. s.cursor() + offset,
+                    TypeErrorKind::InvalidNumber,
+                )
             })
         };
 
@@ -291,7 +316,7 @@ impl Type for Pagination {
     fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         let span = chunks.span();
         Pagination::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| TypeError::new(span, DefectAtom::Pagination))
+            .map_err(|_| TypeError::new(span, TypeErrorKind::UnknownPagination))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -321,7 +346,7 @@ impl Type for EditorType {
     fn from_chunks(chunks: &[Spanned<Chunk>]) -> Result<Self, TypeError> {
         let span = chunks.span();
         EditorType::from_str(&chunks.format_verbatim().to_lowercase())
-            .map_err(|_| TypeError::new(span, DefectAtom::EditorType))
+            .map_err(|_| TypeError::new(span, TypeErrorKind::UnknownEditorType))
     }
 
     fn to_chunks(&self, start: usize) -> Chunks {
@@ -406,7 +431,7 @@ impl Type for Gender {
             "pf" => Ok(Gender::PluralFemale),
             "pm" => Ok(Gender::PluralMale),
             "pn" => Ok(Gender::PluralNeuter),
-            _ => Err(TypeError::new(span, DefectAtom::Gender)),
+            _ => Err(TypeError::new(span, TypeErrorKind::UnknownGender)),
         }
     }
 

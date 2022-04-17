@@ -1,7 +1,7 @@
 /*!
 A crate for parsing Bib(La)TeX files.
 
-The main API entrypoint is a [`Bibliography`].
+The main API entrypoint is the [`Bibliography`] struct.
 
 # Example
 
@@ -67,9 +67,12 @@ pub struct Entry {
     pub fields: BTreeMap<String, Chunks>,
 }
 
+/// Errors that can occur when retrieving a field of an [`Entry`].
 #[derive(Debug, Clone)]
 pub enum RetrievalError {
+    /// The entry has no such field.
     NotFound,
+    /// The field contains malformed data.
     TypeError(TypeError),
 }
 
@@ -135,7 +138,7 @@ impl Bibliography {
                 key: entry.v.key.to_string(),
                 entry_type: EntryType::new(entry.v.kind),
                 fields,
-            })?;
+            });
         }
 
         let mut entries = res.entries.clone();
@@ -170,19 +173,20 @@ impl Bibliography {
     ///
     /// If an entry with the same cite key is already present, the entry is
     /// updated and the old entry is returned.
-    pub fn insert(&mut self, entry: Entry) -> Result<Option<Entry>, ParseError> {
+    pub fn insert(&mut self, entry: Entry) -> Option<Entry> {
         if let Some(prev) = self.get_mut(&entry.key) {
-            Ok(Some(std::mem::replace(prev, entry)))
+            Some(std::mem::replace(prev, entry))
         } else {
             let index = self.entries.len();
             self.keys.insert(entry.key.clone(), index);
-            if let Some(ids) = convert_result(entry.get_as::<Vec<String>>("ids"))? {
+            if let Some(ids) = convert_result(entry.get_as::<Vec<String>>("ids")).unwrap()
+            {
                 for alias in ids {
                     self.keys.insert(alias, index);
                 }
             }
             self.entries.push(entry);
-            Ok(None)
+            None
         }
     }
 
@@ -918,7 +922,10 @@ mod tests {
         let rashid = bibliography.get("rashid2016").unwrap();
         match rashid.pagination() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(360 .. 367, DefectAtom::Pagination));
+                assert_eq!(
+                    s,
+                    TypeError::new(360 .. 367, TypeErrorKind::UnknownPagination)
+                );
             }
             _ => {
                 panic!()
@@ -929,10 +936,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(
-                        301 .. 306,
-                        DefectAtom::Date(DateError::WrongNumberOfDigits)
-                    )
+                    TypeError::new(301 .. 306, TypeErrorKind::WrongNumberOfDigits)
                 );
             }
             _ => {
@@ -945,10 +949,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(
-                        799 .. 801,
-                        DefectAtom::Date(DateError::MonthOutOfRange)
-                    )
+                    TypeError::new(799 .. 801, TypeErrorKind::MonthOutOfRange)
                 );
             }
             _ => {
@@ -958,7 +959,7 @@ mod tests {
 
         match coniglio.pages() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(774 .. 774, DefectAtom::Integer));
+                assert_eq!(s, TypeError::new(774 .. 774, TypeErrorKind::InvalidNumber));
             }
             _ => {
                 panic!()

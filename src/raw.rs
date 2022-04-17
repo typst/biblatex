@@ -3,7 +3,7 @@
 use std::fmt;
 use std::{collections::HashMap, vec};
 
-use crate::{DefectAtom, Span, Spanned, TypeError};
+use crate::{Span, Spanned, TypeErrorKind};
 
 use unscanny::Scanner;
 
@@ -54,9 +54,12 @@ struct BiblatexParser<'s> {
     res: RawBibliography<'s>,
 }
 
+/// An error that might occur during initial parsing of the bibliography.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
+    /// Where in the source the error occurred.
     pub span: std::ops::Range<usize>,
+    /// What kind of error occurred.
     pub kind: ParseErrorKind,
 }
 
@@ -72,26 +75,45 @@ impl fmt::Display for ParseError {
     }
 }
 
+/// Error conditions that might occur during initial parsing of the
+/// bibliography.
+///
+/// Also see [`ParseError`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseErrorKind {
+    /// The file ended prematurely.
     UnexpectedEof,
+    /// An unexpected token was encountered.
     Unexpected(Token),
+    /// A token was expected, but not found.
     Expected(Token),
+    /// A field contained an abbreviation that was not defined.
     UnknownAbbreviation(String),
+    /// A TeX command was malformed.
     MalformedCommand,
+    /// A duplicate citation key was found.
     DuplicateKey(String),
-    TypeError(DefectAtom),
-    ResolutionError(DefectAtom),
+    /// A type error occurred while trying to resolve cross-references.
+    ResolutionError(TypeErrorKind),
 }
 
+/// A token that can be encountered during parsing.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Token {
+    /// An identifier for a field key, citation type, abbreviation, or citation
+    /// key.
     Identifier,
+    /// An opening brace: `{`.
     OpeningBrace,
+    /// A closing brace: `}`.
     ClosingBrace,
+    /// A comma: `,`.
     Comma,
+    /// A quotation mark: `"`.
     QuotationMark,
+    /// An equals sign: `=`.
     Equals,
+    /// A decimal point: `.`.
     DecimalPoint,
 }
 
@@ -104,17 +126,10 @@ impl fmt::Display for ParseErrorKind {
             Self::UnknownAbbreviation(s) => write!(f, "unknown abbreviation {:?}", s),
             Self::MalformedCommand => write!(f, "malformed command"),
             Self::DuplicateKey(s) => write!(f, "duplicate key {:?}", s),
-            Self::TypeError(e) => write!(f, "{}", e),
             Self::ResolutionError(e) => {
                 write!(f, "type error occurred during crossref resolution: {}", e)
             }
         }
-    }
-}
-
-impl From<TypeError> for ParseError {
-    fn from(e: TypeError) -> Self {
-        Self::new(e.span, ParseErrorKind::TypeError(e.kind))
     }
 }
 

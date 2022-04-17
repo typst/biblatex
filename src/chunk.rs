@@ -25,6 +25,7 @@ pub enum Chunk {
 }
 
 impl Chunk {
+    /// Get the string contained in the chunk.
     pub fn get(&self) -> &str {
         match self {
             Chunk::Normal(s) => s,
@@ -33,7 +34,8 @@ impl Chunk {
         }
     }
 
-    pub fn get_and_verb(&self) -> (&str, bool) {
+    /// Get the string contained in the chunk and whether it is verbatim.
+    fn get_and_verb(&self) -> (&str, bool) {
         match self {
             Chunk::Normal(s) => (s, false),
             Chunk::Verbatim(s) => (s, true),
@@ -41,6 +43,7 @@ impl Chunk {
         }
     }
 
+    /// Mutably get the string contained in the chunk.
     pub fn get_mut(&mut self) -> &mut String {
         match self {
             Chunk::Normal(s) => s,
@@ -49,6 +52,7 @@ impl Chunk {
         }
     }
 
+    /// Get the string contained in the chunk with the characters escaped.
     pub fn get_escaped(&self, verbatim_mode: bool) -> String {
         let mut s = String::new();
         for c in self.get().chars() {
