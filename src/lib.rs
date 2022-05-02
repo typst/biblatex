@@ -1185,11 +1185,23 @@ mod tests {
     fn test_verbatim_fields() {
         let contents = fs::read_to_string("tests/libra.bib").unwrap();
         let bibliography = Bibliography::parse(&contents).unwrap();
+
+        // Import an entry/field with escaped colons
         let e = bibliography.get("dierksmeierJustHODLMoral2018").unwrap();
         assert_eq!(e.doi().unwrap(), "10.1007/s41463-018-0036-z");
         assert_eq!(
             e.file().unwrap(),
             "C:\\Users\\mhaug\\Zotero\\storage\\DTPR7TES\\Dierksmeier - 2018 - Just HODL On the Moral Claims of Bitcoin and Ripp.pdf"
         );
+
+        // Import an entry/field with unescaped colons
+        let e = bibliography.get("LibraAssociationIndependent").unwrap();
+        assert_eq!(e.url().unwrap(), "https://libra.org/association/");
+
+        // Test export of entry (not escaping colons)
+        let e = bibliography.get("finextraFedGovernorChallenges2019").unwrap();
+        assert_eq!(e.to_biblatex_string(), 
+        "@online{finextraFedGovernorChallenges2019,\nauthor = {FinExtra},\ndate = {2019-12-18},\nfile = {C:\\\\Users\\\\mhaug\\\\Zotero\\\\storage\\\\VY9LAKFE\\\\fed-governor-challenges-facebooks-libra-project.html},\ntitle = {Fed {Governor} Challenges {Facebook}'s {Libra} Project},\nurl = {https://www.finextra.com/newsarticle/34986/fed-governor-challenges-facebooks-libra-project},\nurldate = {2020-08-22},\n}"
+        )
     }
 }

@@ -136,7 +136,7 @@ impl<'s> ContentParser<'s> {
     fn backslash(&mut self) -> Result<String, ParseError> {
         self.eat_assert('\\');
         match self.s.peek() {
-            Some(c) if is_escapable(c, self.verb_field) => {
+            Some(c) if is_escapable(c, self.verb_field, true) => {
                 self.s.eat();
                 Ok(c.to_string())
             }
@@ -380,10 +380,15 @@ fn flatten(chunks: &mut Chunks) {
 }
 
 /// Characters that can be escaped.
-pub fn is_escapable(c: char, verb: bool) -> bool {
+///
+/// In read mode (`read_char = true`), colons are also converted to an unescaped string to keep
+/// compatiblity with Zotero. Zotero escapes colons when exporting verbatim fields. This crate
+/// doesn't escape colons when exporting.
+pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
     match c {
-        '{' | '}' | '\\' | ':' => true,
+        '{' | '}' | '\\' => true,
         '&' | '%' | '$' | '_' if !verb => true,
+        ':' if read_char => true,
         _ => false,
     }
 }

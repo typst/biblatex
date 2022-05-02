@@ -64,7 +64,7 @@ impl Chunk {
     pub fn to_biblatex_string(&self, is_verbatim: bool) -> String {
         let mut s = String::new();
         for c in self.get().chars() {
-            if is_escapable(c, is_verbatim) {
+            if is_escapable(c, is_verbatim, false) {
                 s.push('\\');
             }
             s.push(c);
