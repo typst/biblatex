@@ -388,7 +388,7 @@ pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
     match c {
         '{' | '}' | '\\' => true,
         '&' | '%' | '$' | '_' if !verb => true,
-        ':' if read_char => true,
+        ':' if read_char || !verb => true,
         _ => false,
     }
 }
