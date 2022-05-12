@@ -1162,7 +1162,7 @@ mod tests {
 
     fn dump_debug(file: &str) {
         let contents = fs::read_to_string(file).unwrap();
-        let bibliography = Bibliography::parse(&contents);
+        let bibliography = Bibliography::parse(&contents).unwrap();
         println!("{:#?}", bibliography);
     }
 
@@ -1200,8 +1200,9 @@ mod tests {
 
         // Test export of entry (not escaping colons)
         let e = bibliography.get("finextraFedGovernorChallenges2019").unwrap();
-        assert_eq!(e.to_biblatex_string(), 
-        "@online{finextraFedGovernorChallenges2019,\nauthor = {FinExtra},\ndate = {2019-12-18},\nfile = {C:\\\\Users\\\\mhaug\\\\Zotero\\\\storage\\\\VY9LAKFE\\\\fed-governor-challenges-facebooks-libra-project.html},\ntitle = {Fed {Governor} Challenges {Facebook}'s {Libra} Project},\nurl = {https://www.finextra.com/newsarticle/34986/fed-governor-challenges-facebooks-libra-project},\nurldate = {2020-08-22},\n}"
+        assert_eq!(
+            e.to_biblatex_string(),
+            "@online{finextraFedGovernorChallenges2019,\nauthor = {FinExtra},\ndate = {2019-12-18},\nfile = {C:\\\\Users\\\\mhaug\\\\Zotero\\\\storage\\\\VY9LAKFE\\\\fed-governor-challenges-facebooks-libra-project.html},\ntitle = {Fed {Governor} Challenges {Facebook}'s {Libra} Project},\nurl = {https://www.finextra.com/newsarticle/34986/fed-governor-challenges-facebooks-libra-project},\nurldate = {2020-08-22},\n}"
         )
     }
 }

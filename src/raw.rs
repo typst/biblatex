@@ -328,8 +328,8 @@ impl<'s> BiblatexParser<'s> {
     fn abbr_element(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
         let start = self.s.cursor();
         let res = match self.s.peek() {
+            Some(c) if c.is_ascii_digit() => self.number().map(|s| RawChunk::Normal(s)),
             Some(c) if is_id_start(c) => self.ident().map(|s| RawChunk::Abbreviation(s)),
-            Some(c) if c.is_numeric() => self.number().map(|s| RawChunk::Normal(s)),
             _ => {
                 return self.single_field();
             }
@@ -570,7 +570,7 @@ mod tests {
 
         assert_eq!(article.v.kind, "article");
         assert_eq!(format(article.v.fields.get("title").unwrap()), "{Great proceedings\\{}");
-        assert_eq!(format(article.v.fields.get("year").unwrap()), "2002");
+        assert_eq!(format(article.v.fields.get("year").unwrap()), "{2002}");
         assert_eq!(format(article.v.fields.get("author").unwrap()), "{Haug, {Martin} and Haug, Gregor}");
     }
 

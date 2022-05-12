@@ -52,8 +52,6 @@ spec with which most of the `.bib` files in circulation can be processed.
 
 However, the crate currently has some limitations:
 
-- Math mode formatting is not being processed, instead, the output strings will
-  contain the dollar-delimited math syntax as it is found in the input string.
 - There is no explicit support for entry sets, although it is easy to account
   for them by manually getting the `entryset` field and calling
   `parse::<Vec<String>>()` on it
