@@ -32,8 +32,8 @@ impl TypeError {
     }
 
     fn offset(&mut self, amount: usize) {
-        self.span.start += amount;
-        self.span.end += amount;
+        self.span.start = self.span.start.saturating_add(amount);
+        self.span.end = self.span.end.saturating_add(amount);
     }
 }
 

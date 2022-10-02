@@ -68,7 +68,7 @@ pub struct Entry {
 }
 
 /// Errors that can occur when retrieving a field of an [`Entry`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RetrievalError {
     /// The entry has no field with this name.
     Missing(String),
@@ -1204,5 +1204,20 @@ mod tests {
             e.to_biblatex_string(),
             "@online{finextraFedGovernorChallenges2019,\nauthor = {FinExtra},\ndate = {2019-12-18},\nfile = {C:\\\\Users\\\\mhaug\\\\Zotero\\\\storage\\\\VY9LAKFE\\\\fed-governor-challenges-facebooks-libra-project.html},\ntitle = {Fed {Governor} Challenges {Facebook}'s {Libra} Project},\nurl = {https://www.finextra.com/newsarticle/34986/fed-governor-challenges-facebooks-libra-project},\nurldate = {2020-08-22},\n}"
         )
+    }
+
+    #[test]
+    fn test_synthesized_entry() {
+        let mut e = Entry::new("Test123".to_owned(), EntryType::Article);
+        let brian = vec![Person {
+            name: "Brian Albert".to_string(),
+            given_name: "Monroe".to_string(),
+            prefix: "".to_string(),
+            suffix: "".to_string(),
+        }];
+
+        e.set_author(brian.clone());
+
+        assert_eq!(Ok(brian), e.author());
     }
 }

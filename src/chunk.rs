@@ -316,9 +316,9 @@ pub(crate) fn split_values(
 
     let (s1, s2) = content.split_at(str_idx);
 
-    let boundry = item.span.start + str_idx;
+    let boundry = item.span.start.saturating_add(str_idx);
     item.span = item.span.start .. boundry;
-    let new_span = boundry .. boundry + s2.len();
+    let new_span = boundry .. boundry.saturating_add(s2.len());
 
     let s1 = s1.trim_end().to_string();
     let s2 = s2.trim_start().to_string();
