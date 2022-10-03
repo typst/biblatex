@@ -1210,8 +1210,8 @@ mod tests {
     fn test_synthesized_entry() {
         let mut e = Entry::new("Test123".to_owned(), EntryType::Article);
         let brian = vec![Person {
-            name: "Brian Albert".to_string(),
-            given_name: "Monroe".to_string(),
+            name: "Monroe".to_string(),
+            given_name: "Brian Albert".to_string(),
             prefix: "".to_string(),
             suffix: "".to_string(),
         }];
