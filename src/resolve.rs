@@ -382,12 +382,15 @@ fn flatten(chunks: &mut Chunks) {
 /// Characters that can be escaped.
 ///
 /// In read mode (`read_char = true`), colons are also converted to an unescaped string to keep
-/// compatiblity with Zotero. Zotero escapes colons when exporting verbatim fields. This crate
+/// compatibility with Zotero. Zotero escapes colons when exporting verbatim fields. This crate
 /// doesn't escape colons when exporting.
+///
+/// List of reserved characters here
+/// http://latexref.xyz/Reserved-characters.html
 pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
     match c {
         '{' | '}' | '\\' => true,
-        '&' | '%' | '$' | '_' if !verb => true,
+        '~' | '^' | '#' | '&' | '%' | '$' | '_' if !verb => true,
         ':' if read_char => true,
         _ => false,
     }
