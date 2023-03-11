@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use unicode_normalization::char;
 
 use crate::chunk::{Chunk, Chunks};
@@ -13,7 +11,7 @@ use unscanny::Scanner;
 pub fn parse_field(
     key: &str,
     field: &Field,
-    abbreviations: &HashMap<&str, Field<'_>>,
+    abbreviations: &Vec<(Spanned<&str>, Spanned<Field<'_>>)>,
 ) -> Result<Chunks, ParseError> {
     let mut chunks = vec![];
     for e in field {
@@ -103,7 +101,7 @@ impl<'s> ContentParser<'s> {
                         let idx = self.s.cursor();
                         self.s.eat();
                         return Err(ParseError::new(
-                            idx .. self.s.cursor(),
+                            idx..self.s.cursor(),
                             ParseErrorKind::Unexpected(Token::ClosingBrace),
                         ));
                     }
@@ -128,7 +126,7 @@ impl<'s> ContentParser<'s> {
     fn turnaround(&mut self, depth: usize) {
         self.result.push(Spanned::new(
             std::mem::replace(&mut self.current_chunk, Self::default_chunk(depth)),
-            self.start .. self.s.cursor(),
+            self.start..self.s.cursor(),
         ));
         self.start = self.s.cursor();
     }
@@ -158,7 +156,7 @@ impl<'s> ContentParser<'s> {
             .unwrap_or_default();
         if !valid_start {
             return Err(ParseError::new(
-                pos .. self.s.cursor(),
+                pos..self.s.cursor(),
                 ParseErrorKind::MalformedCommand,
             ));
         }
@@ -207,7 +205,7 @@ impl<'s> ContentParser<'s> {
             let brace = '}'.len_utf8();
             let arg = self.s.from(idx);
 
-            let arg = ContentParser::new("", &arg[.. arg.len() - brace], idx)
+            let arg = ContentParser::new("", &arg[..arg.len() - brace], idx)
                 .parse()?
                 .format_verbatim();
 
@@ -223,7 +221,7 @@ impl<'s> ContentParser<'s> {
         self.eat_assert('$');
         let idx = self.s.cursor();
         let res = self.s.eat_until(|c| c == '$');
-        let span = idx .. self.s.cursor();
+        let span = idx..self.s.cursor();
 
         if self.s.done() {
             return Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof));
@@ -242,7 +240,7 @@ impl<'s> ContentParser<'s> {
     }
 
     fn here(&self) -> Span {
-        self.s.cursor() .. self.s.cursor()
+        self.s.cursor()..self.s.cursor()
     }
 
     fn default_chunk(depth: usize) -> Chunk {
@@ -259,12 +257,16 @@ fn resolve_abbreviation(
     key: &str,
     abbr: &str,
     span: Span,
-    map: &HashMap<&str, Field<'_>>,
+    map: &Vec<(Spanned<&str>, Spanned<Field<'_>>)>,
 ) -> Result<Chunks, ParseError> {
-    let fields = map.get(abbr).ok_or(ParseError::new(
-        span.clone(),
-        ParseErrorKind::UnknownAbbreviation(abbr.into()),
-    ));
+    let fields =
+        map.iter()
+            .find(|e| e.0.v == abbr)
+            .map(|e| &e.1.v)
+            .ok_or(ParseError::new(
+                span.clone(),
+                ParseErrorKind::UnknownAbbreviation(abbr.into()),
+            ));
 
     if fields.is_err() {
         if let Some(month) = get_month_for_abbr(abbr) {
@@ -368,7 +370,7 @@ fn flatten(chunks: &mut Chunks) {
         if merge {
             let redundant = std::mem::replace(
                 &mut chunks[i],
-                Spanned::new(Chunk::Normal("".to_string()), 0 .. 0),
+                Spanned::new(Chunk::Normal("".to_string()), 0..0),
             );
             chunks[i - 1].v.get_mut().push_str(redundant.v.get());
             chunks[i - 1].span.end = redundant.span.end;
@@ -409,8 +411,6 @@ fn is_single_char_func(c: char) -> bool {
 #[allow(non_snake_case)]
 #[rustfmt::skip]
 mod tests {
-    use std::collections::HashMap;
-
     use super::{parse_field, Chunk, RawChunk, Spanned};
 
     fn N(s: &str) -> Chunk {
@@ -429,10 +429,10 @@ mod tests {
 
     #[test]
     fn test_process() {
-        let mut map = HashMap::new();
-        map.insert("abc", vec![z(RawChunk::Normal("ABC"))]);
-        map.insert("hi", vec![z(RawChunk::Normal("hello"))]);
-        map.insert("you", vec![z(RawChunk::Normal("person"))]);
+        let mut map = Vec::new();
+        map.push((Spanned::detached("abc"), Spanned::detached(vec![z(RawChunk::Normal("ABC"))])));
+        map.push((Spanned::detached("hi"), Spanned::detached(vec![z(RawChunk::Normal("hello"))])));
+        map.push((Spanned::detached("you"), Spanned::detached(vec![z(RawChunk::Normal("person"))])));
 
         let field = vec![
             z(RawChunk::Abbreviation("abc")),
@@ -453,7 +453,7 @@ mod tests {
     fn test_resolve_commands_and_escape() {
         let field = vec![z(RawChunk::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}"))];
 
-        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Äther und "));
         assert_eq!(res[1].v, V("\"LaTeX\""));
         assert_eq!(res[2].v, N(" "));
@@ -462,7 +462,7 @@ mod tests {
 
         let field = vec![z(RawChunk::Normal("M\\\"etal S\\= ound"))];
 
-        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Mëtal Sōund"));
     }
 
@@ -470,7 +470,7 @@ mod tests {
     fn test_math() {
         let field = vec![z(RawChunk::Normal("The $11^{th}$ International Conference on How To Make \\$\\$"))];
 
-        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("The "));
         assert_eq!(res[1].v, M("11^{th}"));
         assert_eq!(res[2].v, N(" International Conference on How To Make $$"));
@@ -481,7 +481,7 @@ mod tests {
     fn test_commands() {
         let field = vec![z(RawChunk::Normal("Bose\\textendash{}Einstein"))];
 
-        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Bose–Einstein"));
     }
 }

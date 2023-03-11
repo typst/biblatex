@@ -28,16 +28,17 @@ mod types;
 
 pub use chunk::{Chunk, Chunks, ChunksExt, ChunksRef};
 pub use mechanics::EntryType;
-pub use raw::{ParseError, ParseErrorKind, Token};
+pub use raw::{
+    Field, ParseError, ParseErrorKind, RawBibliography, RawChunk, RawEntry, Token,
+};
 pub use types::*;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
 use macros::*;
 use mechanics::{is_verbatim_field, AuthorMode, PagesChapterMode};
-use raw::RawBibliography;
 
 use paste::paste;
 
@@ -51,7 +52,7 @@ pub struct Bibliography {
     /// The bibliography entries.
     entries: Vec<Entry>,
     /// Maps from citation keys to indices in `items`.
-    keys: HashMap<String, usize>,
+    keys: BTreeMap<String, usize>,
 }
 
 /// A bibliography entry containing chunk fields, which can be parsed into more
@@ -104,7 +105,7 @@ impl Bibliography {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
-            keys: HashMap::new(),
+            keys: BTreeMap::new(),
         }
     }
 
@@ -115,28 +116,29 @@ impl Bibliography {
 
     /// Construct a bibliography from a raw bibliography, with the `xdata` and
     /// `crossref` links resolved.
-    fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
+    pub fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
         let mut res = Self::new();
         let abbr = &raw.abbreviations;
 
         for entry in raw.entries {
             // Check that the key is not repeated
-            if res.get(entry.v.key).is_some() {
+            if res.get(entry.v.key.v).is_some() {
                 return Err(ParseError::new(
                     entry.span,
-                    ParseErrorKind::DuplicateKey(entry.v.key.to_string()),
+                    ParseErrorKind::DuplicateKey(entry.v.key.v.to_string()),
                 ));
             }
 
-            let mut fields = BTreeMap::new();
-            for (field_key, field_value) in entry.v.fields.into_iter() {
-                let field_key = field_key.to_string();
-                let parsed = resolve::parse_field(&field_key, &field_value, abbr)?;
+            let mut fields: BTreeMap<String, Vec<Spanned<Chunk>>> = BTreeMap::new();
+            for spanned_field in entry.v.fields.into_iter() {
+                let (field_key, field_value) = spanned_field;
+                let field_key = field_key.v.to_string();
+                let parsed = resolve::parse_field(&field_key, &field_value.v, abbr)?;
                 fields.insert(field_key, parsed);
             }
             res.insert(Entry {
-                key: entry.v.key.to_string(),
-                entry_type: EntryType::new(entry.v.kind),
+                key: entry.v.key.v.to_string(),
+                entry_type: EntryType::new(entry.v.kind.v),
                 fields,
             });
         }
@@ -576,7 +578,11 @@ impl Entry {
     /// Get an entry but return None for empty chunk slices.
     fn get_non_empty(&self, key: &str) -> Option<ChunksRef> {
         let entry = self.get(key)?;
-        if !entry.is_empty() { Some(entry) } else { None }
+        if !entry.is_empty() {
+            Some(entry)
+        } else {
+            None
+        }
     }
 
     /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
@@ -898,12 +904,12 @@ impl<T> Spanned<T> {
 
     /// Create a new instance with a value and a zero-length span.
     pub fn zero(v: T) -> Self {
-        Self { v, span: 0 .. 0 }
+        Self { v, span: 0..0 }
     }
 
     /// Create a new instance with a detached span.
     pub fn detached(v: T) -> Self {
-        Self { v, span: usize::MAX .. usize::MAX }
+        Self { v, span: usize::MAX..usize::MAX }
     }
 
     /// Whether the span is detached.
@@ -975,7 +981,7 @@ mod tests {
             Err(s) => {
                 assert_eq!(
                     s,
-                    ParseError::new(369 .. 369, ParseErrorKind::Expected(Token::Equals))
+                    ParseError::new(369..369, ParseErrorKind::Expected(Token::Equals))
                 );
             }
         };
@@ -991,7 +997,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(352 .. 359, TypeErrorKind::UnknownPagination)
+                    TypeError::new(352..359, TypeErrorKind::UnknownPagination)
                 );
             }
             _ => {
@@ -1003,7 +1009,7 @@ mod tests {
             Err(RetrievalError::TypeError(s)) => {
                 assert_eq!(
                     s,
-                    TypeError::new(295 .. 300, TypeErrorKind::WrongNumberOfDigits)
+                    TypeError::new(295..300, TypeErrorKind::WrongNumberOfDigits)
                 );
             }
             _ => {
@@ -1014,10 +1020,7 @@ mod tests {
         let coniglio = bibliography.get("conigliocorbalan").unwrap();
         match coniglio.date() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(
-                    s,
-                    TypeError::new(783 .. 785, TypeErrorKind::MonthOutOfRange)
-                );
+                assert_eq!(s, TypeError::new(783..785, TypeErrorKind::MonthOutOfRange));
             }
             _ => {
                 panic!()
@@ -1026,7 +1029,7 @@ mod tests {
 
         match coniglio.pages() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(759 .. 759, TypeErrorKind::InvalidNumber));
+                assert_eq!(s, TypeError::new(759..759, TypeErrorKind::InvalidNumber));
             }
             _ => {
                 panic!()
@@ -1142,9 +1145,10 @@ mod tests {
             "Recursive shennenigans and other important stuff"
         );
 
-        assert_eq!(bibliography.get("arrgh").unwrap().parents().unwrap(), vec![
-            "polecon".to_string()
-        ]);
+        assert_eq!(
+            bibliography.get("arrgh").unwrap().parents().unwrap(),
+            vec!["polecon".to_string()]
+        );
         let arrgh = bibliography.get("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
         assert_eq!(arrgh.volume().unwrap(), 115);

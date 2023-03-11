@@ -57,16 +57,16 @@ impl Date {
         let date = chunks.format_verbatim().to_uppercase();
         let mut date_trimmed = date.trim_end();
 
-        let (is_uncertain, is_approximate) =
-            match &date_trimmed[date_trimmed.len() - 1 ..] {
-                "?" => (true, false),
-                "~" => (false, true),
-                "%" => (true, true),
-                _ => (false, false),
-            };
+        let (is_uncertain, is_approximate) = match &date_trimmed[date_trimmed.len() - 1..]
+        {
+            "?" => (true, false),
+            "~" => (false, true),
+            "%" => (true, true),
+            _ => (false, false),
+        };
 
         if is_uncertain || is_approximate {
-            date_trimmed = &date_trimmed[.. date_trimmed.len() - 1];
+            date_trimmed = &date_trimmed[..date_trimmed.len() - 1];
         }
 
         let value = if date_trimmed.contains('X') {
@@ -77,8 +77,8 @@ impl Date {
             DateValue::Between(d1, d2)
         } else {
             if let Some(pos) = date_trimmed.find('/') {
-                let s1 = &date_trimmed[.. pos];
-                let s2 = &date_trimmed[pos + 1 ..];
+                let s1 = &date_trimmed[..pos];
+                let s2 = &date_trimmed[pos + 1..];
 
                 fn is_open_range(s: &str) -> bool {
                     s.trim().is_empty() || s == ".."
@@ -173,7 +173,7 @@ impl Date {
 
                 let day_start = s.cursor();
                 let day = s.eat_while(char::is_ascii_digit);
-                let day_span = day_start .. s.cursor();
+                let day_span = day_start..s.cursor();
                 if day.len() == 0 {
                     return Err(TypeError::new(day_span, TypeErrorKind::InvalidNumber));
                 }
@@ -209,7 +209,7 @@ impl Date {
 
         if sure_digits < 2 || s.eat_while('X').len() + sure_digits != 4 {
             return Err(TypeError::new(
-                0 .. s.cursor(),
+                0..s.cursor(),
                 TypeErrorKind::WrongNumberOfDigits,
             ));
         }
@@ -263,7 +263,7 @@ impl Date {
             }
             _ => {
                 return Err(TypeError::new(
-                    idx .. s.cursor(),
+                    idx..s.cursor(),
                     TypeErrorKind::WrongNumberOfDigits,
                 ));
             }
@@ -273,7 +273,7 @@ impl Date {
         let month = s.eat_while(char::is_ascii_digit);
         if month.len() != 2 {
             return Err(TypeError::new(
-                idx .. s.cursor(),
+                idx..s.cursor(),
                 TypeErrorKind::WrongNumberOfDigits,
             ));
         }
@@ -281,7 +281,7 @@ impl Date {
 
         if month > 11 {
             return Err(TypeError::new(
-                month_start .. s.cursor(),
+                month_start..s.cursor(),
                 TypeErrorKind::MonthOutOfRange,
             ));
         }
@@ -326,7 +326,7 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
 
     if s.eat_while(char::is_ascii_digit).len() != 4 {
         return Err(TypeError::new(
-            year_idx .. s.cursor(),
+            year_idx..s.cursor(),
             TypeErrorKind::WrongNumberOfDigits,
         ));
     }
@@ -344,7 +344,7 @@ fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
 }
 
 fn here(s: &Scanner) -> Span {
-    s.cursor() .. s.cursor()
+    s.cursor()..s.cursor()
 }
 
 impl Type for Date {
@@ -394,8 +394,8 @@ impl Datetime {
     fn parse(mut src: &str) -> Result<Self, TypeError> {
         let time = if let Some(pos) = src.find('T') {
             if pos + 1 < src.len() {
-                let time_str = &src[pos + 1 ..];
-                src = &src[.. pos];
+                let time_str = &src[pos + 1..];
+                src = &src[..pos];
                 time_str.parse::<NaiveTime>().ok()
             } else {
                 None
@@ -426,7 +426,7 @@ impl Datetime {
                 let month = s.eat_while(char::is_ascii_digit);
                 if month.len() != 2 {
                     return Err(TypeError::new(
-                        month_start .. s.cursor(),
+                        month_start..s.cursor(),
                         TypeErrorKind::WrongNumberOfDigits,
                     ));
                 }
@@ -434,7 +434,7 @@ impl Datetime {
                 let month = u8::from_str_radix(&month, 10).unwrap() - 1;
                 if month > 11 {
                     return Err(TypeError::new(
-                        month_start .. s.cursor(),
+                        month_start..s.cursor(),
                         TypeErrorKind::MonthOutOfRange,
                     ));
                 }
@@ -570,92 +570,107 @@ mod tests {
 
     #[test]
     fn test_parse_date() {
-        let date = Date::parse(&[s(N("2017-10 -25?"), 0 .. 12)]).unwrap();
+        let date = Date::parse(&[s(N("2017-10 -25?"), 0..12)]).unwrap();
         assert_eq!(date.to_chunks(), vec![d(N("2017-10-25?"))]);
-        assert_eq!(date, Date {
-            value: DateValue::At(Datetime {
-                year: 2017,
-                month: Some(9),
-                day: Some(24),
-                time: None,
-            }),
-            uncertain: true,
-            approximate: false,
-        });
+        assert_eq!(
+            date,
+            Date {
+                value: DateValue::At(Datetime {
+                    year: 2017,
+                    month: Some(9),
+                    day: Some(24),
+                    time: None,
+                }),
+                uncertain: true,
+                approximate: false,
+            }
+        );
 
-        let date = Date::parse(&[s(N("19XX~"), 0 .. 5)]).unwrap();
+        let date = Date::parse(&[s(N("19XX~"), 0..5)]).unwrap();
         assert_eq!(date.to_chunks(), vec![d(N("1900/1999~"))]);
-        assert_eq!(date, Date {
-            value: DateValue::Between(
-                Datetime {
-                    year: 1900,
-                    month: None,
-                    day: None,
-                    time: None,
-                },
-                Datetime {
-                    year: 1999,
-                    month: None,
-                    day: None,
-                    time: None,
-                }
-            ),
-            uncertain: false,
-            approximate: true,
-        });
+        assert_eq!(
+            date,
+            Date {
+                value: DateValue::Between(
+                    Datetime {
+                        year: 1900,
+                        month: None,
+                        day: None,
+                        time: None,
+                    },
+                    Datetime {
+                        year: 1999,
+                        month: None,
+                        day: None,
+                        time: None,
+                    }
+                ),
+                uncertain: false,
+                approximate: true,
+            }
+        );
 
-        let date = Date::parse(&[s(N("1948-03-02/1950"), 1 .. 16)]).unwrap();
+        let date = Date::parse(&[s(N("1948-03-02/1950"), 1..16)]).unwrap();
         assert_eq!(date.to_chunks(), vec![d(N("1948-03-02/1950"))]);
-        assert_eq!(date, Date {
-            value: DateValue::Between(
-                Datetime {
-                    year: 1948,
-                    month: Some(2),
-                    day: Some(1),
-                    time: None,
-                },
-                Datetime {
-                    year: 1950,
-                    month: None,
+        assert_eq!(
+            date,
+            Date {
+                value: DateValue::Between(
+                    Datetime {
+                        year: 1948,
+                        month: Some(2),
+                        day: Some(1),
+                        time: None,
+                    },
+                    Datetime {
+                        year: 1950,
+                        month: None,
+                        day: None,
+                        time: None,
+                    }
+                ),
+                uncertain: false,
+                approximate: false,
+            }
+        );
+
+        let date = Date::parse(&[s(N("2020-04-04T18:30:31/"), 0..20)]).unwrap();
+        assert_eq!(date.to_chunks(), vec![d(N("2020-04-04/.."))]);
+        assert_eq!(
+            date,
+            Date {
+                value: DateValue::After(Datetime {
+                    year: 2020,
+                    month: Some(3),
+                    day: Some(3),
+                    time: Some(NaiveTime::from_hms_opt(18, 30, 31).unwrap()),
+                }),
+                uncertain: false,
+                approximate: false,
+            }
+        );
+
+        let date = Date::parse(&[s(N("/-0031-07%"), 0..10)]).unwrap();
+        assert_eq!(date.to_chunks(), vec![d(N("../-0031-07%"))]);
+        assert_eq!(
+            date,
+            Date {
+                value: DateValue::Before(Datetime {
+                    year: -31,
+                    month: Some(6),
                     day: None,
                     time: None,
-                }
-            ),
-            uncertain: false,
-            approximate: false,
-        });
-
-        let date = Date::parse(&[s(N("2020-04-04T18:30:31/"), 0 .. 20)]).unwrap();
-        assert_eq!(date.to_chunks(), vec![d(N("2020-04-04/.."))]);
-        assert_eq!(date, Date {
-            value: DateValue::After(Datetime {
-                year: 2020,
-                month: Some(3),
-                day: Some(3),
-                time: Some(NaiveTime::from_hms(18, 30, 31)),
-            }),
-            uncertain: false,
-            approximate: false,
-        });
-
-        let date = Date::parse(&[s(N("/-0031-07%"), 0 .. 10)]).unwrap();
-        assert_eq!(date.to_chunks(), vec![d(N("../-0031-07%"))]);
-        assert_eq!(date, Date {
-            value: DateValue::Before(Datetime {
-                year: -31,
-                month: Some(6),
-                day: None,
-                time: None,
-            }),
-            uncertain: true,
-            approximate: true,
-        });
+                }),
+                uncertain: true,
+                approximate: true,
+            }
+        );
     }
 
     #[test]
     fn test_parse_date_from_three_fields() {
-        let year = &[s(N("2020"), 0 .. 4)];
-        let month = &[s(N("January\u{A0}12th"), 20 .. 32)];
+        let year = &[s(N("2020"), 0..4)];
+        let month = &[s(N("January\u{A0}12th"), 20..32)];
         let date = Date::parse_three_fields(year, Some(month), None).unwrap();
         assert_eq!(
             date.value,
@@ -667,9 +682,9 @@ mod tests {
             })
         );
 
-        let year = &[s(N("-0004"), 0 .. 5)];
-        let month = &[s(N("aug"), 41 .. 44)];
-        let day = &[s(N("28"), 48 .. 50)];
+        let year = &[s(N("-0004"), 0..5)];
+        let month = &[s(N("aug"), 41..44)];
+        let day = &[s(N("28"), 48..50)];
         let date = Date::parse_three_fields(year, Some(month), Some(day)).unwrap();
         assert_eq!(
             date.value,
@@ -686,38 +701,50 @@ mod tests {
     fn test_parse_datetime() {
         let date1 = Datetime::parse("2017-10 -25").unwrap();
         assert_eq!(date1.to_string(), "2017-10-25");
-        assert_eq!(date1, Datetime {
-            year: 2017,
-            month: Some(9),
-            day: Some(24),
-            time: None,
-        });
+        assert_eq!(
+            date1,
+            Datetime {
+                year: 2017,
+                month: Some(9),
+                day: Some(24),
+                time: None,
+            }
+        );
 
         let date2 = Datetime::parse("  2019 -- 03 ").unwrap();
-        assert_eq!(date2, Datetime {
-            year: 2019,
-            month: Some(2),
-            day: None,
-            time: None,
-        });
+        assert_eq!(
+            date2,
+            Datetime {
+                year: 2019,
+                month: Some(2),
+                day: None,
+                time: None,
+            }
+        );
         assert_eq!(date2.to_string(), "2019-03");
 
         let date3 = Datetime::parse("  -0006").unwrap();
         assert_eq!(date3.to_string(), "-0006");
-        assert_eq!(date3, Datetime {
-            year: -6,
-            month: None,
-            day: None,
-            time: None,
-        });
+        assert_eq!(
+            date3,
+            Datetime {
+                year: -6,
+                month: None,
+                day: None,
+                time: None,
+            }
+        );
 
         let date4 = Datetime::parse("2020-09-06T13:39:00").unwrap();
-        assert_eq!(date4, Datetime {
-            year: 2020,
-            month: Some(8),
-            day: Some(5),
-            time: Some(NaiveTime::from_hms(13, 39, 00)),
-        });
+        assert_eq!(
+            date4,
+            Datetime {
+                year: 2020,
+                month: Some(8),
+                day: Some(5),
+                time: Some(NaiveTime::from_hms_opt(13, 39, 00).unwrap()),
+            }
+        );
 
         assert!(date3 < date4);
         assert!(date2 > date1);
