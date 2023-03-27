@@ -103,10 +103,7 @@ fn convert_result<T>(err: Result<T, RetrievalError>) -> Result<Option<T>, TypeEr
 impl Bibliography {
     /// Create a new, empty bibliography.
     pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-            keys: BTreeMap::new(),
-        }
+        Self { entries: Vec::new(), keys: BTreeMap::new() }
     }
 
     /// Parse a bibliography from a source string.
@@ -266,11 +263,7 @@ impl Bibliography {
             if !first {
                 write!(sink, "\n")?;
             }
-            writeln!(
-                sink,
-                "{}",
-                entry.to_bibtex_string().map_err(|_| fmt::Error)?
-            )?;
+            writeln!(sink, "{}", entry.to_bibtex_string().map_err(|_| fmt::Error)?)?;
             first = false;
         }
         Ok(())
@@ -995,10 +988,7 @@ mod tests {
         let rashid = bibliography.get("rashid2016").unwrap();
         match rashid.pagination() {
             Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(
-                    s,
-                    TypeError::new(352..359, TypeErrorKind::UnknownPagination)
-                );
+                assert_eq!(s, TypeError::new(352..359, TypeErrorKind::UnknownPagination));
             }
             _ => {
                 panic!()
@@ -1099,14 +1089,8 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
 
-        assert_eq!(
-            bibliography.get_mut("haug2019").unwrap().verify().is_ok(),
-            true
-        );
-        assert_eq!(
-            bibliography.get_mut("cannonfodder").unwrap().verify().is_ok(),
-            true
-        );
+        assert_eq!(bibliography.get_mut("haug2019").unwrap().verify().is_ok(), true);
+        assert_eq!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok(), true);
 
         let ill = bibliography.get("ill-defined").unwrap();
         let report = ill.verify();
@@ -1129,17 +1113,11 @@ mod tests {
 
         let e = bibliography.get("macmillan").unwrap();
         assert_eq!(e.publisher().unwrap()[0].format_verbatim(), "Macmillan");
-        assert_eq!(
-            e.location().unwrap().format_verbatim(),
-            "New York and London"
-        );
+        assert_eq!(e.location().unwrap().format_verbatim(), "New York and London");
 
         let book = bibliography.get("recursive").unwrap();
         assert_eq!(book.publisher().unwrap()[0].format_verbatim(), "Macmillan");
-        assert_eq!(
-            book.location().unwrap().format_verbatim(),
-            "New York and London"
-        );
+        assert_eq!(book.location().unwrap().format_verbatim(), "New York and London");
         assert_eq!(
             book.title().unwrap().format_verbatim(),
             "Recursive shennenigans and other important stuff"

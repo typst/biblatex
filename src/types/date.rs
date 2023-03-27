@@ -247,18 +247,8 @@ impl Date {
                 }
 
                 return Ok((
-                    Datetime {
-                        year,
-                        month: Some(0),
-                        day: None,
-                        time: None,
-                    },
-                    Datetime {
-                        year,
-                        month: Some(11),
-                        day: None,
-                        time: None,
-                    },
+                    Datetime { year, month: Some(0), day: None, time: None },
+                    Datetime { year, month: Some(11), day: None, time: None },
                 ));
             }
             _ => {
@@ -295,12 +285,7 @@ impl Date {
             }
 
             return Ok((
-                Datetime {
-                    year,
-                    month: Some(month),
-                    day: Some(0),
-                    time: None,
-                },
+                Datetime { year, month: Some(month), day: Some(0), time: None },
                 Datetime {
                     year,
                     month: Some(month),
@@ -592,18 +577,8 @@ mod tests {
             date,
             Date {
                 value: DateValue::Between(
-                    Datetime {
-                        year: 1900,
-                        month: None,
-                        day: None,
-                        time: None,
-                    },
-                    Datetime {
-                        year: 1999,
-                        month: None,
-                        day: None,
-                        time: None,
-                    }
+                    Datetime { year: 1900, month: None, day: None, time: None },
+                    Datetime { year: 1999, month: None, day: None, time: None }
                 ),
                 uncertain: false,
                 approximate: true,
@@ -622,12 +597,7 @@ mod tests {
                         day: Some(1),
                         time: None,
                     },
-                    Datetime {
-                        year: 1950,
-                        month: None,
-                        day: None,
-                        time: None,
-                    }
+                    Datetime { year: 1950, month: None, day: None, time: None }
                 ),
                 uncertain: false,
                 approximate: false,
@@ -712,28 +682,12 @@ mod tests {
         );
 
         let date2 = Datetime::parse("  2019 -- 03 ").unwrap();
-        assert_eq!(
-            date2,
-            Datetime {
-                year: 2019,
-                month: Some(2),
-                day: None,
-                time: None,
-            }
-        );
+        assert_eq!(date2, Datetime { year: 2019, month: Some(2), day: None, time: None });
         assert_eq!(date2.to_string(), "2019-03");
 
         let date3 = Datetime::parse("  -0006").unwrap();
         assert_eq!(date3.to_string(), "-0006");
-        assert_eq!(
-            date3,
-            Datetime {
-                year: -6,
-                month: None,
-                day: None,
-                time: None,
-            }
-        );
+        assert_eq!(date3, Datetime { year: -6, month: None, day: None, time: None });
 
         let date4 = Datetime::parse("2020-09-06T13:39:00").unwrap();
         assert_eq!(

@@ -26,16 +26,17 @@ impl Person {
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
     pub fn parse(chunks: ChunksRef) -> Self {
-        let num_commas: usize = chunks
-            .iter()
-            .map(|val| {
-                if let Chunk::Normal(s) = &val.v {
-                    s.matches(',').count()
-                } else {
-                    0
-                }
-            })
-            .sum();
+        let num_commas: usize =
+            chunks
+                .iter()
+                .map(|val| {
+                    if let Chunk::Normal(s) = &val.v {
+                        s.matches(',').count()
+                    } else {
+                        0
+                    }
+                })
+                .sum();
 
         match num_commas {
             0 => Self::parse_unified(&chunks),
@@ -301,14 +302,11 @@ mod tests {
         assert_eq!(p.given_name, "Jean");
         assert_eq!(vec![p].to_chunks(), vec![d(N("De La Fontaine, Jean"),)]);
 
-        let p = Person::parse(&[s(V("De La"), 2 .. 6), s(N(" Fontaine, Jean"), 7 .. 15)]);
+        let p = Person::parse(&[s(V("De La"), 2..6), s(N(" Fontaine, Jean"), 7..15)]);
         assert_eq!(p.name, "Fontaine");
         assert_eq!(p.prefix, "De La");
         assert_eq!(p.given_name, "Jean");
-        assert_eq!(vec![p].to_chunks(), vec![
-            d(V("De La")),
-            d(N(" Fontaine, Jean"))
-        ]);
+        assert_eq!(vec![p].to_chunks(), vec![d(V("De La")), d(N(" Fontaine, Jean"))]);
 
         let p = Person::parse(&[Spanned::zero(N("De la Fontaine, Jean"))]);
         assert_eq!(p.name, "Fontaine");

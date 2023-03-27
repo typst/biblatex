@@ -190,11 +190,8 @@ impl<'s> BiblatexParser<'s> {
 
     /// Eat a delimiter.
     fn brace(&mut self, open: bool) -> Result<(), ParseError> {
-        let (brace, token) = if open {
-            ('{', Token::OpeningBrace)
-        } else {
-            ('}', Token::ClosingBrace)
-        };
+        let (brace, token) =
+            if open { ('{', Token::OpeningBrace) } else { ('}', Token::ClosingBrace) };
 
         let peeked = self.s.peek();
 
@@ -202,10 +199,7 @@ impl<'s> BiblatexParser<'s> {
             self.s.eat();
             Ok(())
         } else {
-            Err(ParseError::new(
-                self.here(),
-                ParseErrorKind::Expected(token),
-            ))
+            Err(ParseError::new(self.here(), ParseErrorKind::Expected(token)))
         }
     }
 
@@ -224,10 +218,7 @@ impl<'s> BiblatexParser<'s> {
     /// Eat an equals sign.
     fn equals(&mut self) -> Result<(), ParseError> {
         if !self.s.eat_if('=') {
-            Err(ParseError::new(
-                self.here(),
-                ParseErrorKind::Expected(Token::Equals),
-            ))
+            Err(ParseError::new(self.here(), ParseErrorKind::Expected(Token::Equals)))
         } else {
             Ok(())
         }
@@ -433,10 +424,7 @@ impl<'s> BiblatexParser<'s> {
             self.s.eat_while(is_id_continue);
             Ok(Spanned::new(self.s.from(idx), idx..self.s.cursor()))
         } else {
-            Err(ParseError::new(
-                self.here(),
-                ParseErrorKind::Expected(Token::Identifier),
-            ))
+            Err(ParseError::new(self.here(), ParseErrorKind::Expected(Token::Identifier)))
         }
     }
 
@@ -495,10 +483,9 @@ impl<'s> BiblatexParser<'s> {
         self.s.eat_whitespace();
         let fields = self.fields()?;
 
-        self.res.entries.push(Spanned::new(
-            RawEntry { key, kind, fields },
-            start..self.s.cursor(),
-        ));
+        self.res
+            .entries
+            .push(Spanned::new(RawEntry { key, kind, fields }, start..self.s.cursor()));
         Ok(())
     }
 

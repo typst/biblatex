@@ -201,7 +201,7 @@ impl Type for Vec<Range<u32>> {
             let num = s.eat_while(|c: char| c.is_digit(10));
             u32::from_str(num).map_err(|_| {
                 TypeError::new(
-                    idx + offset .. s.cursor() + offset,
+                    idx + offset..s.cursor() + offset,
                     TypeErrorKind::InvalidNumber,
                 )
             })
@@ -224,13 +224,13 @@ impl Type for Vec<Range<u32>> {
             let start = component(&mut s, span.start)?;
             s.eat_whitespace();
             if !s.eat_if('-') {
-                res.push(start .. start);
+                res.push(start..start);
                 continue;
             }
             s.eat_while('-');
             s.eat_whitespace();
             let end = component(&mut s, span.start)?;
-            res.push(start .. end);
+            res.push(start..end);
         }
 
         Ok(res)
@@ -426,8 +426,8 @@ mod tests {
     fn test_ranges() {
         let ranges = &[Spanned::zero(N("31--43,21:4-21:6,  194 --- 245"))];
         let res = ranges.parse::<Vec<Range<u32>>>().unwrap();
-        assert_eq!(res[0], 31 .. 43);
-        assert_eq!(res[1], 4 .. 6);
-        assert_eq!(res[2], 194 .. 245);
+        assert_eq!(res[0], 31..43);
+        assert_eq!(res[1], 4..6);
+        assert_eq!(res[2], 194..245);
     }
 }

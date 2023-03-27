@@ -150,7 +150,7 @@ impl ChunksExt for [Spanned<Chunk>] {
     fn span(&self) -> Span {
         let start = self.first().map(|c| c.span.start).unwrap_or(0);
         let end = self.last().map(|c| c.span.end).unwrap_or(start);
-        start .. end
+        start..end
     }
 
     fn to_biblatex_string(&self, is_verbatim: bool) -> String {
@@ -181,7 +181,7 @@ impl ChunksExt for [Spanned<Chunk>] {
             }
         }
 
-        for _ in 0 .. if extra_brace { 2 } else { 1 } {
+        for _ in 0..if extra_brace { 2 } else { 1 } {
             res.push('}');
         }
 
@@ -210,7 +210,7 @@ pub(crate) fn join_chunk_list(chunks: ChunksRef, sep: &str) -> Chunks {
         } else {
             res.push(Spanned::new(
                 Chunk::Normal(sep.to_string()),
-                chunk.span.start .. chunk.span.start,
+                chunk.span.start..chunk.span.start,
             ));
         }
 
@@ -234,20 +234,20 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
             let mut start = val.span.start;
 
             while let Some(pos) = target.find(keyword) {
-                let first = target[.. pos].trim_end();
+                let first = target[..pos].trim_end();
                 latest.push(Spanned::new(
                     Chunk::Normal(first.to_string()),
-                    start .. start + pos,
+                    start..start + pos,
                 ));
                 out.push(std::mem::take(&mut latest));
 
-                target = target[pos + keyword.len() ..].trim_start();
+                target = target[pos + keyword.len()..].trim_start();
                 start += pos + keyword.len();
             }
 
             latest.push(Spanned::new(
                 Chunk::Normal(target.to_string()),
-                start .. val.span.end,
+                start..val.span.end,
             ));
         } else {
             latest.push(val.clone());
@@ -308,7 +308,7 @@ pub(crate) fn split_values(
     }
 
     if chunk_idx + 1 < src.len() {
-        new.extend(src.drain(chunk_idx + 1 ..));
+        new.extend(src.drain(chunk_idx + 1..));
     }
 
     let item = src.last_mut().unwrap();
@@ -317,8 +317,8 @@ pub(crate) fn split_values(
     let (s1, s2) = content.split_at(str_idx);
 
     let boundry = item.span.start.saturating_add(str_idx);
-    item.span = item.span.start .. boundry;
-    let new_span = boundry .. boundry.saturating_add(s2.len());
+    item.span = item.span.start..boundry;
+    let new_span = boundry..boundry.saturating_add(s2.len());
 
     let s1 = s1.trim_end().to_string();
     let s2 = s2.trim_start().to_string();
@@ -364,13 +364,9 @@ pub(crate) mod tests {
 
     #[test]
     fn test_split() {
-        let vls = &[
-            s(N("split "), 1 .. 7),
-            s(V("exac^tly"), 9 .. 17),
-            s(N("here"), 19 .. 23),
-        ];
-        let ref1 = &[s(N("split "), 1 .. 7), s(V("exac^"), 9 .. 14)];
-        let ref2 = &[s(V("tly"), 14 .. 17), s(N("here"), 19 .. 23)];
+        let vls = &[s(N("split "), 1..7), s(V("exac^tly"), 9..17), s(N("here"), 19..23)];
+        let ref1 = &[s(N("split "), 1..7), s(V("exac^"), 9..14)];
+        let ref2 = &[s(V("tly"), 14..17), s(N("here"), 19..23)];
 
         let split = split_values(vls, 1, 5);
         assert_eq!(split.0, ref1);
@@ -380,16 +376,13 @@ pub(crate) mod tests {
     #[test]
     fn test_split_at_normal_char() {
         let vls = &[
-            s(N("split "), 1 .. 7),
-            s(V("not, "), 9 .. 14),
-            s(N("but rather, here"), 16 .. 32),
+            s(N("split "), 1..7),
+            s(V("not, "), 9..14),
+            s(N("but rather, here"), 16..32),
         ];
-        let ref1 = &[
-            s(N("split "), 1 .. 7),
-            s(V("not, "), 9 .. 14),
-            s(N("but rather"), 16 .. 26),
-        ];
-        let ref2 = &[s(N("here"), 28 .. 32)];
+        let ref1 =
+            &[s(N("split "), 1..7), s(V("not, "), 9..14), s(N("but rather"), 16..26)];
+        let ref2 = &[s(N("here"), 28..32)];
 
         let split = split_at_normal_char(vls, ',', true);
         assert_eq!(split.0, ref1);

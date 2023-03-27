@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 bench/target
+.DS_Store
