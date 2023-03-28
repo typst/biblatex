@@ -497,7 +497,7 @@ impl<'s> BiblatexParser<'s> {
 /// Whether a character can start an identifier.
 #[inline]
 pub fn is_id_start(c: char) -> bool {
-    !matches!(c, ':' | '<' | '-' | '>' | '_') && is_id_continue(c)
+    !matches!(c, ':' | '<' | '-' | '>') && is_id_continue(c)
 }
 
 /// Whether a character can continue an identifier.
