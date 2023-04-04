@@ -355,13 +355,7 @@ impl<'s> BiblatexParser<'s> {
         self.equals()?;
         self.s.eat_whitespace();
 
-        let value = match self.s.peek() {
-            Some(c) if c != '{' && c != '"' => self.abbr_field()?,
-            _ => {
-                let start = self.s.cursor();
-                Spanned::new(vec![self.single_field()?], start..self.s.cursor())
-            }
-        };
+        let value = self.abbr_field()?;
 
         self.s.eat_whitespace();
 
@@ -443,6 +437,9 @@ impl<'s> BiblatexParser<'s> {
         match entry_type.v.to_ascii_lowercase().as_str() {
             "string" => self.strings()?,
             "preamble" => self.preamble()?,
+            "comment" => {
+                self.s.eat_until('}');
+            }
             _ => self.body(entry_type, start)?,
         }
 

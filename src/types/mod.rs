@@ -249,31 +249,31 @@ impl Type for Vec<Range<u32>> {
     }
 }
 
-/// The edition of a printed publication.
+/// A value that could be either a typed value or a literal string.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Edition {
-    /// An integer edition.
-    Int(i64),
-    /// A literal edition, for example `"Reprinted, and revised edition"`.
+pub enum PermissiveType<T: Type> {
+    /// A typed version of the value.
+    Typed(T),
+    /// A literal string, for example `"Reprinted, and revised edition"`.
     Chunks(Chunks),
 }
 
-impl Type for Edition {
+impl<T> Type for PermissiveType<T>
+where
+    T: Type,
+{
     fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
-        Ok(if let Ok(int) = chunks.parse() {
-            Edition::Int(int)
+        Ok(if let Ok(val) = chunks.parse() {
+            PermissiveType::Typed(val)
         } else {
-            Edition::Chunks(chunks.to_vec())
+            PermissiveType::Chunks(chunks.to_vec())
         })
     }
 
     fn to_chunks(&self) -> Chunks {
         match self {
-            Edition::Int(int) => {
-                let res = int.to_string();
-                vec![Spanned::detached(Chunk::Normal(res))]
-            }
-            Edition::Chunks(chunks) => chunks.clone(),
+            PermissiveType::Typed(val) => val.to_chunks(),
+            PermissiveType::Chunks(chunks) => chunks.clone(),
         }
     }
 }

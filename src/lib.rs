@@ -453,7 +453,7 @@ impl Entry {
 
         for (key, chunks) in &self.fields {
             let error = match key.as_str() {
-                "edition" => chunks.parse::<Edition>().err(),
+                "edition" => chunks.parse::<PermissiveType<i64>>().err(),
                 "organization" => chunks.parse::<Vec<Chunks>>().err(),
                 "pages" => chunks.parse::<Vec<std::ops::Range<u32>>>().err(),
                 "publisher" => chunks.parse::<Vec<Chunks>>().err(),
@@ -539,13 +539,17 @@ impl Entry {
         for (key, value) in &self.fields {
             if key == "date" {
                 if let Some(date) = convert_result(self.date())? {
-                    for (key, value) in date.to_fieldset() {
-                        let v = [Spanned::zero(Chunk::Normal(value))]
-                            .to_biblatex_string(false);
-                        writeln!(bibtex, "{} = {},", key, v).unwrap();
+                    if let PermissiveType::Typed(date) = date {
+                        for (key, value) in date.to_fieldset() {
+                            let v = [Spanned::zero(Chunk::Normal(value))]
+                                .to_biblatex_string(false);
+                            writeln!(bibtex, "{} = {},", key, v).unwrap();
+                        }
+                        continue;
                     }
+                } else {
+                    continue;
                 }
-                continue;
             }
 
             let key = match key.as_ref() {
@@ -738,17 +742,17 @@ impl Entry {
         author: "author" => Vec<Person>,
         book_title: "booktitle",
         chapter: "chapter",
-        edition: "edition" => Edition,
+        edition: "edition" => PermissiveType<i64>,
         how_published: "howpublished",
         note: "note",
         number: "number",
         organization: "organization" => Vec<Chunks>,
-        pages: "pages" => Vec<std::ops::Range<u32>>,
+        pages: "pages" => PermissiveType<Vec<std::ops::Range<u32>>>,
         publisher: "publisher" => Vec<Chunks>,
         series: "series",
         title: "title",
         type_: "type" => String,
-        volume: "volume" => i64,
+        volume: "volume" => PermissiveType<i64>,
     }
 
     alias_fields! {
@@ -994,37 +998,6 @@ mod tests {
                 panic!()
             }
         };
-
-        match rashid.date() {
-            Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(
-                    s,
-                    TypeError::new(295..300, TypeErrorKind::WrongNumberOfDigits)
-                );
-            }
-            _ => {
-                panic!()
-            }
-        };
-
-        let coniglio = bibliography.get("conigliocorbalan").unwrap();
-        match coniglio.date() {
-            Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(783..785, TypeErrorKind::MonthOutOfRange));
-            }
-            _ => {
-                panic!()
-            }
-        };
-
-        match coniglio.pages() {
-            Err(RetrievalError::TypeError(s)) => {
-                assert_eq!(s, TypeError::new(759..759, TypeErrorKind::InvalidNumber));
-            }
-            _ => {
-                panic!()
-            }
-        };
     }
 
     #[test]
@@ -1129,7 +1102,7 @@ mod tests {
         );
         let arrgh = bibliography.get("arrgh").unwrap();
         assert_eq!(arrgh.entry_type, EntryType::Article);
-        assert_eq!(arrgh.volume().unwrap(), 115);
+        assert_eq!(arrgh.volume().unwrap(), PermissiveType::Typed(115));
         assert_eq!(arrgh.editors().unwrap()[0].0[0].name, "Uhlig");
         assert_eq!(arrgh.number().unwrap().format_verbatim(), "6");
         assert_eq!(

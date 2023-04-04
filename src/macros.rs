@@ -61,22 +61,24 @@ macro_rules! date_fields {
             #[doc = "Get the `" $prefix "date` field, falling back on the
                      `" $prefix "year`, `" $prefix "month`, and
                      `" $prefix "day` fields if it is not present."]
-            pub fn $name(&self) -> Result<Date, RetrievalError> {
+            pub fn $name(&self) -> Result<PermissiveType<Date>, RetrievalError> {
                 if let Some(chunks) = self.get(concat!($prefix, "date")) {
                     chunks.parse::<Date>()
+                        .map(|d| PermissiveType::Typed(d))
+                        .or_else(|_| Ok::<_, RetrievalError>(PermissiveType::Chunks(chunks.to_vec())))
                 } else {
-                    Date::parse_three_fields(
+                    Ok(PermissiveType::Typed(Date::parse_three_fields(
                         self.get(concat!($prefix, "year")).ok_or_else(|| RetrievalError::Missing("year".to_string()))?,
                         self.get(concat!($prefix, "month")),
                         self.get(concat!($prefix, "day")),
-                    )
+                    )?))
                 }.map_err(Into::into)
             }
 
             #[doc = "Set the value of the `" $prefix "date` field, removing the
                      `" $prefix "year`, `" $prefix "month`, and
                      `" $prefix "day` fields if present."]
-            pub fn [<set_ $name>](&mut self, item: Date) {
+            pub fn [<set_ $name>](&mut self, item: PermissiveType<Date>) {
                 self.set(concat!($prefix, "date"), item.to_chunks());
                 self.remove(concat!($prefix, "year"));
                 self.remove(concat!($prefix, "month"));
