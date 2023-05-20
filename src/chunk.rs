@@ -258,6 +258,80 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     out
 }
 
+/// Splits chunk vectors that are a token lists as defined per the
+/// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
+///
+/// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
+pub(crate) fn split_token_lists_surrounded_by_whitespace(
+    vals: ChunksRef,
+    keyword: &str,
+) -> Vec<Chunks> {
+    let mut out = vec![];
+    let mut latest = vec![];
+
+    for val in vals {
+        if let Chunk::Normal(s) = &val.v {
+            let mut start = val.span.start;
+            let possible_splits: Vec<&str> = s.split(keyword).collect();
+
+            let mut cur = String::new();
+            let mut j = 1;
+
+            while j < possible_splits.len() {
+                if let (Some(left_last), Some(right_first)) = (
+                    possible_splits[j - 1].chars().last(),
+                    possible_splits[j].chars().next(),
+                ) {
+                    if left_last.is_whitespace() && right_first.is_whitespace() {
+                        // add remaining value to the cur
+                        cur += possible_splits[j - 1];
+
+                        // trim start and advance start
+                        let cur_trim_start = cur.trim_start();
+                        start += cur.len() - cur_trim_start.len();
+
+                        // record new start
+                        let new_start = start + cur_trim_start.len();
+
+                        // trim_end
+                        cur = cur_trim_start.trim_end().to_string();
+
+                        // push previous successful split
+                        latest.push(Spanned::new(
+                            Chunk::Normal(std::mem::take(&mut cur)),
+                            start..start + cur.len(),
+                        ));
+                        out.push(std::mem::take(&mut latest));
+
+                        // continue
+                        start = new_start;
+                        j += 1;
+                        continue;
+                    }
+                }
+
+                // if trailing "and" or leading "and" or any of the neighbouring chars are not whitespaces
+                cur += possible_splits[j - 1];
+                cur += "and";
+                j += 1;
+            }
+            cur += possible_splits[j - 1];
+
+            let cur_trim_start = cur.trim_start();
+            start += cur.len() - cur_trim_start.len();
+            cur = cur_trim_start.trim_end().to_string();
+            let end = start + cur.len();
+
+            latest.push(Spanned::new(Chunk::Normal(cur), start..end));
+        } else {
+            latest.push(val.clone());
+        }
+    }
+
+    out.push(latest);
+    out
+}
+
 /// Splits a chunk vector into two at the first occurrance of the character `c`.
 /// `omit` controls whether the output will contain `c`.
 pub(crate) fn split_at_normal_char(
