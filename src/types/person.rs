@@ -390,6 +390,29 @@ Claude Garamond and",
     }
 
     #[test]
+    fn test_name_with_and_inside() {
+        let names = String::from(
+            "Johannes anderson Gutenberg and Claudeand Garamond and Aanderson Manutius",
+        );
+        let range = std::ops::Range { start: 0, end: names.len() };
+        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].prefix, "anderson");
+        assert_eq!(people[0].given_name, "Johannes");
+
+        assert_eq!(people[1].name, "Garamond");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "Claudeand");
+
+        assert_eq!(people[2].name, "Manutius");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "Aanderson");
+    }
+
+    #[test]
     fn test_person_comma() {
         let p = Person::parse(&[Spanned::zero(N("jean de la fontaine,"))]);
         assert_eq!(p.name, "fontaine");
