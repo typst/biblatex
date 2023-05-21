@@ -320,10 +320,10 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
 
             let cur_trim_start = cur.trim_start();
             start += cur.len() - cur_trim_start.len();
-            cur = cur_trim_start.trim_end().to_string();
-            let end = start + cur.len();
-
-            latest.push(Spanned::new(Chunk::Normal(cur), start..end));
+            latest.push(Spanned::new(
+                Chunk::Normal(cur_trim_start.to_string()),
+                start..val.span.end,
+            ));
         } else {
             latest.push(val.clone());
         }
