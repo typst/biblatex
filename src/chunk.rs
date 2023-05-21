@@ -295,11 +295,12 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
 
                         // trim_end
                         cur = cur_trim_start.trim_end().to_string();
+                        let end = start + cur.len();
 
                         // push previous successful split
                         latest.push(Spanned::new(
                             Chunk::Normal(std::mem::take(&mut cur)),
-                            start..start + cur.len(),
+                            start..start + end,
                         ));
                         out.push(std::mem::take(&mut latest));
 
