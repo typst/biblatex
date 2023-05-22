@@ -394,7 +394,7 @@ Claude Garamond and",
         let names = String::from(
             "Johannes Gutenberg and and
 Aldus Manutius and
-Claude Garamond and",
+Claude Garamond",
         );
         let range = std::ops::Range { start: 0, end: names.len() };
         let people = &[Spanned::new(Chunk::Normal(names), range)];
@@ -408,7 +408,7 @@ Claude Garamond and",
         let names = String::from(
             "Johannes Gutenberg and and and
 Aldus Manutius and
-Claude Garamond and",
+Claude Garamond",
         );
         let range = std::ops::Range { start: 0, end: names.len() };
         let people = &[Spanned::new(Chunk::Normal(names), range)];
