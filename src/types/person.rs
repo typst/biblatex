@@ -390,6 +390,40 @@ Claude Garamond and",
     }
 
     #[test]
+    fn test_consecutive_and() {
+        let names = String::from(
+            "Johannes Gutenberg and and
+Aldus Manutius and
+Claude Garamond and",
+        );
+        let range = std::ops::Range { start: 0, end: names.len() };
+        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 4);
+
+        assert_eq!(people[1].name, "");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "");
+
+        let names = String::from(
+            "Johannes Gutenberg and and and
+Aldus Manutius and
+Claude Garamond and",
+        );
+        let range = std::ops::Range { start: 0, end: names.len() };
+        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 5);
+
+        assert_eq!(people[1].name, "");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "");
+        assert_eq!(people[2].name, "");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "");
+    }
+
+    #[test]
     fn test_name_with_and_inside() {
         let names = String::from(
             "Johannes anderson Gutenberg and Claudeand Garamond and Aanderson Manutius",
