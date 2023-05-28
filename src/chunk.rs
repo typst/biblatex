@@ -311,9 +311,10 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                     }
                 }
 
-                // if trailing "and" or leading "and" or any of the neighbouring chars are not whitespaces
+                // if trailing keyword or leading keyword or
+                // any of the neighbouring chars are not whitespaces
                 cur += prev;
-                cur += "and";
+                cur += keyword;
                 prev = split;
             }
 
