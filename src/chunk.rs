@@ -272,19 +272,19 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
     for val in vals {
         if let Chunk::Normal(s) = &val.v {
             let mut start = val.span.start;
-            let possible_splits: Vec<&str> = s.split(keyword).collect();
+            let mut splits = s.split(keyword);
+            // guaranteed to have values
+            let mut prev = splits.next().unwrap();
 
             let mut cur = String::new();
-            let mut j = 1;
 
-            while j < possible_splits.len() {
-                if let (Some(left_last), Some(right_first)) = (
-                    possible_splits[j - 1].chars().last(),
-                    possible_splits[j].chars().next(),
-                ) {
+            for split in splits {
+                if let (Some(left_last), Some(right_first)) =
+                    (prev.chars().last(), split.chars().next())
+                {
                     if left_last.is_whitespace() && right_first.is_whitespace() {
                         // add remaining value to the cur
-                        cur += possible_splits[j - 1];
+                        cur += prev;
 
                         // trim start and advance start
                         let cur_trim_start = cur.trim_start();
@@ -306,18 +306,18 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
 
                         // continue
                         start = new_start;
-                        j += 1;
+                        prev = split;
                         continue;
                     }
                 }
 
                 // if trailing "and" or leading "and" or any of the neighbouring chars are not whitespaces
-                cur += possible_splits[j - 1];
+                cur += prev;
                 cur += "and";
-                j += 1;
+                prev = split;
             }
-            cur += possible_splits[j - 1];
 
+            cur += prev;
             let cur_trim_start = cur.trim_start();
             start += cur.len() - cur_trim_start.len();
             latest.push(Spanned::new(
