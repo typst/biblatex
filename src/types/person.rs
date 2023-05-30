@@ -438,6 +438,19 @@ Claude Garamond",
     }
 
     #[test]
+    fn test_verbatim() {
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+    }
+
+    #[test]
     fn test_person_comma() {
         let p = Person::parse(&[Spanned::zero(N("jean de la fontaine,"))]);
         assert_eq!(p.name, "fontaine");

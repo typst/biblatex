@@ -271,86 +271,97 @@ pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<C
     let mut out = vec![];
     let mut latest = vec![];
 
+    // Trim the beginning and the end of the parsed field
+    let sanitize_latest = |latest: &mut Vec<Spanned<Chunk>>| {
+        if latest.len() == 0 {
+            return;
+        }
+
+        let mut diff = 0;
+        if let Chunk::Normal(s) = &mut latest[0].v {
+            diff = s.len() - s.trim_start().len();
+            s.drain(0..diff);
+        }
+        if !latest[0].is_detached() {
+            latest[0].span.start += diff;
+        }
+
+        let mut new_len = 0;
+        let end = latest.len() - 1;
+        if let Chunk::Normal(s) = &mut latest[end].v {
+            new_len = s.trim_end().len();
+            s.truncate(new_len);
+        }
+        if !latest[end].is_detached() {
+            latest[end].span.end = latest[end].span.start + new_len;
+        }
+    };
+
     for (chunk_idx, chunk) in vals.iter().enumerate() {
-        let chunk_generator = if chunk.is_detached() {
-            |cur: &mut String, _start: usize| {
-                Spanned::detached(Chunk::Normal(std::mem::take(cur)))
-            }
-        } else {
-            |cur: &mut String, start: usize| {
-                let end = start + cur.len();
-                Spanned::new(Chunk::Normal(std::mem::take(cur)), start..end)
-            }
-        };
-
         if let Chunk::Normal(s) = &chunk.v {
-            let mut span_start = chunk.span.start;
+            let mut start = chunk.span.start;
 
-            // If the first chunk is normal -> leading and
+            // If the first chunk is normal -> leading keyword
             let s = if chunk_idx == 0 {
                 let new_s = s.trim_start();
                 if !chunk.is_detached() {
                     // Offset the span start by the number of characters trimmed
-                    span_start = chunk.span.start + s.len() - new_s.len();
+                    start = chunk.span.start + s.len() - new_s.len();
                 }
                 new_s
             } else {
                 &s
             };
 
-            // If the last chunk is normal -> trailing and
+            // If the last chunk is normal -> trailing keyword
             let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { &s };
 
-            let mut splits_with_indexes = s
-                .split_whitespace()
-                .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub))
-                .peekable();
+            let mut splits = s.split(keyword);
+            // guaranteed to have values
+            let mut prev = splits.next().unwrap();
 
-            // Set start to index of next item
-            let mut start = if !chunk.is_detached() {
-                splits_with_indexes.peek().unwrap_or(&(0, "")).0
-            } else {
-                0
-            };
             let mut cur = String::new();
 
-            while let Some((idx, split)) = splits_with_indexes.next() {
-                // Correct partition:
-                // 1. split == keyword
-                // 2. idx != 0: Check if exists whitespace before keyword
-                //    - If this is the first block => Trim whitespace (so
-                //      leading keywords are suppressed)
-                //    - Otherwise => No change
-                // 3. idx + split.len() != s.len(): Check if exists whitespace
-                //    after keyword
-                //    - If last block => Trim whitespace (so trailing keywords
-                //      are suppressed)
-                //    - Otherwise => No change
-                if split == keyword && idx != 0 && idx + split.len() != s.len() {
-                    latest.push(chunk_generator(&mut cur, span_start + start));
-                    out.push(std::mem::take(&mut latest));
+            for split in splits {
+                if let (Some(left_last), Some(right_first)) =
+                    (prev.chars().last(), split.chars().next())
+                {
+                    if left_last.is_whitespace() && right_first.is_whitespace() {
+                        cur += prev;
+                        let end = if chunk.is_detached() {
+                            usize::MAX
+                        } else {
+                            start + cur.len()
+                        };
+                        latest.push(Spanned::new(
+                            Chunk::Normal(std::mem::take(&mut cur)),
+                            start..end,
+                        ));
 
-                    // Set start to index of next item
-                    if !chunk.is_detached() {
-                        start = splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+                        sanitize_latest(&mut latest);
+                        out.push(std::mem::take(&mut latest));
+
+                        start = end;
+                        prev = split;
+                        continue;
                     }
-                    continue;
                 }
 
-                if !cur.is_empty() {
-                    cur += " ";
-                }
-                cur += split;
+                cur += prev;
+                cur += keyword;
+                prev = split;
             }
 
-            if !cur.is_empty() {
-                latest.push(chunk_generator(&mut cur, span_start + start));
-            }
+            cur += prev;
+            let end = if chunk.is_detached() { usize::MAX } else { start + cur.len() };
+            latest
+                .push(Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end));
         } else {
             latest.push(chunk.clone());
         }
     }
 
+    sanitize_latest(&mut latest);
     out.push(latest);
     out
 }
