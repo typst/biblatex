@@ -286,8 +286,7 @@ mod tests {
     fn test_list_of_names() {
         let names =
             String::from("Johannes Gutenberg and Aldus Manutius and Claude Garamond");
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 3);
 
@@ -311,8 +310,7 @@ mod tests {
 Aldus Manutius and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people1: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people1.len(), 3);
 
@@ -323,8 +321,7 @@ Aldus Manutius
 and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people2: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people2.len(), 3);
 
@@ -334,8 +331,7 @@ and
 Aldus Manutius and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people3: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people3.len(), 3);
 
@@ -362,8 +358,7 @@ Claude Garamond",
 Aldus Manutius and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 3);
 
@@ -379,8 +374,7 @@ Claude Garamond",
 Aldus Manutius and
 Claude Garamond and",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 3);
 
@@ -396,8 +390,7 @@ Claude Garamond and",
 Aldus Manutius and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 4);
 
@@ -410,8 +403,7 @@ Claude Garamond",
 Aldus Manutius and
 Claude Garamond",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 5);
 
@@ -428,8 +420,7 @@ Claude Garamond",
         let names = String::from(
             "Johannes anderson Gutenberg and Claudeand Garamond and Aanderson Manutius",
         );
-        let range = std::ops::Range { start: 0, end: names.len() };
-        let people = &[Spanned::new(Chunk::Normal(names), range)];
+        let people = &[Spanned::detached(Chunk::Normal(names))];
         let people: Vec<Person> = Type::from_chunks(people).unwrap();
         assert_eq!(people.len(), 3);
 
