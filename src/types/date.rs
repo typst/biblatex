@@ -404,12 +404,9 @@ impl Datetime {
         } else {
             // This might be an incomplete date, missing day and possibly month.
             let mut s = Scanner::new(&slice);
-            s.eat_whitespace();
             let year = get_year(&mut s)?;
-            s.eat_whitespace();
 
             let month = if s.eat_while('-').len() > 0 {
-                s.eat_whitespace();
                 let month_start = s.cursor();
                 let month = s.eat_while(char::is_ascii_digit);
                 if month.len() != 2 {

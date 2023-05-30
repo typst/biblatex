@@ -260,15 +260,14 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
 
 /// Split the token list based on a keyword surrounded by whitespaces
 ///
-/// For Normal Chunk,
+/// For Normal Chunks,
 /// - The leading/trailing keyword is not considered as a valid split
-/// (regardless of whether the keyword is preceded/after by some whitespaces).
-/// - If there are consecutive keywords, the words between two consecutive keywords
-/// (whether empty or not) will be considered as a valid split.
-pub(crate) fn split_token_lists_surrounded_by_whitespace(
-    vals: ChunksRef,
-    keyword: &str,
-) -> Vec<Chunks> {
+/// (regardless of whether the keyword is preceded/followed by some
+/// whitespaces).
+/// - If there are consecutive keywords, the characters between two consecutive
+/// keywords (whether only whitespace or not) will be considered as a valid
+/// split.
+pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     let mut out = vec![];
     let mut latest = vec![];
 
@@ -287,17 +286,19 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
         if let Chunk::Normal(s) = &chunk.v {
             let mut span_start = chunk.span.start;
 
-            // if first chunk is normal -> leading and
+            // If the first chunk is normal -> leading and
             let s = if chunk_idx == 0 {
                 let new_s = s.trim_start();
                 if !chunk.is_detached() {
+                    // Offset the span start by the number of characters trimmed
                     span_start = chunk.span.start + s.len() - new_s.len();
                 }
                 new_s
             } else {
                 &s
             };
-            // if last chunk is normal -> trailing end
+
+            // If the last chunk is normal -> trailing and
             let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { &s };
 
             let mut splits_with_indexes = s
@@ -305,7 +306,7 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub))
                 .peekable();
 
-            // set start to index of next item
+            // Set start to index of next item
             let mut start = if !chunk.is_detached() {
                 splits_with_indexes.peek().unwrap_or(&(0, "")).0
             } else {
@@ -314,19 +315,22 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
             let mut cur = String::new();
 
             while let Some((idx, split)) = splits_with_indexes.next() {
-                // correct partition:
+                // Correct partition:
                 // 1. split == keyword
-                // 2. idx != 0: check if exists whitespace before keyword
-                // - if first block => whitespace is trimmed (so leading keyword is ruled out)
-                // - otherwise => no change
-                // 3. idx + split.len() != s.len(): check if exists whitespace after keyword
-                // - if last block => whitespace is trimmed (so trailing keyword is ruled out)
-                // - otherwise => no change
+                // 2. idx != 0: Check if exists whitespace before keyword
+                //    - If this is the first block => Trim whitespace (so
+                //      leading keywords are suppressed)
+                //    - Otherwise => No change
+                // 3. idx + split.len() != s.len(): Check if exists whitespace
+                //    after keyword
+                //    - If last block => Trim whitespace (so trailing keywords
+                //      are suppressed)
+                //    - Otherwise => No change
                 if split == keyword && idx != 0 && idx + split.len() != s.len() {
                     latest.push(chunk_generator(&mut cur, span_start + start));
                     out.push(std::mem::take(&mut latest));
 
-                    // set start to index of next item
+                    // Set start to index of next item
                     if !chunk.is_detached() {
                         start = splits_with_indexes.peek().unwrap_or(&(0, "")).0;
                     }

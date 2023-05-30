@@ -217,7 +217,7 @@ impl Person {
 
 impl Type for Vec<Person> {
     fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
-        Ok(split_token_lists_surrounded_by_whitespace(chunks, "and")
+        Ok(split_token_lists_with_kw(chunks, "and")
             .into_iter()
             .map(|subchunks| Person::parse(&subchunks))
             .collect())

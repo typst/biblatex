@@ -150,7 +150,7 @@ impl Type for Range<u32> {
 impl Type for Vec<Chunks> {
     /// Splits the chunks at `"and"`s.
     fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
-        Ok(split_token_lists_surrounded_by_whitespace(chunks, "and"))
+        Ok(split_token_lists_with_kw(chunks, "and"))
     }
 
     fn to_chunks(&self) -> Chunks {
