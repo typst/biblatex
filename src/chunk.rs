@@ -273,26 +273,32 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
     let mut first_chunk = true;
     while let Some(val) = vals.next() {
         if let Chunk::Normal(s) = &val.v {
+            let mut start = val.span.start;
+            let mut cur = String::new();
+
             // if first chunk is normal -> leading and
-            let s = if first_chunk { s.trim_start() } else { &s };
+            let s = if first_chunk {
+                let new_s = s.trim_start();
+                if !val.is_detached() {
+                    start += s.len() - new_s.len();
+                }
+                new_s
+            } else {
+                &s
+            };
             // if last chunk is normal -> trailing end
             let s = if vals.peek().is_none() { s.trim_end() } else { &s };
 
-            let splits_with_indexes = s
+            let mut splits_with_indexes = s
                 .split_whitespace()
-                .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub));
+                .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub))
+                .peekable();
 
-            let mut reset_start = true && !val.is_detached();
-            let mut start = 0;
-            let mut cur = String::new();
+            if !val.is_detached() {
+                start += splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+            }
 
-            for (idx, split) in splits_with_indexes {
-                // update to correct start
-                if reset_start {
-                    start = val.span.start + idx;
-                    reset_start = false;
-                }
-
+            while let Some((idx, split)) = splits_with_indexes.next() {
                 // correct partition:
                 // 1. split == keyword
                 // 2. idx != 0: check if exists whitespace before keyword
@@ -302,14 +308,18 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 // - if last block => whitespace is trimmed (so trailing keyword is ruled out)
                 // - otherwise => no change
                 if split == keyword && idx != 0 && idx + split.len() != s.len() {
-                    let end = start + cur.len();
                     latest.push(if val.is_detached() {
                         Spanned::detached(Chunk::Normal(std::mem::take(&mut cur)))
                     } else {
+                        let end = start + cur.len();
                         Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end)
                     });
                     out.push(std::mem::take(&mut latest));
-                    reset_start = true && !val.is_detached();
+
+                    if !val.is_detached() {
+                        start += splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+                    }
+
                     continue;
                 }
 
@@ -319,10 +329,10 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 cur += split;
             }
 
-            let end = start + cur.len();
             latest.push(if val.is_detached() {
                 Spanned::detached(Chunk::Normal(std::mem::take(&mut cur)))
             } else {
+                let end = start + cur.len();
                 Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end)
             });
         } else {
