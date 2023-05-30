@@ -276,14 +276,13 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
     let mut first_chunk = true;
     while let Some(val) = vals.next() {
         if let Chunk::Normal(s) = &val.v {
-            let mut start = val.span.start;
-            let mut cur = String::new();
+            let mut span_start = val.span.start;
 
             // if first chunk is normal -> leading and
             let s = if first_chunk {
                 let new_s = s.trim_start();
                 if !val.is_detached() {
-                    start += s.len() - new_s.len();
+                    span_start = val.span.start + s.len() - new_s.len();
                 }
                 new_s
             } else {
@@ -297,8 +296,10 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub))
                 .peekable();
 
+            let mut start = 0;
+            let mut cur = String::new();
             if !val.is_detached() {
-                start += splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+                start = span_start + splits_with_indexes.peek().unwrap_or(&(0, "")).0;
             }
 
             while let Some((idx, split)) = splits_with_indexes.next() {
@@ -320,7 +321,7 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                     out.push(std::mem::take(&mut latest));
 
                     if !val.is_detached() {
-                        start += splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+                        start = span_start + splits_with_indexes.peek().unwrap_or(&(0, "")).0;
                     }
 
                     continue;
