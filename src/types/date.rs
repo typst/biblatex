@@ -376,11 +376,14 @@ impl DateValue {
 
 impl Datetime {
     /// Parse a datetime from a string.
-    fn parse(mut src: &str) -> Result<Self, TypeError> {
-        let time = if let Some(pos) = src.find('T') {
-            if pos + 1 < src.len() {
-                let time_str = &src[pos + 1..];
-                src = &src[..pos];
+    fn parse(src: &str) -> Result<Self, TypeError> {
+        let src = src.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        let mut slice = &src[..];
+
+        let time = if let Some(pos) = slice.find('T') {
+            if pos + 1 < slice.len() {
+                let time_str = &slice[pos + 1..];
+                slice = &slice[..pos];
                 time_str.parse::<NaiveTime>().ok()
             } else {
                 None
@@ -389,7 +392,7 @@ impl Datetime {
             None
         };
 
-        let full_date = src.parse::<NaiveDate>();
+        let full_date = slice.parse::<NaiveDate>();
 
         Ok(if let Ok(ndate) = full_date {
             Datetime {
@@ -400,7 +403,7 @@ impl Datetime {
             }
         } else {
             // This might be an incomplete date, missing day and possibly month.
-            let mut s = Scanner::new(&src);
+            let mut s = Scanner::new(&slice);
             s.eat_whitespace();
             let year = get_year(&mut s)?;
             s.eat_whitespace();
