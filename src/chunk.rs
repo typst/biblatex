@@ -269,38 +269,49 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
     vals: ChunksRef,
     keyword: &str,
 ) -> Vec<Chunks> {
-    let mut vals = vals.iter().peekable();
     let mut out = vec![];
     let mut latest = vec![];
 
-    let mut first_chunk = true;
-    while let Some(val) = vals.next() {
-        if let Chunk::Normal(s) = &val.v {
-            let mut span_start = val.span.start;
+    for (chunk_idx, chunk) in vals.iter().enumerate() {
+        let chunk_generator = if chunk.is_detached() {
+            |cur: &mut String, _start: usize| {
+                Spanned::detached(Chunk::Normal(std::mem::take(cur)))
+            }
+        } else {
+            |cur: &mut String, start: usize| {
+                let end = start + cur.len();
+                Spanned::new(Chunk::Normal(std::mem::take(cur)), start..end)
+            }
+        };
+
+        if let Chunk::Normal(s) = &chunk.v {
+            let mut span_start = chunk.span.start;
 
             // if first chunk is normal -> leading and
-            let s = if first_chunk {
+            let s = if chunk_idx == 0 {
                 let new_s = s.trim_start();
-                if !val.is_detached() {
-                    span_start = val.span.start + s.len() - new_s.len();
+                if !chunk.is_detached() {
+                    span_start = chunk.span.start + s.len() - new_s.len();
                 }
                 new_s
             } else {
                 &s
             };
             // if last chunk is normal -> trailing end
-            let s = if vals.peek().is_none() { s.trim_end() } else { &s };
+            let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { &s };
 
             let mut splits_with_indexes = s
                 .split_whitespace()
                 .map(move |sub| (sub.as_ptr() as usize - s.as_ptr() as usize, sub))
                 .peekable();
 
-            let mut start = 0;
+            // set start to index of next item
+            let mut start = if !chunk.is_detached() {
+                splits_with_indexes.peek().unwrap_or(&(0, "")).0
+            } else {
+                0
+            };
             let mut cur = String::new();
-            if !val.is_detached() {
-                start = span_start + splits_with_indexes.peek().unwrap_or(&(0, "")).0;
-            }
 
             while let Some((idx, split)) = splits_with_indexes.next() {
                 // correct partition:
@@ -312,18 +323,13 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 // - if last block => whitespace is trimmed (so trailing keyword is ruled out)
                 // - otherwise => no change
                 if split == keyword && idx != 0 && idx + split.len() != s.len() {
-                    latest.push(if val.is_detached() {
-                        Spanned::detached(Chunk::Normal(std::mem::take(&mut cur)))
-                    } else {
-                        let end = start + cur.len();
-                        Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end)
-                    });
+                    latest.push(chunk_generator(&mut cur, span_start + start));
                     out.push(std::mem::take(&mut latest));
 
-                    if !val.is_detached() {
-                        start = span_start + splits_with_indexes.peek().unwrap_or(&(0, "")).0;
+                    // set start to index of next item
+                    if !chunk.is_detached() {
+                        start = splits_with_indexes.peek().unwrap_or(&(0, "")).0;
                     }
-
                     continue;
                 }
 
@@ -333,16 +339,12 @@ pub(crate) fn split_token_lists_surrounded_by_whitespace(
                 cur += split;
             }
 
-            latest.push(if val.is_detached() {
-                Spanned::detached(Chunk::Normal(std::mem::take(&mut cur)))
-            } else {
-                let end = start + cur.len();
-                Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end)
-            });
+            if !cur.is_empty() {
+                latest.push(chunk_generator(&mut cur, span_start + start));
+            }
         } else {
-            latest.push(val.clone());
+            latest.push(chunk.clone());
         }
-        first_chunk = false;
     }
 
     out.push(latest);
