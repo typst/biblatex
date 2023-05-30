@@ -258,10 +258,13 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     out
 }
 
-/// Splits chunk vectors that are a token lists as defined per the
-/// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
+/// Split the token list based on a keyword surrounded by whitespaces
 ///
-/// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
+/// For Normal Chunk,
+/// - The leading/trailing keyword is not considered as a valid split
+/// (regardless of whether the keyword is preceded/after by some whitespaces).
+/// - If there are consecutive keywords, the words between two consecutive keywords
+/// (whether empty or not) will be considered as a valid split.
 pub(crate) fn split_token_lists_surrounded_by_whitespace(
     vals: ChunksRef,
     keyword: &str,
