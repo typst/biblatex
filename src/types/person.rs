@@ -448,6 +448,35 @@ Claude Garamond",
         assert_eq!(people.len(), 1);
         assert_eq!(people[0].name, "Gutenberg");
         assert_eq!(people[0].given_name, "Johannes");
+
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+            Spanned::detached(Chunk::Normal(" and ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Manutius".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Aldus".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+        assert_eq!(people[1].name, "Aldus");
+        assert_eq!(people[1].given_name, "Manutius");
+
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+            Spanned::detached(Chunk::Normal(" and Manutius Aldus".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+        assert_eq!(people[1].name, "Aldus");
+        assert_eq!(people[1].given_name, "Manutius");
     }
 
     #[test]
