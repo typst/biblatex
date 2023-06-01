@@ -39,8 +39,8 @@ pub struct Datetime {
     /// The year.
     ///
     /// AD years are counted starting from one and thus represented as exactly
-    /// their year (e.g. 2000 AD is `2000`) whereas BC years are counted
-    /// starting from zero downwards (e.g. 1000 BC is `999`)
+    /// their year (e.g., 2000 AD is `2000`) whereas BC years are counted
+    /// starting from zero downwards (e.g., 1000 BC is `999`)
     pub year: i32,
     /// The month (starting at zero).
     pub month: Option<u8>,

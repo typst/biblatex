@@ -16,7 +16,7 @@ pub struct Person {
     /// The prefix is placed between given name and name. It could, for example,
     /// be a nobiliary particle.
     pub prefix: String,
-    /// The suffix is placed after the name (e.g. "Jr.").
+    /// The suffix is placed after the name (e.g., "Jr.").
     pub suffix: String,
 }
 
@@ -56,9 +56,9 @@ impl Person {
     /// form `<First> <Prefix> <Last>`.
     fn parse_unified(chunks: ChunksRef) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
-        // lowercase word), start of last capitalized seqence.
+        // lowercase word), start of last capitalized sequence.
         // If there is no subsequent capitalized word, take last one.
-        // Treat verbatim as capital letters
+        // Treat verbatim as capital letters.
         let mut word_start = true;
         let mut capital = false;
         let mut seen_lowercase = false;
