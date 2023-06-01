@@ -323,28 +323,23 @@ pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<C
             let mut cur = String::new();
 
             for split in splits {
-                if let (Some(left_last), Some(right_first)) =
-                    (prev.chars().last(), split.chars().next())
+                if prev.ends_with(char::is_whitespace)
+                    && split.starts_with(char::is_whitespace)
                 {
-                    if left_last.is_whitespace() && right_first.is_whitespace() {
-                        cur += prev;
-                        let end = if chunk.is_detached() {
-                            usize::MAX
-                        } else {
-                            start + cur.len()
-                        };
-                        latest.push(Spanned::new(
-                            Chunk::Normal(std::mem::take(&mut cur)),
-                            start..end,
-                        ));
+                    cur += prev;
+                    let end =
+                        if chunk.is_detached() { usize::MAX } else { start + cur.len() };
+                    latest.push(Spanned::new(
+                        Chunk::Normal(std::mem::take(&mut cur)),
+                        start..end,
+                    ));
 
-                        sanitize_latest(&mut latest);
-                        out.push(std::mem::take(&mut latest));
+                    sanitize_latest(&mut latest);
+                    out.push(std::mem::take(&mut latest));
 
-                        start = end;
-                        prev = split;
-                        continue;
-                    }
+                    start = end;
+                    prev = split;
+                    continue;
                 }
 
                 cur += prev;
