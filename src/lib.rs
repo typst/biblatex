@@ -62,7 +62,7 @@ pub struct Bibliography {
 pub struct Entry {
     /// The citation key.
     pub key: String,
-    /// Denotes the type of bibliography item (e.g. `Article`).
+    /// Denotes the type of bibliography item (e.g., `Article`).
     pub entry_type: EntryType,
     /// Maps from field names to their associated chunk vectors.
     pub fields: BTreeMap<String, Chunks>,
@@ -311,14 +311,14 @@ impl Entry {
 
     /// Set the chunk slice for a field.
     ///
-    /// The field key is lowercased before insertion.
+    /// The field key is lowercase before insertion.
     pub fn set(&mut self, key: &str, chunks: Chunks) {
         self.fields.insert(key.to_lowercase(), chunks);
     }
 
     /// Set the value of a field as a specific type.
     ///
-    /// The field key is lowercased before insertion.
+    /// The field key is lowercase before insertion.
     pub fn set_as<T: Type>(&mut self, key: &str, value: &T) {
         self.set(key, value.to_chunks());
     }
@@ -582,7 +582,7 @@ impl Entry {
         }
     }
 
-    /// Resolves all data dependancies defined by `crossref` and `xdata` fields.
+    /// Resolves all data dependencies defined by `crossref` and `xdata` fields.
     fn resolve_crossrefs(&mut self, bib: &Bibliography) -> Result<(), TypeError> {
         let mut refs = vec![];
 
@@ -718,7 +718,7 @@ impl Entry {
 
 /// A report of the validity of an `Entry`. Can be obtained by calling [`Entry::verify`].
 pub struct Report {
-    /// These fields were missing although they are required for the entry type.
+    /// These fields were missing, although they are required for the entry type.
     pub missing: Vec<&'static str>,
     /// These fields were present but are not allowed for the entry type.
     pub superfluous: Vec<&'static str>,
@@ -878,7 +878,7 @@ type Span = std::ops::Range<usize>;
 
 /// A value with the span it corresponds to in the source code.
 ///
-/// Spans can be _detatched,_ this means that they deliberately do not point
+/// Spans can be _detached,_ this means that they deliberately do not point
 /// into the source code. Such spans are created when manually setting fields
 /// with an empty bibliography or after parsing a file. Detached spans do not
 /// indicate valid index ranges in the source files and must not be used as

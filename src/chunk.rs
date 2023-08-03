@@ -190,7 +190,7 @@ impl ChunksExt for [Spanned<Chunk>] {
 }
 
 /// An iterator over the characters in each chunk, indicating whether they are
-/// verbatim or not. Chunk types other than `Normal` or `Verbatim` are ommitted.
+/// verbatim or not. Chunk types other than `Normal` or `Verbatim` are omitted.
 pub(crate) fn chunk_chars(chunks: ChunksRef) -> impl Iterator<Item = (char, bool)> + '_ {
     chunks.iter().flat_map(|chunk| {
         let (s, verbatim) = chunk.v.get_and_verb();
@@ -199,7 +199,7 @@ pub(crate) fn chunk_chars(chunks: ChunksRef) -> impl Iterator<Item = (char, bool
     })
 }
 
-/// Combines the cunks, interlacing with the separator.
+/// Combines the chunks, interlacing with the separator.
 pub(crate) fn join_chunk_list(chunks: ChunksRef, sep: &str) -> Chunks {
     let mut res = vec![];
     let mut first = true;
@@ -221,7 +221,7 @@ pub(crate) fn join_chunk_list(chunks: ChunksRef, sep: &str) -> Chunks {
 }
 
 /// Splits chunk vectors that are a token lists as defined per the
-/// [BibLaTeX Manual][manual] p. 16 along occurances of the keyword.
+/// [BibLaTeX Manual][manual] p. 16 along occurrences of the keyword.
 ///
 /// [manual]: http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf
 pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
@@ -258,7 +258,110 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     out
 }
 
-/// Splits a chunk vector into two at the first occurrance of the character `c`.
+/// Split the token list based on a keyword surrounded by whitespace
+///
+/// For Normal Chunks,
+/// - The leading/trailing keyword is not considered as a valid split
+/// (regardless of whether the keyword is preceded/followed by some
+/// whitespace).
+/// - If there are consecutive keywords, the characters between two consecutive
+/// keywords (whether only whitespace or not) will be considered as a valid
+/// split.
+pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
+    let mut out = vec![];
+    let mut latest = vec![];
+
+    // Trim the beginning and the end of the parsed field
+    let sanitize_latest = |latest: &mut Vec<Spanned<Chunk>>| {
+        if latest.len() == 0 {
+            return;
+        }
+
+        let mut diff = 0;
+        if let Chunk::Normal(s) = &mut latest[0].v {
+            diff = s.len() - s.trim_start().len();
+            s.drain(0..diff);
+        }
+        if !latest[0].is_detached() {
+            latest[0].span.start += diff;
+        }
+
+        let mut new_len = 0;
+        let end = latest.len() - 1;
+        if let Chunk::Normal(s) = &mut latest[end].v {
+            new_len = s.trim_end().len();
+            s.truncate(new_len);
+        }
+        if !latest[end].is_detached() {
+            latest[end].span.end = latest[end].span.start + new_len;
+        }
+    };
+
+    for (chunk_idx, chunk) in vals.iter().enumerate() {
+        if let Chunk::Normal(s) = &chunk.v {
+            let mut start = chunk.span.start;
+
+            // If the first chunk is normal -> leading keyword
+            let s = if chunk_idx == 0 {
+                let new_s = s.trim_start();
+                if !chunk.is_detached() {
+                    // Offset the span start by the number of characters trimmed
+                    start = chunk.span.start + s.len() - new_s.len();
+                }
+                new_s
+            } else {
+                &s
+            };
+
+            // If the last chunk is normal -> trailing keyword
+            let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { &s };
+
+            let mut splits = s.split(keyword);
+            // guaranteed to have a value
+            let mut prev = splits.next().unwrap();
+
+            let mut cur = String::new();
+
+            for split in splits {
+                if prev.ends_with(char::is_whitespace)
+                    && split.starts_with(char::is_whitespace)
+                {
+                    cur += prev;
+                    let end =
+                        if chunk.is_detached() { usize::MAX } else { start + cur.len() };
+                    latest.push(Spanned::new(
+                        Chunk::Normal(std::mem::take(&mut cur)),
+                        start..end,
+                    ));
+
+                    sanitize_latest(&mut latest);
+                    out.push(std::mem::take(&mut latest));
+
+                    start = end;
+                    prev = split;
+                    continue;
+                }
+
+                cur += prev;
+                cur += keyword;
+                prev = split;
+            }
+
+            cur += prev;
+            let end = if chunk.is_detached() { usize::MAX } else { start + cur.len() };
+            latest
+                .push(Spanned::new(Chunk::Normal(std::mem::take(&mut cur)), start..end));
+        } else {
+            latest.push(chunk.clone());
+        }
+    }
+
+    sanitize_latest(&mut latest);
+    out.push(latest);
+    out
+}
+
+/// Splits a chunk vector into two at the first occurrence of the character `c`.
 /// `omit` controls whether the output will contain `c`.
 pub(crate) fn split_at_normal_char(
     src: ChunksRef,
@@ -316,9 +419,9 @@ pub(crate) fn split_values(
 
     let (s1, s2) = content.split_at(str_idx);
 
-    let boundry = item.span.start.saturating_add(str_idx);
-    item.span = item.span.start..boundry;
-    let new_span = boundry..boundry.saturating_add(s2.len());
+    let boundary = item.span.start.saturating_add(str_idx);
+    item.span = item.span.start..boundary;
+    let new_span = boundary..boundary.saturating_add(s2.len());
 
     let s1 = s1.trim_end().to_string();
     let s2 = s2.trim_start().to_string();

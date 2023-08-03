@@ -26,7 +26,7 @@ pub struct RawBibliography<'s> {
 pub struct RawEntry<'s> {
     /// The citation key.
     pub key: Spanned<&'s str>,
-    /// Denotes the type of bibliographic item (e.g. `article`).
+    /// Denotes the type of bibliographic item (e.g., `article`).
     pub kind: Spanned<&'s str>,
     /// Maps from field names to their values.
     pub fields: Vec<(Spanned<&'s str>, Spanned<Field<'s>>)>,
@@ -471,7 +471,7 @@ impl<'s> BiblatexParser<'s> {
         Ok(())
     }
 
-    /// Eat the body of a entry.
+    /// Eat the body of an entry.
     fn body(&mut self, kind: Spanned<&'s str>, start: usize) -> Result<(), ParseError> {
         let key = self.ident()?;
         self.s.eat_whitespace();

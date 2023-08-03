@@ -278,7 +278,7 @@ fn resolve_abbreviation(
 }
 
 /// Best-effort evaluation of LaTeX commands with a focus on diacritics.
-/// Will dump the command arguments if evaluation not possible.
+/// Will dump the command arguments if evaluation is not possible.
 /// Nested commands are not supported.
 fn execute_command(command: &str, arg: Option<&str>) -> String {
     fn last_char_combine(v: Option<&str>, combine: char) -> String {

@@ -16,7 +16,7 @@ pub struct Person {
     /// The prefix is placed between given name and name. It could, for example,
     /// be a nobiliary particle.
     pub prefix: String,
-    /// The suffix is placed after the name (e.g. "Jr.").
+    /// The suffix is placed after the name (e.g., "Jr.").
     pub suffix: String,
 }
 
@@ -56,9 +56,9 @@ impl Person {
     /// form `<First> <Prefix> <Last>`.
     fn parse_unified(chunks: ChunksRef) -> Self {
         // Find end of first sequence of capitalized words (denominated by first
-        // lowercase word), start of last capitalized seqence.
+        // lowercase word), start of last capitalized sequence.
         // If there is no subsequent capitalized word, take last one.
-        // Treat verbatim as capital letters
+        // Treat verbatim as capital letters.
         let mut word_start = true;
         let mut capital = false;
         let mut seen_lowercase = false;
@@ -217,7 +217,7 @@ impl Person {
 
 impl Type for Vec<Person> {
     fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
-        Ok(split_token_lists(chunks, " and ")
+        Ok(split_token_lists_with_kw(chunks, "and")
             .into_iter()
             .map(|subchunks| Person::parse(&subchunks))
             .collect())
@@ -281,6 +281,203 @@ impl Display for Person {
 mod tests {
     use super::*;
     use crate::chunk::tests::*;
+
+    #[test]
+    fn test_list_of_names() {
+        let names =
+            String::from("Johannes Gutenberg and Aldus Manutius and Claude Garamond");
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].prefix, "");
+        assert_eq!(people[0].given_name, "Johannes");
+
+        assert_eq!(people[1].name, "Manutius");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "Aldus");
+
+        assert_eq!(people[2].name, "Garamond");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "Claude");
+    }
+
+    #[test]
+    fn test_list_of_names_multilines() {
+        let names = String::from(
+            "Johannes Gutenberg and
+Aldus Manutius and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people1: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people1.len(), 3);
+
+        let names = String::from(
+            "Johannes Gutenberg
+and
+Aldus Manutius
+and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people2: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people2.len(), 3);
+
+        let names = String::from(
+            "Johannes Gutenberg
+and
+Aldus Manutius and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people3: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people3.len(), 3);
+
+        assert_eq!(people1, people2);
+        assert_eq!(people2, people3);
+
+        assert_eq!(people1[0].name, "Gutenberg");
+        assert_eq!(people1[0].prefix, "");
+        assert_eq!(people1[0].given_name, "Johannes");
+
+        assert_eq!(people1[1].name, "Manutius");
+        assert_eq!(people1[1].prefix, "");
+        assert_eq!(people1[1].given_name, "Aldus");
+
+        assert_eq!(people1[2].name, "Garamond");
+        assert_eq!(people1[2].prefix, "");
+        assert_eq!(people1[2].given_name, "Claude");
+    }
+
+    #[test]
+    fn test_leading_and() {
+        let names = String::from(
+            "and Gutenberg, Johannes and
+Aldus Manutius and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].prefix, "and");
+        assert_eq!(people[0].given_name, "Johannes");
+    }
+
+    #[test]
+    fn test_trailing_and() {
+        let names = String::from(
+            "Johannes Gutenberg and
+Aldus Manutius and
+Claude Garamond and",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+
+        assert_eq!(people[2].name, "and");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "Claude Garamond");
+    }
+
+    #[test]
+    fn test_consecutive_and() {
+        let names = String::from(
+            "Johannes Gutenberg and and
+Aldus Manutius and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 4);
+
+        assert_eq!(people[1].name, "");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "");
+
+        let names = String::from(
+            "Johannes Gutenberg and and and
+Aldus Manutius and
+Claude Garamond",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 5);
+
+        assert_eq!(people[1].name, "");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "");
+        assert_eq!(people[2].name, "");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "");
+    }
+
+    #[test]
+    fn test_name_with_and_inside() {
+        let names = String::from(
+            "Johannes anderson Gutenberg and Claudeand Garamond and Aanderson Manutius",
+        );
+        let people = &[Spanned::detached(Chunk::Normal(names))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].prefix, "anderson");
+        assert_eq!(people[0].given_name, "Johannes");
+
+        assert_eq!(people[1].name, "Garamond");
+        assert_eq!(people[1].prefix, "");
+        assert_eq!(people[1].given_name, "Claudeand");
+
+        assert_eq!(people[2].name, "Manutius");
+        assert_eq!(people[2].prefix, "");
+        assert_eq!(people[2].given_name, "Aanderson");
+    }
+
+    #[test]
+    fn test_verbatim() {
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+            Spanned::detached(Chunk::Normal(" and ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Manutius".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Aldus".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+        assert_eq!(people[1].name, "Aldus");
+        assert_eq!(people[1].given_name, "Manutius");
+
+        let people = &[
+            Spanned::detached(Chunk::Verbatim("Johannes".to_string())),
+            Spanned::detached(Chunk::Normal(" ".to_string())),
+            Spanned::detached(Chunk::Verbatim("Gutenberg".to_string())),
+            Spanned::detached(Chunk::Normal(" and Manutius Aldus".to_string())),
+        ];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Gutenberg");
+        assert_eq!(people[0].given_name, "Johannes");
+        assert_eq!(people[1].name, "Aldus");
+        assert_eq!(people[1].given_name, "Manutius");
+    }
 
     #[test]
     fn test_person_comma() {
