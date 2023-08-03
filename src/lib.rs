@@ -129,7 +129,7 @@ impl Bibliography {
             let mut fields: BTreeMap<String, Vec<Spanned<Chunk>>> = BTreeMap::new();
             for spanned_field in entry.v.fields.into_iter() {
                 let (field_key, field_value) = spanned_field;
-                let field_key = field_key.v.to_string();
+                let field_key = field_key.v.to_string().to_ascii_lowercase();
                 let parsed = resolve::parse_field(&field_key, &field_value.v, abbr)?;
                 fields.insert(field_key, parsed);
             }
@@ -1174,5 +1174,22 @@ mod tests {
         e.set_author(brian.clone());
 
         assert_eq!(Ok(brian), e.author());
+    }
+
+    #[test]
+    fn test_case_sensitivity() {
+        let contents = fs::read_to_string("tests/case.bib").unwrap();
+        let bibliography = Bibliography::parse(&contents).unwrap();
+
+        let entry = bibliography.get("biblatex2023").unwrap();
+        let author = entry.author();
+
+        match author {
+            Ok(a) => assert_eq!(a[0].name, "Kime"),
+            Err(RetrievalError::Missing(_)) => {
+                panic!("Tags should be case insensitive.");
+            }
+            _ => panic!(),
+        }
     }
 }
