@@ -198,7 +198,7 @@ impl Type for Vec<Range<u32>> {
         let number = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
             s.eat_whitespace();
             let idx = s.cursor();
-            let num = s.eat_while(|c: char| c.is_digit(10));
+            let num = s.eat_while(|c: char| c.is_ascii_digit());
             u32::from_str(num).map_err(|_| {
                 TypeError::new(
                     idx + offset..s.cursor() + offset,

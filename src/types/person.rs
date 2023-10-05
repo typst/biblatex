@@ -39,7 +39,7 @@ impl Person {
                 .sum();
 
         match num_commas {
-            0 => Self::parse_unified(&chunks),
+            0 => Self::parse_unified(chunks),
             1 => {
                 let (v1, v2) = split_at_normal_char(chunks, ',', true);
                 Self::parse_single_comma(&v1, &v2)
@@ -69,7 +69,7 @@ impl Person {
         let mut last_word_start = 0;
         let mut last_lowercase_start = 0;
 
-        for (index, (c, v)) in chunk_chars(&chunks).enumerate() {
+        for (index, (c, v)) in chunk_chars(chunks).enumerate() {
             if c.is_whitespace() && !v {
                 word_start = true;
                 continue;
@@ -102,7 +102,7 @@ impl Person {
         let mut given_name = String::new();
         let mut prefix = String::new();
 
-        for (index, (c, _)) in chunk_chars(&chunks).enumerate() {
+        for (index, (c, _)) in chunk_chars(chunks).enumerate() {
             if (index <= cap_word_end
                 && seen_lowercase
                 && seen_uppercase
@@ -157,7 +157,7 @@ impl Person {
         let mut last_word_start = 0;
         let mut has_seen_uppercase_words = false;
 
-        for (index, (c, v)) in chunk_chars(&s1).enumerate() {
+        for (index, (c, v)) in chunk_chars(s1).enumerate() {
             if c.is_whitespace() && !v {
                 word_start = true;
                 continue;
@@ -183,7 +183,7 @@ impl Person {
 
         let mut name = String::new();
         let mut prefix = String::new();
-        for (index, (c, _)) in chunk_chars(&s1).enumerate() {
+        for (index, (c, _)) in chunk_chars(s1).enumerate() {
             if (index as i32 <= last_lower_case_end && has_seen_uppercase_words)
                 || (!has_seen_uppercase_words && index < last_word_start)
             {

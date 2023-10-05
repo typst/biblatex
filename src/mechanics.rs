@@ -169,25 +169,22 @@ impl EntryType {
 
     /// Is this a multi-volume work?
     pub fn is_multi_volume(&self) -> bool {
-        match self {
-            Self::MvBook => true,
-            Self::MvCollection => true,
-            Self::MvReference => true,
-            Self::MvProceedings => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::MvBook | Self::MvCollection | Self::MvReference | Self::MvProceedings
+        )
     }
 
     /// Is this a single-volume composite work?
     pub fn is_collection(&self) -> bool {
-        match self {
-            Self::Book => true,
-            Self::Collection => true,
-            Self::Periodical => true,
-            Self::Reference => true,
-            Self::Proceedings => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::Book
+                | Self::Collection
+                | Self::Periodical
+                | Self::Reference
+                | Self::Proceedings
+        )
     }
 
     /// Convert into a type native to BibLaTeX.
@@ -231,8 +228,7 @@ impl EntryType {
 
     /// Get the required fields for the `EntryType`.
     pub(crate) fn requirements(&self) -> Requirements {
-        let mut reqs = Requirements::default();
-        reqs.needs_date = true;
+        let mut reqs = Requirements { needs_date: true, ..Default::default() };
 
         reqs.required.push("title");
 
@@ -651,9 +647,17 @@ impl EntryType {
 /// Whether a field with this key should be parsed with commands and most
 /// escapes turned off.
 pub fn is_verbatim_field(key: &str) -> bool {
-    match key {
-        "file" | "doi" | "uri" | "eprint" | "verba" | "verbb" | "verbc" | "pdf"
-        | "url" | "urlraw" => true,
-        _ => false,
-    }
+    matches!(
+        key,
+        "file"
+            | "doi"
+            | "uri"
+            | "eprint"
+            | "verba"
+            | "verbb"
+            | "verbc"
+            | "pdf"
+            | "url"
+            | "urlraw"
+    )
 }

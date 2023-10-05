@@ -18,7 +18,7 @@ pub struct RawBibliography<'s> {
     /// The collection of citation keys and bibliography entries.
     pub entries: Vec<Spanned<RawEntry<'s>>>,
     /// A map of reusable abbreviations, only supported by BibTeX.
-    pub abbreviations: Vec<(Spanned<&'s str>, Spanned<Field<'s>>)>,
+    pub abbreviations: Vec<KeyVal<'s>>,
 }
 
 /// A raw extracted entry, with abbreviations not yet resolved.
@@ -29,7 +29,7 @@ pub struct RawEntry<'s> {
     /// Denotes the type of bibliographic item (e.g., `article`).
     pub kind: Spanned<&'s str>,
     /// Maps from field names to their values.
-    pub fields: Vec<(Spanned<&'s str>, Spanned<Field<'s>>)>,
+    pub fields: Vec<KeyVal<'s>>,
 }
 
 /// A literal representation of a bibliography entry field.
@@ -319,7 +319,7 @@ impl<'s> BiblatexParser<'s> {
     fn abbr_element(&mut self) -> Result<Spanned<RawChunk<'s>>, ParseError> {
         let start = self.s.cursor();
         let res = match self.s.peek() {
-            Some(c) if c.is_ascii_digit() => self.number().map(|s| RawChunk::Normal(s)),
+            Some(c) if c.is_ascii_digit() => self.number().map(RawChunk::Normal),
             Some(c) if is_id_start(c) => {
                 self.ident().map(|s| RawChunk::Abbreviation(s.v))
             }
@@ -373,9 +373,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat fields.
-    fn fields(
-        &mut self,
-    ) -> Result<Vec<(Spanned<&'s str>, Spanned<Field<'s>>)>, ParseError> {
+    fn fields(&mut self) -> Result<Vec<KeyVal<'s>>, ParseError> {
         let mut fields = Vec::new();
 
         while !self.s.done() {
@@ -389,7 +387,7 @@ impl<'s> BiblatexParser<'s> {
 
             self.s.eat_whitespace();
 
-            fields.push((key, value));
+            fields.push(KeyVal::new(key, value));
 
             match self.s.peek() {
                 Some(',') => self.comma()?,
@@ -491,6 +489,21 @@ impl<'s> BiblatexParser<'s> {
     }
 }
 
+/// The keys for fields and their values.
+#[derive(Debug, Clone)]
+pub struct KeyVal<'s> {
+    /// The key.
+    pub key: Spanned<&'s str>,
+    /// The value.
+    pub value: Spanned<Field<'s>>,
+}
+
+impl<'s> KeyVal<'s> {
+    pub fn new(key: Spanned<&'s str>, value: Spanned<Field<'s>>) -> Self {
+        Self { key, value }
+    }
+}
+
 /// Whether a character can start an identifier.
 #[inline]
 pub fn is_id_start(c: char) -> bool {
@@ -547,7 +560,7 @@ mod tests {
         let test = format!("@article{{test, {}={}}}", key, value);
         let bt = RawBibliography::parse(&test).unwrap();
         let article = &bt.entries[0];
-        format(&article.v.fields[0].1.v)
+        format(&article.v.fields[0].value.v)
     }
 
     #[test]
@@ -562,19 +575,19 @@ mod tests {
 
         assert_eq!(article.v.kind.v, "article");
 
-        assert_eq!(article.v.fields[0].0.v, "title");
-        assert_eq!(article.v.fields[1].0.v, "year");
-        assert_eq!(article.v.fields[2].0.v, "author");
-        assert_eq!(format(&article.v.fields[0].1.v), "{Great proceedings\\{}");
-        assert_eq!(format(&article.v.fields[1].1.v), "{2002}");
-        assert_eq!(format(&article.v.fields[2].1.v), "{Haug, {Martin} and Haug, Gregor}");
+        assert_eq!(article.v.fields[0].key.v, "title");
+        assert_eq!(article.v.fields[1].key.v, "year");
+        assert_eq!(article.v.fields[2].key.v, "author");
+        assert_eq!(format(&article.v.fields[0].value.v), "{Great proceedings\\{}");
+        assert_eq!(format(&article.v.fields[1].value.v), "{2002}");
+        assert_eq!(format(&article.v.fields[2].value.v), "{Haug, {Martin} and Haug, Gregor}");
     }
 
     #[test]
     fn test_resolve_string() {
         let bt = RawBibliography::parse("@string{BT = \"bibtex\"}").unwrap();
-        assert_eq!(bt.abbreviations[0].0.v, "BT");
-        assert_eq!(&bt.abbreviations[0].1.v, &vec![Spanned::new(RawChunk::Normal("bibtex"), 14..20)]);
+        assert_eq!(bt.abbreviations[0].key.v, "BT");
+        assert_eq!(&bt.abbreviations[0].value.v, &vec![Spanned::new(RawChunk::Normal("bibtex"), 14..20)]);
     }
 
     #[test]
