@@ -134,7 +134,7 @@ impl<'s> ContentParser<'s> {
     fn backslash(&mut self) -> Result<String, ParseError> {
         self.eat_assert('\\');
         match self.s.peek() {
-            Some(c) if is_escapable(c, self.verb_field, true) => {
+            Some(c) if c != '^' && c != '~' && is_escapable(c, self.verb_field, true) => {
                 self.s.eat();
                 Ok(c.to_string())
             }
@@ -284,7 +284,11 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
     fn last_char_combine(v: Option<&str>, combine: char) -> String {
         if let Some(v) = v {
             if v.is_empty() {
-                combine.into()
+                match combine {
+                    '\u{302}' => '^'.into(),
+                    '\u{303}' => '~'.into(),
+                    _ => combine.into(),
+                }
             } else {
                 let mut chars = v.chars();
 
@@ -464,6 +468,11 @@ mod tests {
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Mëtal Sōund"));
+
+        let field = vec![z(RawChunk::Normal(r"L\^{e} D\~{u}ng Tr\'{a}ng"))];
+
+        let res = parse_field("", &field, &Vec::new()).unwrap();
+        assert_eq!(res[0].v, N("Lê Dũng Tráng"));
     }
 
     #[test]
