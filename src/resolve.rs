@@ -2,7 +2,9 @@ use unicode_normalization::char;
 
 use crate::chunk::{Chunk, Chunks};
 use crate::mechanics::is_verbatim_field;
-use crate::raw::{is_id_continue, Field, ParseError, ParseErrorKind, RawChunk, Token};
+use crate::raw::{
+    is_id_continue, Field, Pair, ParseError, ParseErrorKind, RawChunk, Token,
+};
 use crate::types::get_month_for_abbr;
 use crate::{ChunksExt, Span, Spanned};
 use unscanny::Scanner;
@@ -11,7 +13,7 @@ use unscanny::Scanner;
 pub fn parse_field(
     key: &str,
     field: &Field,
-    abbreviations: &Vec<(Spanned<&str>, Spanned<Field<'_>>)>,
+    abbreviations: &Vec<Pair<'_>>,
 ) -> Result<Chunks, ParseError> {
     let mut chunks = vec![];
     for e in field {
@@ -138,9 +140,7 @@ impl<'s> ContentParser<'s> {
                 self.s.eat();
                 Ok(c.to_string())
             }
-            _ if self.verb_field => {
-                return Ok("\\".to_string());
-            }
+            _ if self.verb_field => Ok("\\".to_string()),
             Some(c) if !c.is_whitespace() && !c.is_control() => self.command(),
             Some(c) => Ok(format!("\\{}", c)),
             None => Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof)),
@@ -257,12 +257,12 @@ fn resolve_abbreviation(
     key: &str,
     abbr: &str,
     span: Span,
-    map: &Vec<(Spanned<&str>, Spanned<Field<'_>>)>,
+    map: &Vec<Pair<'_>>,
 ) -> Result<Chunks, ParseError> {
     let fields =
         map.iter()
-            .find(|e| e.0.v == abbr)
-            .map(|e| &e.1.v)
+            .find(|e| e.key.v == abbr)
+            .map(|e| &e.value.v)
             .ok_or(ParseError::new(
                 span.clone(),
                 ParseErrorKind::UnknownAbbreviation(abbr.into()),
@@ -365,11 +365,11 @@ fn flatten(chunks: &mut Chunks) {
             break;
         }
 
-        let merge = match (&chunks[i - 1].v, &chunks[i].v) {
-            (Chunk::Normal(_), Chunk::Normal(_)) => true,
-            (Chunk::Verbatim(_), Chunk::Verbatim(_)) => true,
-            _ => false,
-        };
+        let merge = matches!(
+            (&chunks[i - 1].v, &chunks[i].v),
+            (Chunk::Normal(_), Chunk::Normal(_))
+                | (Chunk::Verbatim(_), Chunk::Verbatim(_))
+        );
 
         if merge {
             let redundant = std::mem::replace(
@@ -405,16 +405,14 @@ pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
 /// Characters that are the name of a single-char command
 /// that automatically terminates.
 fn is_single_char_func(c: char) -> bool {
-    match c {
-        '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\' => true,
-        _ => false,
-    }
+    matches!(c, '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\')
 }
 
 #[cfg(test)]
 #[allow(non_snake_case)]
-#[rustfmt::skip]
 mod tests {
+    use crate::raw::Pair;
+
     use super::{parse_field, Chunk, RawChunk, Spanned};
 
     fn N(s: &str) -> Chunk {
@@ -428,15 +426,20 @@ mod tests {
     }
 
     fn z(c: RawChunk) -> Spanned<RawChunk> {
-        Spanned::new(c, 0 .. 0)
+        Spanned::new(c, 0..0)
     }
 
     #[test]
     fn test_process() {
-        let mut map = Vec::new();
-        map.push((Spanned::detached("abc"), Spanned::detached(vec![z(RawChunk::Normal("ABC"))])));
-        map.push((Spanned::detached("hi"), Spanned::detached(vec![z(RawChunk::Normal("hello"))])));
-        map.push((Spanned::detached("you"), Spanned::detached(vec![z(RawChunk::Normal("person"))])));
+        let map: Vec<_> = [("abc", "ABC"), ("hi", "hello"), ("you", "person")]
+            .into_iter()
+            .map(|(k, v)| {
+                Pair::new(
+                    Spanned::detached(k),
+                    Spanned::detached(vec![z(RawChunk::Normal(v))]),
+                )
+            })
+            .collect();
 
         let field = vec![
             z(RawChunk::Abbreviation("abc")),
@@ -455,7 +458,9 @@ mod tests {
 
     #[test]
     fn test_resolve_commands_and_escape() {
-        let field = vec![z(RawChunk::Normal("\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}"))];
+        let field = vec![z(RawChunk::Normal(
+            "\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}",
+        ))];
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Äther und "));
@@ -477,7 +482,9 @@ mod tests {
 
     #[test]
     fn test_math() {
-        let field = vec![z(RawChunk::Normal("The $11^{th}$ International Conference on How To Make \\$\\$"))];
+        let field = vec![z(RawChunk::Normal(
+            "The $11^{th}$ International Conference on How To Make \\$\\$",
+        ))];
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("The "));

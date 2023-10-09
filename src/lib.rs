@@ -19,6 +19,8 @@ assert_eq!(author[0].name, "Tolkien");
 ```
 */
 
+#![deny(missing_docs)]
+
 mod chunk;
 mod macros;
 mod mechanics;
@@ -29,7 +31,7 @@ mod types;
 pub use chunk::{Chunk, Chunks, ChunksExt, ChunksRef};
 pub use mechanics::EntryType;
 pub use raw::{
-    Field, ParseError, ParseErrorKind, RawBibliography, RawChunk, RawEntry, Token,
+    Field, Pair, ParseError, ParseErrorKind, RawBibliography, RawChunk, RawEntry, Token,
 };
 pub use types::*;
 
@@ -46,7 +48,7 @@ use paste::paste;
 use serde::{Deserialize, Serialize};
 
 /// A fully parsed bibliography.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bibliography {
     /// The bibliography entries.
@@ -103,7 +105,7 @@ fn convert_result<T>(err: Result<T, RetrievalError>) -> Result<Option<T>, TypeEr
 impl Bibliography {
     /// Create a new, empty bibliography.
     pub fn new() -> Self {
-        Self { entries: Vec::new(), keys: BTreeMap::new() }
+        Self::default()
     }
 
     /// Parse a bibliography from a source string.
@@ -128,9 +130,9 @@ impl Bibliography {
 
             let mut fields: BTreeMap<String, Vec<Spanned<Chunk>>> = BTreeMap::new();
             for spanned_field in entry.v.fields.into_iter() {
-                let (field_key, field_value) = spanned_field;
-                let field_key = field_key.v.to_string().to_ascii_lowercase();
-                let parsed = resolve::parse_field(&field_key, &field_value.v, abbr)?;
+                let field_key = spanned_field.key.v.to_string().to_ascii_lowercase();
+                let parsed =
+                    resolve::parse_field(&field_key, &spanned_field.value.v, abbr)?;
                 fields.insert(field_key, parsed);
             }
             res.insert(Entry {
@@ -154,6 +156,11 @@ impl Bibliography {
     /// The number of bibliography entries.
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Whether the bibliography is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Returns the entry with the given cite key.
@@ -226,11 +233,6 @@ impl Bibliography {
         self.entries.iter_mut()
     }
 
-    /// Consume this struct and return an iterator over the bibliography's entries.
-    pub fn into_iter(self) -> impl Iterator<Item = Entry> {
-        self.entries.into_iter()
-    }
-
     /// Consume this struct and return a vector of the bibliography's entries.
     pub fn into_vec(self) -> Vec<Entry> {
         self.entries
@@ -241,7 +243,7 @@ impl Bibliography {
         let mut first = true;
         for entry in &self.entries {
             if !first {
-                write!(sink, "\n")?;
+                writeln!(sink)?;
             }
             writeln!(sink, "{}", entry.to_biblatex_string())?;
             first = false;
@@ -261,7 +263,7 @@ impl Bibliography {
         let mut first = true;
         for entry in &self.entries {
             if !first {
-                write!(sink, "\n")?;
+                writeln!(sink)?;
             }
             writeln!(sink, "{}", entry.to_bibtex_string().map_err(|_| fmt::Error)?)?;
             first = false;
@@ -472,9 +474,8 @@ impl Entry {
                 _ => continue,
             };
 
-            match error {
-                Some(t) => malformed.push((key.clone(), t)),
-                None => {}
+            if let Some(err) = error {
+                malformed.push((key.clone(), err))
             }
         }
 
@@ -1062,8 +1063,8 @@ mod tests {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
 
-        assert_eq!(bibliography.get_mut("haug2019").unwrap().verify().is_ok(), true);
-        assert_eq!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok(), true);
+        assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
+        assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
 
         let ill = bibliography.get("ill-defined").unwrap();
         let report = ill.verify();

@@ -198,7 +198,7 @@ impl Type for Vec<Range<u32>> {
         let number = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
             s.eat_whitespace();
             let idx = s.cursor();
-            let num = s.eat_while(|c: char| c.is_digit(10));
+            let num = s.eat_while(|c: char| c.is_ascii_digit());
             u32::from_str(num).map_err(|_| {
                 TypeError::new(
                     idx + offset..s.cursor() + offset,
@@ -281,6 +281,7 @@ where
 /// Defines the pagination scheme to use for formatting purposes.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
+#[allow(missing_docs)]
 pub enum Pagination {
     Page,
     Column,
@@ -308,6 +309,7 @@ impl Type for Pagination {
 /// The value of the `editor` through `editorc` fields.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
+#[allow(missing_docs)]
 pub enum EditorType {
     Editor,
     Compiler,
@@ -334,6 +336,7 @@ impl Type for EditorType {
 
 /// Gender of the author or editor (if no author was specified).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Display, AsRefStr)]
+#[allow(missing_docs)]
 pub enum Gender {
     SingularFemale,
     SingularMale,

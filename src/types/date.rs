@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-
-use chrono::{Datelike, NaiveDate, NaiveTime};
+use std::str::FromStr;
 
 use crate::chunk::*;
 use crate::{Span, Spanned, Type, TypeError, TypeErrorKind};
@@ -47,7 +46,114 @@ pub struct Datetime {
     /// The day (starting at zero).
     pub day: Option<u8>,
     /// The timezone-unaware time.
-    pub time: Option<NaiveTime>,
+    pub time: Option<Time>,
+}
+
+/// A potentially timezone aware time.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Time {
+    /// The hour (0-23).
+    pub hour: u8,
+    /// The minute (0-59).
+    pub minute: u8,
+    /// The second (0-59).
+    pub second: u8,
+    /// An optional timezone offset.
+    pub offset: Option<TimeOffset>,
+}
+
+impl Time {
+    /// Create a new time from hours, minutes, and seconds. Return `None` if
+    /// the values are out of range.
+    pub fn from_hms(hour: u8, minute: u8, second: u8) -> Option<Self> {
+        if hour > 23 || minute > 59 || second > 59 {
+            return None;
+        }
+
+        Some(Self { hour, minute, second, offset: None })
+    }
+
+    /// Create a new time from hours, minutes, seconds and an offset. Return
+    /// `None` if the values are out of range.
+    pub fn from_hms_offset(
+        hour: u8,
+        minute: u8,
+        second: u8,
+        offset: TimeOffset,
+    ) -> Option<Self> {
+        if hour > 23 || minute > 59 || second > 59 {
+            return None;
+        }
+
+        Some(Self { hour, minute, second, offset: Some(offset) })
+    }
+
+    /// Return seconds in UTC.
+    pub fn to_utc_seconds(&self) -> isize {
+        let mut seconds =
+            self.hour as isize * 3600 + self.minute as isize * 60 + self.second as isize;
+        if let Some(offset) = self.offset {
+            seconds -= offset.to_seconds();
+        }
+        seconds
+    }
+}
+
+impl PartialOrd for Time {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self.offset, other.offset) {
+            (Some(_), Some(_)) | (None, None) => {
+                Some(self.to_utc_seconds().cmp(&other.to_utc_seconds()))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// A timezone offset.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TimeOffset {
+    /// Time is UTC. Do not assume an origin timezone.
+    Utc,
+    /// Offset relative to UTC. Positiveness, hour, and minute.
+    Offset {
+        /// Whether the time is ahead of UTC.
+        positive: bool,
+        /// The hour offset.
+        hours: u8,
+        /// The minute offset.
+        minutes: u8,
+    },
+}
+
+impl TimeOffset {
+    /// Create a new offset.
+    pub fn offset(positive: bool, hours: u8, minutes: u8) -> Self {
+        Self::Offset { positive, hours, minutes }
+    }
+
+    /// Create a new offset from an hour.
+    pub fn offset_hour(hour: i32) -> Self {
+        if hour < 0 {
+            Self::Offset { positive: false, hours: (-hour) as u8, minutes: 0 }
+        } else {
+            Self::Offset { positive: true, hours: hour as u8, minutes: 0 }
+        }
+    }
+
+    /// Convert to seconds.
+    fn to_seconds(self) -> isize {
+        match self {
+            TimeOffset::Utc => 0,
+            TimeOffset::Offset { positive, hours, minutes } => {
+                let mut seconds = hours as isize * 3600 + minutes as isize * 60;
+                if !positive {
+                    seconds *= -1;
+                }
+                seconds
+            }
+        }
+    }
 }
 
 impl Date {
@@ -75,48 +181,46 @@ impl Date {
                 e
             })?;
             DateValue::Between(d1, d2)
-        } else {
-            if let Some(pos) = date_trimmed.find('/') {
-                let s1 = &date_trimmed[..pos];
-                let s2 = &date_trimmed[pos + 1..];
+        } else if let Some(pos) = date_trimmed.find('/') {
+            let s1 = &date_trimmed[..pos];
+            let s2 = &date_trimmed[pos + 1..];
 
-                fn is_open_range(s: &str) -> bool {
-                    s.trim().is_empty() || s == ".."
-                }
-
-                match (is_open_range(&s1), is_open_range(&s2)) {
-                    (false, false) => DateValue::Between(
-                        Datetime::parse(s1).map_err(|mut e| {
-                            e.offset(span.start);
-                            e
-                        })?,
-                        Datetime::parse(s2).map_err(|mut e| {
-                            e.offset(span.start + pos + 1);
-                            e
-                        })?,
-                    ),
-                    (false, true) => {
-                        DateValue::After(Datetime::parse(s1).map_err(|mut e| {
-                            e.offset(span.start);
-                            e
-                        })?)
-                    }
-                    (true, false) => {
-                        DateValue::Before(Datetime::parse(s2).map_err(|mut e| {
-                            e.offset(span.start + pos + 1);
-                            e
-                        })?)
-                    }
-                    (true, true) => {
-                        return Err(TypeError::new(span, TypeErrorKind::UndefinedRange));
-                    }
-                }
-            } else {
-                DateValue::At(Datetime::parse(date_trimmed).map_err(|mut e| {
-                    e.offset(span.start);
-                    e
-                })?)
+            fn is_open_range(s: &str) -> bool {
+                s.trim().is_empty() || s == ".."
             }
+
+            match (is_open_range(s1), is_open_range(s2)) {
+                (false, false) => DateValue::Between(
+                    Datetime::parse(s1).map_err(|mut e| {
+                        e.offset(span.start);
+                        e
+                    })?,
+                    Datetime::parse(s2).map_err(|mut e| {
+                        e.offset(span.start + pos + 1);
+                        e
+                    })?,
+                ),
+                (false, true) => {
+                    DateValue::After(Datetime::parse(s1).map_err(|mut e| {
+                        e.offset(span.start);
+                        e
+                    })?)
+                }
+                (true, false) => {
+                    DateValue::Before(Datetime::parse(s2).map_err(|mut e| {
+                        e.offset(span.start + pos + 1);
+                        e
+                    })?)
+                }
+                (true, true) => {
+                    return Err(TypeError::new(span, TypeErrorKind::UndefinedRange));
+                }
+            }
+        } else {
+            DateValue::At(Datetime::parse(date_trimmed).map_err(|mut e| {
+                e.offset(span.start);
+                e
+            })?)
         };
 
         Ok(Self {
@@ -155,7 +259,7 @@ impl Date {
                 let day: u8 = day.trim().parse().map_err(|_| {
                     TypeError::new(span.clone(), TypeErrorKind::InvalidNumber)
                 })?;
-                if day > 31 || day < 1 {
+                if !(1..=31).contains(&day) {
                     return Err(TypeError::new(span, TypeErrorKind::DayOutOfRange));
                 }
 
@@ -165,8 +269,7 @@ impl Date {
                 if s.eat_while(|c: char| {
                     c.is_whitespace() || matches!(c, '-' | '\u{00a0}')
                 })
-                .len()
-                    == 0
+                .is_empty()
                 {
                     return Ok(Date::from_datetime(date_atom));
                 };
@@ -174,13 +277,13 @@ impl Date {
                 let day_start = s.cursor();
                 let day = s.eat_while(char::is_ascii_digit);
                 let day_span = day_start..s.cursor();
-                if day.len() == 0 {
+                if day.is_empty() {
                     return Err(TypeError::new(day_span, TypeErrorKind::InvalidNumber));
                 }
 
                 let day: u8 = day.parse().unwrap();
 
-                if day < 1 || day > 31 {
+                if !(1..=31).contains(&day) {
                     return Err(TypeError::new(day_span, TypeErrorKind::DayOutOfRange));
                 }
 
@@ -298,7 +401,7 @@ impl Date {
         Err(TypeError::new(here(&s), TypeErrorKind::InvalidFormat))
     }
 
-    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
+    pub(crate) fn to_fieldset(self) -> Vec<(String, String)> {
         self.value.to_fieldset()
     }
 }
@@ -316,7 +419,7 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
         ));
     }
 
-    Ok(i32::from_str_radix(s.from(year_idx), 10).unwrap())
+    Ok(s.from(year_idx).parse::<i32>().unwrap())
 }
 
 fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
@@ -357,7 +460,7 @@ impl Type for Date {
 }
 
 impl DateValue {
-    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
+    pub(crate) fn to_fieldset(self) -> Vec<(String, String)> {
         match self {
             DateValue::At(date) | DateValue::After(date) | DateValue::Before(date) => {
                 date.to_fieldset()
@@ -377,63 +480,100 @@ impl DateValue {
 impl Datetime {
     /// Parse a datetime from a string.
     fn parse(src: &str) -> Result<Self, TypeError> {
-        let src = src.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-        let mut slice = &src[..];
+        let mut s = Scanner::new(src);
+        let pos = s.cursor();
+        let year = parse_short_year(&mut s).or_else(|_| {
+            s.jump(pos);
+            parse_year(&mut s)
+        })?;
 
-        let time = if let Some(pos) = slice.find('T') {
-            if pos + 1 < slice.len() {
-                let time_str = &slice[pos + 1..];
-                slice = &slice[..pos];
-                time_str.parse::<NaiveTime>().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let mut month = None;
+        let mut day = None;
 
-        let full_date = slice.parse::<NaiveDate>();
+        s.eat_whitespace();
 
-        Ok(if let Ok(ndate) = full_date {
-            Datetime {
-                year: ndate.year(),
-                month: Some(ndate.month0() as u8),
-                day: Some(ndate.day0() as u8),
-                time,
-            }
-        } else {
-            // This might be an incomplete date, missing day and possibly month.
-            let mut s = Scanner::new(&slice);
-            let year = get_year(&mut s)?;
+        if s.done() {
+            return Ok(Datetime { year, month, day, time: None });
+        }
 
-            let month = if s.eat_while('-').len() > 0 {
-                let month_start = s.cursor();
-                let month = s.eat_while(char::is_ascii_digit);
-                if month.len() != 2 {
-                    return Err(TypeError::new(
-                        month_start..s.cursor(),
-                        TypeErrorKind::WrongNumberOfDigits,
-                    ));
-                }
+        parse_hyphen(&mut s)?;
 
-                let month = u8::from_str_radix(&month, 10).unwrap() - 1;
-                if month > 11 {
-                    return Err(TypeError::new(
-                        month_start..s.cursor(),
-                        TypeErrorKind::MonthOutOfRange,
-                    ));
-                }
+        let some_month = parse_month(&mut s)?;
+        month = Some(some_month);
 
-                Some(month)
-            } else {
-                None
-            };
+        s.eat_whitespace();
 
-            Datetime { year, month, day: None, time: None }
+        if s.done() {
+            return Ok(Datetime { year, month, day, time: None });
+        }
+
+        parse_hyphen(&mut s)?;
+
+        let some_day = parse_day(&mut s)?;
+        day = Some(some_day);
+
+        if some_day + 1 > days_in_month(some_month, year) {
+            return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::DayOutOfRange));
+        }
+
+        s.eat_whitespace();
+        if s.done() {
+            return Ok(Datetime { year, month, day, time: None });
+        }
+
+        if !s.eat_if('T') {
+            return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat));
+        }
+
+        let hour = parse_hour(&mut s)?;
+        s.eat_whitespace();
+
+        if s.done() {
+            return Ok(Datetime {
+                year,
+                month,
+                day,
+                time: Some(Time { hour, minute: 0, second: 0, offset: None }),
+            });
+        }
+
+        parse_colon(&mut s)?;
+        let minute = parse_minutes_or_seconds(&mut s)?;
+        s.eat_whitespace();
+
+        if s.done() {
+            return Ok(Datetime {
+                year,
+                month,
+                day,
+                time: Some(Time { hour, minute, second: 0, offset: None }),
+            });
+        }
+
+        parse_colon(&mut s)?;
+        let second = parse_minutes_or_seconds(&mut s)?;
+        s.eat_whitespace();
+
+        if s.done() {
+            return Ok(Datetime {
+                year,
+                month,
+                day,
+                time: Some(Time { hour, minute, second, offset: None }),
+            });
+        }
+
+        let offset = parse_offset(&mut s)?;
+
+        Ok(Datetime {
+            year,
+            month,
+            day,
+            time: Some(Time { hour, minute, second, offset: Some(offset) }),
         })
     }
 
-    pub(crate) fn to_fieldset(&self) -> Vec<(String, String)> {
+    pub(crate) fn to_fieldset(self) -> Vec<(String, String)> {
         let year = if self.year >= 0 {
             format!("{:04}", self.year)
         } else {
@@ -483,7 +623,7 @@ impl PartialOrd for Datetime {
         }
 
         match (self.time, other.time) {
-            (Some(s), Some(o)) => Some(s.cmp(&o)),
+            (Some(s), Some(o)) => s.partial_cmp(&o),
             (None, None) => Some(Ordering::Equal),
             _ => None,
         }
@@ -507,6 +647,162 @@ impl Display for Datetime {
         }
 
         Ok(())
+    }
+}
+
+fn parse_int<R>(s: &mut Scanner, digits: R) -> Option<i32>
+where
+    R: std::ops::RangeBounds<usize>,
+{
+    s.eat_whitespace();
+
+    let sign = s.eat_if(|c| c == '+' || c == '-');
+    let positive = if sign { !s.before().ends_with('-') } else { true };
+
+    s.eat_whitespace();
+    let num = s.eat_while(char::is_numeric);
+    if !digits.contains(&num.len()) {
+        return None;
+    }
+
+    let num = num.parse::<i32>().unwrap() * if positive { 1 } else { -1 };
+    Some(num)
+}
+
+fn parse_unsigned_int<T, R>(s: &mut Scanner, digits: R) -> Option<T>
+where
+    T: FromStr + Ord + std::fmt::Debug,
+    <T as FromStr>::Err: std::fmt::Debug,
+    R: std::ops::RangeBounds<usize>,
+{
+    s.eat_whitespace();
+    let num = s.eat_while(char::is_numeric);
+    if !digits.contains(&num.len()) {
+        return None;
+    }
+
+    let num = num.parse::<T>().unwrap();
+    Some(num)
+}
+
+/// Parse a string with a plus/minus and one to four digits into an integer.
+fn parse_year(s: &mut Scanner) -> Result<i32, TypeError> {
+    let pos = s.cursor();
+    parse_int(s, 4..=4)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))
+}
+
+fn parse_short_year(s: &mut Scanner) -> Result<i32, TypeError> {
+    let pos = s.cursor();
+    let year = parse_int(s, 2..=2)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))?;
+    let year = if year < 50 { year + 2000 } else { year + 1900 };
+    Ok(year)
+}
+
+/// Parse the month in the 0-11 range.
+fn parse_month(s: &mut Scanner) -> Result<u8, TypeError> {
+    let pos = s.cursor();
+    let month: u8 = parse_unsigned_int(s, 1..=2)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))?;
+    if !(1..=12).contains(&month) {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::MonthOutOfRange));
+    }
+
+    Ok(month - 1)
+}
+
+/// Parse the day in the 0-30 range.
+fn parse_day(s: &mut Scanner) -> Result<u8, TypeError> {
+    let pos = s.cursor();
+    let day: u8 = parse_unsigned_int(s, 1..=2)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))?;
+    if !(1..=31).contains(&day) {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::DayOutOfRange));
+    }
+
+    Ok(day - 1)
+}
+
+/// Parse the hour in the 0-23 range.
+fn parse_hour(s: &mut Scanner) -> Result<u8, TypeError> {
+    let pos = s.cursor();
+    let hour: u8 = parse_unsigned_int(s, 1..=2)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))?;
+    if !(0..=23).contains(&hour) {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidNumber));
+    }
+
+    Ok(hour)
+}
+
+/// Parse minutes or seconds in the 0-59 range.
+fn parse_minutes_or_seconds(s: &mut Scanner) -> Result<u8, TypeError> {
+    let pos = s.cursor();
+    let num: u8 = parse_unsigned_int(s, 1..=2)
+        .ok_or_else(|| TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat))?;
+    if !(0..=59).contains(&num) {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidNumber));
+    }
+
+    Ok(num)
+}
+
+/// Parse an offset.
+fn parse_offset(s: &mut Scanner) -> Result<TimeOffset, TypeError> {
+    s.eat_whitespace();
+    let pos = s.cursor();
+    let c = s.eat();
+    Ok(match c {
+        Some('Z') => TimeOffset::Utc,
+        Some('+' | '-') => {
+            let positive = c == Some('+');
+            let hours = parse_hour(s)?;
+            s.eat_whitespace();
+            if s.done() {
+                return Ok(TimeOffset::Offset { positive, hours, minutes: 0 });
+            }
+
+            parse_colon(s)?;
+            let minutes = parse_minutes_or_seconds(s)?;
+            TimeOffset::Offset { positive, hours, minutes }
+        }
+        _ => return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat)),
+    })
+}
+
+/// Parse a hyphen.
+pub fn parse_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
+    let pos = s.cursor();
+    s.eat_whitespace();
+    if !s.eat_if('-') {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat));
+    }
+    s.eat_while('-');
+    Ok(())
+}
+
+/// Parse a colon.
+pub fn parse_colon(s: &mut Scanner) -> Result<(), TypeError> {
+    let pos = s.cursor();
+    s.eat_whitespace();
+    if !s.eat_if(':') {
+        return Err(TypeError::new(pos..s.cursor(), TypeErrorKind::InvalidFormat));
+    }
+    Ok(())
+}
+
+fn days_in_month(month: u8, year: i32) -> u8 {
+    if month == 1 {
+        if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            29
+        } else {
+            28
+        }
+    } else if month < 7 {
+        31 - month % 2
+    } else {
+        30 + month % 2
     }
 }
 
@@ -613,7 +909,7 @@ mod tests {
                     year: 2020,
                     month: Some(3),
                     day: Some(3),
-                    time: Some(NaiveTime::from_hms_opt(18, 30, 31).unwrap()),
+                    time: Some(Time::from_hms(18, 30, 31).unwrap()),
                 }),
                 uncertain: false,
                 approximate: false,
@@ -696,7 +992,46 @@ mod tests {
                 year: 2020,
                 month: Some(8),
                 day: Some(5),
-                time: Some(NaiveTime::from_hms_opt(13, 39, 00).unwrap()),
+                time: Some(Time::from_hms(13, 39, 00).unwrap()),
+            }
+        );
+
+        let date5 = Datetime::parse("2020-09-06T13:39:00Z").unwrap();
+        assert_eq!(
+            date5,
+            Datetime {
+                year: 2020,
+                month: Some(8),
+                day: Some(5),
+                time: Some(Time::from_hms_offset(13, 39, 00, TimeOffset::Utc).unwrap()),
+            }
+        );
+
+        let date6 = Datetime::parse("2020-09-06T13:39:00+01").unwrap();
+        assert_eq!(
+            date6,
+            Datetime {
+                year: 2020,
+                month: Some(8),
+                day: Some(5),
+                time: Some(
+                    Time::from_hms_offset(13, 39, 00, TimeOffset::offset_hour(1))
+                        .unwrap()
+                ),
+            }
+        );
+
+        let date6 = Datetime::parse("2020-09-06T13:39:00-02:10").unwrap();
+        assert_eq!(
+            date6,
+            Datetime {
+                year: 2020,
+                month: Some(8),
+                day: Some(5),
+                time: Some(
+                    Time::from_hms_offset(13, 39, 00, TimeOffset::offset(false, 2, 10))
+                        .unwrap()
+                ),
             }
         );
 

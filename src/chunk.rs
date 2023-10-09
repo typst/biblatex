@@ -115,7 +115,7 @@ impl ChunksExt for [Spanned<Chunk>] {
                     }
                 }
                 Chunk::Verbatim(s) => {
-                    out.push_str(&s);
+                    out.push_str(s);
                 }
                 Chunk::Math(s) => {
                     out.push('$');
@@ -273,7 +273,7 @@ pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<C
 
     // Trim the beginning and the end of the parsed field
     let sanitize_latest = |latest: &mut Vec<Spanned<Chunk>>| {
-        if latest.len() == 0 {
+        if latest.is_empty() {
             return;
         }
 
@@ -310,11 +310,11 @@ pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<C
                 }
                 new_s
             } else {
-                &s
+                s
             };
 
             // If the last chunk is normal -> trailing keyword
-            let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { &s };
+            let s = if chunk_idx == vals.len() - 1 { s.trim_end() } else { s };
 
             let mut splits = s.split(keyword);
             // guaranteed to have a value
