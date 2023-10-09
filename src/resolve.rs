@@ -3,7 +3,7 @@ use unicode_normalization::char;
 use crate::chunk::{Chunk, Chunks};
 use crate::mechanics::is_verbatim_field;
 use crate::raw::{
-    is_id_continue, Field, KeyVal, ParseError, ParseErrorKind, RawChunk, Token,
+    is_id_continue, Field, Pair, ParseError, ParseErrorKind, RawChunk, Token,
 };
 use crate::types::get_month_for_abbr;
 use crate::{ChunksExt, Span, Spanned};
@@ -13,7 +13,7 @@ use unscanny::Scanner;
 pub fn parse_field(
     key: &str,
     field: &Field,
-    abbreviations: &Vec<KeyVal<'_>>,
+    abbreviations: &Vec<Pair<'_>>,
 ) -> Result<Chunks, ParseError> {
     let mut chunks = vec![];
     for e in field {
@@ -257,7 +257,7 @@ fn resolve_abbreviation(
     key: &str,
     abbr: &str,
     span: Span,
-    map: &Vec<KeyVal<'_>>,
+    map: &Vec<Pair<'_>>,
 ) -> Result<Chunks, ParseError> {
     let fields =
         map.iter()
@@ -411,7 +411,7 @@ fn is_single_char_func(c: char) -> bool {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
-    use crate::raw::KeyVal;
+    use crate::raw::Pair;
 
     use super::{parse_field, Chunk, RawChunk, Spanned};
 
@@ -434,7 +434,7 @@ mod tests {
         let map: Vec<_> = [("abc", "ABC"), ("hi", "hello"), ("you", "person")]
             .into_iter()
             .map(|(k, v)| {
-                KeyVal::new(
+                Pair::new(
                     Spanned::detached(k),
                     Spanned::detached(vec![z(RawChunk::Normal(v))]),
                 )

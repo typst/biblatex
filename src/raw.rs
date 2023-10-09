@@ -18,7 +18,7 @@ pub struct RawBibliography<'s> {
     /// The collection of citation keys and bibliography entries.
     pub entries: Vec<Spanned<RawEntry<'s>>>,
     /// A map of reusable abbreviations, only supported by BibTeX.
-    pub abbreviations: Vec<KeyVal<'s>>,
+    pub abbreviations: Vec<Pair<'s>>,
 }
 
 /// A raw extracted entry, with abbreviations not yet resolved.
@@ -29,7 +29,7 @@ pub struct RawEntry<'s> {
     /// Denotes the type of bibliographic item (e.g., `article`).
     pub kind: Spanned<&'s str>,
     /// Maps from field names to their values.
-    pub fields: Vec<KeyVal<'s>>,
+    pub fields: Vec<Pair<'s>>,
 }
 
 /// A literal representation of a bibliography entry field.
@@ -373,7 +373,7 @@ impl<'s> BiblatexParser<'s> {
     }
 
     /// Eat fields.
-    fn fields(&mut self) -> Result<Vec<KeyVal<'s>>, ParseError> {
+    fn fields(&mut self) -> Result<Vec<Pair<'s>>, ParseError> {
         let mut fields = Vec::new();
 
         while !self.s.done() {
@@ -387,7 +387,7 @@ impl<'s> BiblatexParser<'s> {
 
             self.s.eat_whitespace();
 
-            fields.push(KeyVal::new(key, value));
+            fields.push(Pair::new(key, value));
 
             match self.s.peek() {
                 Some(',') => self.comma()?,
@@ -491,14 +491,15 @@ impl<'s> BiblatexParser<'s> {
 
 /// The keys for fields and their values.
 #[derive(Debug, Clone)]
-pub struct KeyVal<'s> {
+pub struct Pair<'s> {
     /// The key.
     pub key: Spanned<&'s str>,
     /// The value.
     pub value: Spanned<Field<'s>>,
 }
 
-impl<'s> KeyVal<'s> {
+impl<'s> Pair<'s> {
+    /// Constructs a new key-value pair.
     pub fn new(key: Spanned<&'s str>, value: Spanned<Field<'s>>) -> Self {
         Self { key, value }
     }

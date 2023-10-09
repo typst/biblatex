@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Each type comes with a different set of required and allowable fields that
 /// are taken into consideration in [`Entry::verify`](crate::Entry::verify).
 #[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
+#[allow(missing_docs)]
 #[strum(serialize_all = "lowercase")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EntryType {

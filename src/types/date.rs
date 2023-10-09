@@ -49,18 +49,23 @@ pub struct Datetime {
     pub time: Option<Time>,
 }
 
+/// A potentially timezone aware time.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Time {
+    /// The hour (0-23).
     pub hour: u8,
+    /// The minute (0-59).
     pub minute: u8,
+    /// The second (0-59).
     pub second: u8,
+    /// An optional timezone offset.
     pub offset: Option<TimeOffset>,
 }
 
 impl Time {
     /// Create a new time from hours, minutes, and seconds. Return `None` if
     /// the values are out of range.
-    pub fn from_hms_opt(hour: u8, minute: u8, second: u8) -> Option<Self> {
+    pub fn from_hms(hour: u8, minute: u8, second: u8) -> Option<Self> {
         if hour > 23 || minute > 59 || second > 59 {
             return None;
         }
@@ -70,7 +75,7 @@ impl Time {
 
     /// Create a new time from hours, minutes, seconds and an offset. Return
     /// `None` if the values are out of range.
-    pub fn from_hms_offset_opt(
+    pub fn from_hms_offset(
         hour: u8,
         minute: u8,
         second: u8,
@@ -105,11 +110,20 @@ impl PartialOrd for Time {
     }
 }
 
+/// A timezone offset.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TimeOffset {
+    /// Time is UTC. Do not assume an origin timezone.
     Utc,
-    // Offset relative to UTC. Positiveness, hour, and minute.
-    Offset { positive: bool, hours: u8, minutes: u8 },
+    /// Offset relative to UTC. Positiveness, hour, and minute.
+    Offset {
+        /// Whether the time is ahead of UTC.
+        positive: bool,
+        /// The hour offset.
+        hours: u8,
+        /// The minute offset.
+        minutes: u8,
+    },
 }
 
 impl TimeOffset {
@@ -895,7 +909,7 @@ mod tests {
                     year: 2020,
                     month: Some(3),
                     day: Some(3),
-                    time: Some(Time::from_hms_opt(18, 30, 31).unwrap()),
+                    time: Some(Time::from_hms(18, 30, 31).unwrap()),
                 }),
                 uncertain: false,
                 approximate: false,
@@ -978,7 +992,7 @@ mod tests {
                 year: 2020,
                 month: Some(8),
                 day: Some(5),
-                time: Some(Time::from_hms_opt(13, 39, 00).unwrap()),
+                time: Some(Time::from_hms(13, 39, 00).unwrap()),
             }
         );
 
@@ -989,9 +1003,7 @@ mod tests {
                 year: 2020,
                 month: Some(8),
                 day: Some(5),
-                time: Some(
-                    Time::from_hms_offset_opt(13, 39, 00, TimeOffset::Utc).unwrap()
-                ),
+                time: Some(Time::from_hms_offset(13, 39, 00, TimeOffset::Utc).unwrap()),
             }
         );
 
@@ -1003,7 +1015,7 @@ mod tests {
                 month: Some(8),
                 day: Some(5),
                 time: Some(
-                    Time::from_hms_offset_opt(13, 39, 00, TimeOffset::offset_hour(1))
+                    Time::from_hms_offset(13, 39, 00, TimeOffset::offset_hour(1))
                         .unwrap()
                 ),
             }
@@ -1017,13 +1029,8 @@ mod tests {
                 month: Some(8),
                 day: Some(5),
                 time: Some(
-                    Time::from_hms_offset_opt(
-                        13,
-                        39,
-                        00,
-                        TimeOffset::offset(false, 2, 10)
-                    )
-                    .unwrap()
+                    Time::from_hms_offset(13, 39, 00, TimeOffset::offset(false, 2, 10))
+                        .unwrap()
                 ),
             }
         );

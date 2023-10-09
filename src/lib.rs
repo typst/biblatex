@@ -19,6 +19,8 @@ assert_eq!(author[0].name, "Tolkien");
 ```
 */
 
+#![deny(missing_docs)]
+
 mod chunk;
 mod macros;
 mod mechanics;
@@ -29,7 +31,7 @@ mod types;
 pub use chunk::{Chunk, Chunks, ChunksExt, ChunksRef};
 pub use mechanics::EntryType;
 pub use raw::{
-    Field, KeyVal, ParseError, ParseErrorKind, RawBibliography, RawChunk, RawEntry, Token,
+    Field, Pair, ParseError, ParseErrorKind, RawBibliography, RawChunk, RawEntry, Token,
 };
 pub use types::*;
 
