@@ -101,21 +101,33 @@ impl ChunksExt for [Spanned<Chunk>] {
     fn format_sentence(&self) -> String {
         let mut out = String::new();
         let mut first = true;
+        let mut prev_was_whitespace = false;
 
         for val in self {
             match &val.v {
                 Chunk::Normal(s) => {
-                    for c in s.chars() {
+                    for mut c in s.chars() {
+                        if c == '\n' || c == '\r' {
+                            if prev_was_whitespace {
+                                continue;
+                            } else {
+                                c = ' ';
+                            }
+                        }
+
                         if first {
                             out.extend(c.to_uppercase());
                         } else {
                             out.extend(c.to_lowercase());
                         }
                         first = false;
+                        prev_was_whitespace = c.is_whitespace();
                     }
                 }
                 Chunk::Verbatim(s) => {
                     out.push_str(s);
+                    prev_was_whitespace =
+                        s.chars().last().map(char::is_whitespace).unwrap_or(false);
                 }
                 Chunk::Math(s) => {
                     out.push('$');
@@ -132,10 +144,29 @@ impl ChunksExt for [Spanned<Chunk>] {
 
     fn format_verbatim(&self) -> String {
         let mut out = String::new();
+        let mut prev_was_whitespace = false;
+
         for val in self {
             match &val.v {
-                Chunk::Normal(s) => out += s,
-                Chunk::Verbatim(s) => out += s,
+                Chunk::Normal(s) => {
+                    for mut c in s.chars() {
+                        if c == '\n' || c == '\r' {
+                            if prev_was_whitespace {
+                                continue;
+                            } else {
+                                c = ' ';
+                            }
+                        }
+
+                        out.push(c);
+                        prev_was_whitespace = c.is_whitespace();
+                    }
+                }
+                Chunk::Verbatim(s) => {
+                    out += s;
+                    prev_was_whitespace =
+                        s.chars().last().map(char::is_whitespace).unwrap_or(false);
+                }
                 Chunk::Math(s) => {
                     out.push('$');
                     out += s;

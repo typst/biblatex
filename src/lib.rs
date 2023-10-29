@@ -1138,6 +1138,15 @@ mod tests {
     }
 
     #[test]
+    fn linebreak_field() {
+        let contents = r#"@book{key, title = {Hello
+Martin}}"#;
+        let bibliography = Bibliography::parse(contents).unwrap();
+        let entry = bibliography.get("key").unwrap();
+        assert_eq!(entry.title().unwrap().format_verbatim(), "Hello Martin");
+    }
+
+    #[test]
     fn test_verbatim_fields() {
         let contents = fs::read_to_string("tests/libra.bib").unwrap();
         let bibliography = Bibliography::parse(&contents).unwrap();

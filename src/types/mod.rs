@@ -433,4 +433,12 @@ mod tests {
         assert_eq!(res[1], 4..6);
         assert_eq!(res[2], 194..245);
     }
+
+    #[test]
+    fn test_ranges_2228() {
+        let ranges = &[Spanned::zero(N("34,37--39"))];
+        let res = ranges.parse::<Vec<Range<u32>>>().unwrap();
+        assert_eq!(res[0], 34..34);
+        assert_eq!(res[1], 37..39);
+    }
 }
