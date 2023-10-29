@@ -161,18 +161,11 @@ impl Date {
     pub fn parse(chunks: ChunksRef) -> Result<Self, TypeError> {
         let span = chunks.span();
         let date = chunks.format_verbatim().to_uppercase();
+
         let mut date_trimmed = date.trim_end();
-        let last_trimmed = (!date.is_empty()
-            && date.is_char_boundary(date_trimmed.len() - 1))
-        .then(|| &date_trimmed[date_trimmed.len() - 1..]);
-
-        let (is_uncertain, is_approximate) = match last_trimmed {
-            Some("?") => (true, false),
-            Some("~") => (false, true),
-            Some("%") => (true, true),
-            _ => (false, false),
-        };
-
+        let is_both = date_trimmed.ends_with('%');
+        let is_uncertain = is_both || date_trimmed.ends_with('?');
+        let is_approximate = is_both || date_trimmed.ends_with('~');
         if is_uncertain || is_approximate {
             date_trimmed = &date_trimmed[..date_trimmed.len() - 1];
         }
