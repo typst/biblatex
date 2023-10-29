@@ -162,12 +162,14 @@ impl Date {
         let span = chunks.span();
         let date = chunks.format_verbatim().to_uppercase();
         let mut date_trimmed = date.trim_end();
+        let last_trimmed = (!date.is_empty()
+            && date.is_char_boundary(date_trimmed.len() - 1))
+        .then(|| &date_trimmed[date_trimmed.len() - 1..]);
 
-        let (is_uncertain, is_approximate) = match &date_trimmed[date_trimmed.len() - 1..]
-        {
-            "?" => (true, false),
-            "~" => (false, true),
-            "%" => (true, true),
+        let (is_uncertain, is_approximate) = match last_trimmed {
+            Some("?") => (true, false),
+            Some("~") => (false, true),
+            Some("%") => (true, true),
             _ => (false, false),
         };
 
@@ -848,6 +850,12 @@ fn get_month_for_name(month: &str) -> Option<u8> {
 mod tests {
     use super::*;
     use crate::chunk::tests::*;
+
+    #[test]
+    fn test_parse_empty_date() {
+        assert!(Date::parse(&[]).is_err());
+        assert!(Date::parse(&[s(N(""), 0..0)]).is_err());
+    }
 
     #[test]
     fn test_parse_date() {
