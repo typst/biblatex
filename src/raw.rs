@@ -406,6 +406,14 @@ impl<'s> BiblatexParser<'s> {
         Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
     }
 
+    /// Eat an entry key.
+    fn key(&mut self) -> Result<Spanned<&'s str>, ParseError> {
+        let idx = self.s.cursor();
+        self.s.eat_while(is_key);
+
+        Ok(Spanned::new(self.s.from(idx), idx..self.s.cursor()))
+    }
+
     /// Eat an identifier.
     fn ident(&mut self) -> Result<Spanned<&'s str>, ParseError> {
         let idx = self.s.cursor();
@@ -471,7 +479,7 @@ impl<'s> BiblatexParser<'s> {
 
     /// Eat the body of an entry.
     fn body(&mut self, kind: Spanned<&'s str>, start: usize) -> Result<(), ParseError> {
-        let key = self.ident()?;
+        let key = self.key()?;
         self.s.eat_whitespace();
         self.comma()?;
 
@@ -503,6 +511,12 @@ impl<'s> Pair<'s> {
     pub fn new(key: Spanned<&'s str>, value: Spanned<Field<'s>>) -> Self {
         Self { key, value }
     }
+}
+
+/// Whether a character is allowed in an entry key
+#[inline]
+pub fn is_key(c: char) -> bool {
+    !matches!(c, ',' | '}' ) && !c.is_control() && !c.is_whitespace()
 }
 
 /// Whether a character can start an identifier.
@@ -562,6 +576,22 @@ mod tests {
         let bt = RawBibliography::parse(&test).unwrap();
         let article = &bt.entries[0];
         format(&article.v.fields[0].value.v)
+    }
+
+    #[test]
+    fn test_entry_key() {
+        let file = "@article{!\"#$%&'()*+-./123:;<=>?@ABC[\\]^_`abc{|~,}";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.key.v, "!\"#$%&'()*+-./123:;<=>?@ABC[\\]^_`abc{|~");
+    }
+
+    #[test]
+    fn test_empty_entry_key() {
+        let file = "@article{,}";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.key.v, "");
     }
 
     #[test]
