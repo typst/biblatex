@@ -362,15 +362,6 @@ impl Entry {
                         missing.push(field);
                     }
                 }
-                "location" => {
-                    if self
-                        .get_non_empty(field)
-                        .or_else(|| self.get_non_empty("address"))
-                        .is_none()
-                    {
-                        missing.push(field);
-                    }
-                }
                 "school"
                     if self.entry_type == EntryType::Thesis
                         || self.entry_type == EntryType::MastersThesis
@@ -459,6 +450,7 @@ impl Entry {
                 "organization" => chunks.parse::<Vec<Chunks>>().err(),
                 "pages" => chunks.parse::<Vec<std::ops::Range<u32>>>().err(),
                 "publisher" => chunks.parse::<Vec<Chunks>>().err(),
+                "publisher_place" => chunks.parse::<Vec<Chunks>>().err(),
                 "volume" => chunks.parse::<i64>().err(),
                 "bookpagination" => chunks.parse::<Pagination>().err(),
                 "pagination" => chunks.parse::<Pagination>().err(),
@@ -509,7 +501,7 @@ impl Entry {
         for (key, value) in &self.fields {
             let key = match key.as_ref() {
                 "journal" => "journaltitle",
-                "address" => "location",
+                "publisher_place" => "address",
                 "school" => "institution",
                 k => k,
             };
@@ -555,7 +547,7 @@ impl Entry {
 
             let key = match key.as_ref() {
                 "journaltitle" => "journal",
-                "location" => "address",
+                "publisher_place" => "address",
                 "institution" if thesis => "school",
                 k => k,
             };
@@ -669,7 +661,7 @@ impl Entry {
                 }
                 "address" => {
                     if let Some(item) =
-                        crossref.get(f).or_else(|| crossref.get("location"))
+                        crossref.get(f).or_else(|| crossref.get("publisher_place"))
                     {
                         self.set(f, item.to_vec())
                     }
@@ -750,6 +742,8 @@ impl Entry {
         organization: "organization" => Vec<Chunks>,
         pages: "pages" => PermissiveType<Vec<std::ops::Range<u32>>>,
         publisher: "publisher" => Vec<Chunks>,
+        publisher_place: "address",
+        location: "location",
         series: "series",
         title: "title",
         type_: "type" => String,
@@ -757,8 +751,6 @@ impl Entry {
     }
 
     alias_fields! {
-        address: "address" | "location",
-        location: "location" | "address",
         annotation: "annotation" | "annote",
         eprint_type: "eprinttype" | "archiveprefix",
         journal: "journal" | "journaltitle",
