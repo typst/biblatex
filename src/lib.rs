@@ -1202,4 +1202,24 @@ Martin}}"#;
             _ => panic!(),
         }
     }
+
+    #[test]
+    fn test_whitespace_collapse() {
+        let raw = r#"@article{aksin,
+            title        = {Effect of immobilization on catalytic characteristics of
+                            saturated {Pd-N}-heterocyclic carbenes in {Mizoroki-Heck}
+                            reactions},
+          }"#;
+
+        let bibliography = Bibliography::parse(raw).unwrap();
+        let entry = bibliography.get("aksin").unwrap();
+        assert_eq!(
+            entry.title().unwrap().first().map(|s| s.as_ref().v),
+            Some(Chunk::Normal(
+                "Effect of immobilization on catalytic characteristics of saturated "
+                    .to_string()
+            ))
+            .as_ref()
+        );
+    }
 }

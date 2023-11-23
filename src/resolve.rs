@@ -114,6 +114,10 @@ impl<'s> ContentParser<'s> {
 
                     self.s.eat();
                 }
+                _ if c.is_whitespace() => {
+                    self.current_chunk.get_mut().push(' ');
+                    self.s.eat_whitespace();
+                }
                 _ => self.current_chunk.get_mut().push(self.s.eat().unwrap()),
             }
         }
