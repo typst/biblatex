@@ -57,6 +57,8 @@ pub enum TypeErrorKind {
     MonthOutOfRange,
     /// The given input did not contain a valid number.
     InvalidNumber,
+    /// The given input did not contain a number.
+    MissingNumber,
     /// A number did not have the right number of digits.
     WrongNumberOfDigits,
     /// The entry was not in a format valid for that type.
@@ -80,6 +82,7 @@ impl fmt::Display for TypeErrorKind {
             Self::DayOutOfRange => "day out of range (must be between 1 and 31)",
             Self::MonthOutOfRange => "month out of range (must be between 1 and 12)",
             Self::InvalidNumber => "invalid number",
+            Self::MissingNumber => "missing number",
             Self::WrongNumberOfDigits => "wrong number of digits",
             Self::InvalidFormat => "invalid format",
             Self::UnknownGender => "unknown gender",
@@ -113,6 +116,8 @@ impl Type for i64 {
             Ok(n)
         } else if let Some(roman) = Roman::parse(s) {
             Ok(roman.value() as i64)
+        } else if span.is_empty() {
+            Err(TypeError::new(span, TypeErrorKind::MissingNumber))
         } else {
             Err(TypeError::new(span, TypeErrorKind::InvalidNumber))
         }

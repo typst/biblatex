@@ -252,7 +252,11 @@ impl Date {
                 let day = day.format_verbatim();
 
                 let day: u8 = day.trim().parse().map_err(|_| {
-                    TypeError::new(span.clone(), TypeErrorKind::InvalidNumber)
+                    if span.is_empty() {
+                        TypeError::new(span.clone(), TypeErrorKind::MissingNumber)
+                    } else {
+                        TypeError::new(span.clone(), TypeErrorKind::InvalidNumber)
+                    }
                 })?;
                 if !(1..=31).contains(&day) {
                     return Err(TypeError::new(span, TypeErrorKind::DayOutOfRange));
@@ -273,7 +277,7 @@ impl Date {
                 let day = s.eat_while(char::is_ascii_digit);
                 let day_span = day_start..s.cursor();
                 if day.is_empty() {
-                    return Err(TypeError::new(day_span, TypeErrorKind::InvalidNumber));
+                    return Err(TypeError::new(day_span, TypeErrorKind::MissingNumber));
                 }
 
                 let day: u8 = day.parse().unwrap();

@@ -122,7 +122,7 @@ impl<'s> ContentParser<'s> {
             }
         }
 
-        if !self.current_chunk.get().is_empty() {
+        if !self.current_chunk.get().is_empty() || self.result.is_empty() {
             self.turnaround(depth);
         }
 
