@@ -404,17 +404,67 @@ impl Date {
 fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
     s.eat_whitespace();
     let year_idx = s.cursor();
-    s.eat_if('-');
+    let has_sign = s.eat_if(['-', '+']);
     s.eat_whitespace();
+    let digits = s.eat_while(char::is_ascii_digit);
 
-    if s.eat_while(char::is_ascii_digit).len() != 4 {
+    if digits.is_empty() || digits.len() > 4 {
         return Err(TypeError::new(
             year_idx..s.cursor(),
             TypeErrorKind::WrongNumberOfDigits,
         ));
     }
 
-    Ok(s.from(year_idx).parse::<i32>().unwrap())
+    // This is guaranteed to only contain digits, whitespace, and a sign.
+    let year = s.from(year_idx).parse::<i32>().unwrap();
+
+    if let Some(positive_era) = parse_era_marker(s)? {
+        if has_sign {
+            return Err(TypeError::new(
+                year_idx..s.cursor(),
+                TypeErrorKind::InvalidFormat,
+            ));
+        }
+
+        if year == 0 {
+            return Err(TypeError::new(year_idx..s.cursor(), TypeErrorKind::YearZeroCE));
+        }
+
+        if !positive_era {
+            return Ok(-year + 1);
+        }
+    }
+
+    Ok(year)
+}
+
+fn parse_era_marker(s: &mut Scanner) -> Result<Option<bool>, TypeError> {
+    s.eat_whitespace();
+    let era_idx = s.cursor();
+    if s.eat_if("AD") || s.eat_if("CE") {
+        if s.peek().map_or(false, |c| c.is_alphanumeric()) {
+            return Err(TypeError::new(
+                era_idx..s.cursor(),
+                TypeErrorKind::InvalidFormat,
+            ));
+        }
+
+        return Ok(Some(true));
+    }
+
+    if s.eat_if("BC") {
+        s.eat_if("E");
+        if s.peek().map_or(false, |c| c.is_alphanumeric()) {
+            return Err(TypeError::new(
+                era_idx..s.cursor(),
+                TypeErrorKind::InvalidFormat,
+            ));
+        }
+
+        return Ok(Some(false));
+    }
+
+    Ok(None)
 }
 
 fn get_hyphen(s: &mut Scanner) -> Result<(), TypeError> {
@@ -961,6 +1011,30 @@ mod tests {
                 day: Some(27),
                 time: None,
             })
+        );
+    }
+
+    #[test]
+    fn test_parse_bce_year() {
+        let year = &[s(N("3 AD"), 0..4)];
+        let date = Date::parse_three_fields(year, None, None).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime { year: 3, month: None, day: None, time: None })
+        );
+
+        let year = &[s(N("3 BCE"), 0..5)];
+        let date = Date::parse_three_fields(year, None, None).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime { year: -2, month: None, day: None, time: None })
+        );
+
+        let year = &[s(N("90"), 0..2)];
+        let date = Date::parse_three_fields(year, None, None).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime { year: 90, month: None, day: None, time: None })
         );
     }
 

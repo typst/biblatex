@@ -69,6 +69,8 @@ pub enum TypeErrorKind {
     UnknownPagination,
     /// There is no [`EditorType`] variant for this input.
     UnknownEditorType,
+    /// The year 0 CE or BCE does not exist.
+    YearZeroCE,
 }
 
 impl fmt::Display for TypeErrorKind {
@@ -84,6 +86,7 @@ impl fmt::Display for TypeErrorKind {
             Self::InvalidIntegerRange => "invalid integer range",
             Self::UnknownPagination => "unknown pagination",
             Self::UnknownEditorType => "unknown editor type",
+            Self::YearZeroCE => "year 0 CE or BCE does not exist",
         })
     }
 }
