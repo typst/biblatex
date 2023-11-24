@@ -80,6 +80,7 @@ impl fmt::Display for ParseError {
 ///
 /// Also see [`ParseError`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ParseErrorKind {
     /// The file ended prematurely.
     UnexpectedEof,
@@ -516,7 +517,7 @@ impl<'s> Pair<'s> {
 /// Whether a character is allowed in an entry key
 #[inline]
 pub fn is_key(c: char) -> bool {
-    !matches!(c, ',' | '}' ) && !c.is_control() && !c.is_whitespace()
+    !matches!(c, ',' | '}') && !c.is_control() && !c.is_whitespace()
 }
 
 /// Whether a character can start an identifier.

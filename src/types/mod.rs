@@ -48,6 +48,7 @@ impl fmt::Display for TypeError {
 ///
 /// Also see [`TypeError`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum TypeErrorKind {
     /// The date range was open on both sides.
     UndefinedRange,
