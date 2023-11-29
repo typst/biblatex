@@ -1,6 +1,6 @@
 [package]
 name = "biblatex"
-version = "0.9.0"
+version = "0.9.1"
 authors = ["Martin Haug <mhaug@live.de>"]
 license = "MIT OR Apache-2.0"
 description = "Parsing, writing, and evaluating BibTeX and BibLaTeX files"
