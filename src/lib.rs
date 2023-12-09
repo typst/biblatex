@@ -1027,6 +1027,11 @@ mod tests {
     }
 
     #[test]
+    fn test_extended_name_format() {
+        dump_author_title("tests/extended_name_format.bib");
+    }
+
+    #[test]
     fn test_alias() {
         let contents = fs::read_to_string("tests/cross.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
