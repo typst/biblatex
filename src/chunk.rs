@@ -474,6 +474,14 @@ pub(crate) fn split_values(
     (src, new)
 }
 
+/// Returns the number of characters in the chunks.
+pub(crate) fn count_num_char(chunks: ChunksRef, c: char) -> usize {
+    chunks
+        .iter()
+        .map(|val| if let Chunk::Normal(s) = &val.v { s.matches(c).count() } else { 0 })
+        .sum()
+}
+
 #[cfg(test)]
 #[allow(non_snake_case)]
 pub(crate) mod tests {

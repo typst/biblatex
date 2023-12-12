@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
 use crate::{chunk::*, Spanned};
@@ -21,34 +22,58 @@ pub struct Person {
 }
 
 impl Person {
-    /// Constructs a new person from a chunk vector according to the specs of
-    /// [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
+    /// Constructs a new person from a chunk vector:
+    /// 1. according to the specs of
+    ///     [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
+    /// 2. biblatex extended name format according to the
+    ///     [documentation of biblatex][biblatex], section 3.4 pp. 80-81,
+    ///     and section §4.2.3 pp. 164-165.
+    ///     Support is limited to default `nameparts`: prefix, family,
+    ///     suffix, given.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
+    /// [biblatex]: https://ctan.gutenberg-asso.fr/macros/latex/contrib/biblatex/doc/biblatex.pdf
     pub fn parse(chunks: ChunksRef) -> Self {
-        let num_commas: usize =
-            chunks
-                .iter()
-                .map(|val| {
-                    if let Chunk::Normal(s) = &val.v {
-                        s.matches(',').count()
-                    } else {
-                        0
-                    }
-                })
-                .sum();
+        // Extended Name Format
+        if chunks.iter().any(|val| val.v.get().contains("=")) {
+            return Self::parse_extended_name_format(chunks);
+        }
+        // BibTeX
+        Self::parse_bibtex(chunks)
+    }
+
+    /// Constructs new person from chunk slices.
+    fn parse_extended_name_format(chunks: ChunksRef) -> Self {
+        let mut person = HashMap::new();
+        for chunk in split_token_lists(chunks, ",") {
+            let (key, value) = split_at_normal_char(&chunk, '=', true);
+            let key = key.format_verbatim();
+            let value = value.format_verbatim();
+            person.insert(key, value);
+        }
+
+        let name = person.remove("family").unwrap_or_default();
+        let given_name = person.remove("given").unwrap_or_default();
+        let prefix = person.remove("prefix").unwrap_or_default();
+        let suffix = person.remove("suffix").unwrap_or_default();
+
+        return Self { name, given_name, prefix, suffix };
+    }
+
+    fn parse_bibtex(chunks: ChunksRef) -> Self {
+        let num_commas = count_num_char(chunks, ',');
 
         match num_commas {
-            0 => Self::parse_unified(chunks),
+            0 => Self::parse_unified(chunks), // `<First> <Prefix> <Last>`
             1 => {
                 let (v1, v2) = split_at_normal_char(chunks, ',', true);
                 Self::parse_single_comma(&v1, &v2)
-            }
+            } // `<Prefix> <Last>, <First>`
             _ => {
                 let (v1, v2) = split_at_normal_char(chunks, ',', true);
                 let (v2, v3) = split_at_normal_char(&v2, ',', true);
                 Self::parse_two_commas(&v1, &v2, &v3)
-            }
+            } // `<Prefix> <Last>, <Suffix>, <First>`.
         }
     }
 
@@ -587,5 +612,100 @@ Claude Garamond",
         assert_eq!(p.prefix, "");
         assert_eq!(p.suffix, "Sr.");
         assert_eq!(p.given_name, "Harcourt Fenton");
+    }
+
+    #[test]
+    fn test_person_extended_name_format() {
+        // AUTHOR = {given=Hans, family=Harman}
+        let p = Person::parse(&[Spanned::zero(N("given=Hans, family=Harman"))]);
+        assert_eq!(p.name, "Harman");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "Hans");
+
+        // AUTHOR = {given={Jean Pierre}}
+        let p =
+            Person::parse(&[Spanned::zero(N("given=")), Spanned::zero(V("Jean Pierre"))]);
+        assert_eq!(p.name, "");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "Jean Pierre");
+
+        // AUTHOR = {given={Jean Pierre Simon}, given-i=JPS}
+        let p = Person::parse(&[
+            Spanned::zero(N("given=")),
+            Spanned::zero(V("Jean Pierre Simon")),
+            Spanned::zero(N(", given-i=JPS")),
+        ]);
+        assert_eq!(p.name, "");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "Jean Pierre Simon");
+
+        // AUTHOR = {given=Jean, prefix=de la, prefix-i=d, family=Rousse}
+        let p = Person::parse(&[Spanned::zero(N(
+            "given=Jean, prefix=de la, prefix-i=d, family=Rousse",
+        ))]);
+        assert_eq!(p.name, "Rousse");
+        assert_eq!(p.prefix, "de la");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "Jean");
+
+        // AUTHOR = {"family={Robert and Sons, Inc.}"}
+        let p = Person::parse(&[
+            Spanned::zero(N("family=")),
+            Spanned::zero(V("Robert and Sons, Inc.")),
+        ]);
+        assert_eq!(p.name, "Robert and Sons, Inc.");
+        assert_eq!(p.prefix, "");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "");
+
+        // AUTHOR = {given = Simon, prefix = de, family = Beumont}
+        let p = Person::parse(&[Spanned::zero(N(
+            "given = Simon, prefix = de, family = Beumont",
+        ))]);
+        assert_eq!(p.name, "Beumont");
+        assert_eq!(p.prefix, "de");
+        assert_eq!(p.suffix, "");
+        assert_eq!(p.given_name, "Simon");
+
+        // AUTHOR = {given=Hans, family=Harman and given=Simon, prefix=de, family=Beumont}
+        let people = &[Spanned::zero(N(
+            "given=Hans, family=Harman and given=Simon, prefix=de, family=Beumont",
+        ))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Harman");
+        assert_eq!(people[0].prefix, "");
+        assert_eq!(people[0].suffix, "");
+        assert_eq!(people[0].given_name, "Hans");
+        assert_eq!(people[1].name, "Beumont");
+        assert_eq!(people[1].prefix, "de");
+        assert_eq!(people[1].suffix, "");
+        assert_eq!(people[1].given_name, "Simon");
+
+        // AUTHOR = {Hans Harman and given=Simon, prefix=de, family=Beumont}
+        let people =
+            &[Spanned::zero(N("Hans Harman and given=Simon, prefix=de, family=Beumont"))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Harman");
+        assert_eq!(people[0].prefix, "");
+        assert_eq!(people[0].suffix, "");
+        assert_eq!(people[0].given_name, "Hans");
+        assert_eq!(people[1].name, "Beumont");
+        assert_eq!(people[1].prefix, "de");
+        assert_eq!(people[1].suffix, "");
+        assert_eq!(people[1].given_name, "Simon");
+
+        // AUTHOR = {nosortothers=true and Hans Harman and given=Simon, family=Beumont, prefix=de, useprefix=true}
+        let people = &[Spanned::zero(N("nosortothers=true and Hans Harman and given=Simon, family=Beumont, prefix=de, useprefix=true"))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(people.len(), 3);
+        assert_eq!(people[0].name, "");
+        assert_eq!(people[0].prefix, "");
+        assert_eq!(people[0].suffix, "");
+        assert_eq!(people[0].given_name, "");
     }
 }
