@@ -114,6 +114,23 @@ impl<'s> ContentParser<'s> {
 
                     self.s.eat();
                 }
+                '-' => {
+                    let mut count = 0;
+                    let hyphens = self.s.eat_while(|c| {
+                        let res = c == '-' && count < 3;
+                        if res {
+                            count += 1;
+                        }
+                        res
+                    });
+
+                    match count {
+                        1 => self.current_chunk.get_mut().push('-'),
+                        2 => self.current_chunk.get_mut().push('–'),
+                        3 => self.current_chunk.get_mut().push('—'),
+                        _ => self.current_chunk.get_mut().push_str(hyphens),
+                    }
+                }
                 _ if c.is_whitespace() => {
                     self.current_chunk.get_mut().push(' ');
                     self.s.eat_whitespace();
@@ -171,10 +188,12 @@ impl<'s> ContentParser<'s> {
 
         let command = self.s.from(pos);
         let ws = !self.s.eat_whitespace().is_empty();
+        let first_char = command.chars().next().unwrap();
 
         let arg = if self.s.peek() != Some('{')
             && command.chars().count() == 1
-            && is_single_char_func(command.chars().next().unwrap())
+            && first_char != '-'
+            && is_single_char_func(first_char)
         {
             let idx = self.s.cursor();
             self.s.eat();
@@ -406,7 +425,7 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
         "k" => last_char_combine(arg, '\u{328}'),
         "b" => last_char_combine(arg, '\u{332}'),
         "o" => last_char_combine(arg, '\u{338}'),
-        "-" => arg.map(ToString::to_string).unwrap_or_default(),
+        "-" => String::new(),
         _ => {
             if let Some(arg) = arg {
                 format!("\\{}{{{}}}", command, arg)
@@ -448,9 +467,9 @@ fn flatten(chunks: &mut Chunks) {
 
 /// Characters that can be escaped.
 ///
-/// In read mode (`read_char = true`), colons are also converted to an unescaped string to keep
-/// compatibility with Zotero. Zotero escapes colons when exporting verbatim fields. This crate
-/// doesn't escape colons when exporting.
+/// In read mode (`read_char = true`), colons are also converted to an unescaped
+/// string to keep compatibility with Zotero. Zotero escapes colons when
+/// exporting verbatim fields. This crate doesn't escape colons when exporting.
 ///
 /// List of reserved characters here
 /// http://latexref.xyz/Reserved-characters.html
@@ -561,5 +580,14 @@ mod tests {
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Bose–Einstein uses Windows"));
+    }
+
+    #[test]
+    fn test_hyphens() {
+        let field =
+            vec![z(RawChunk::Normal("- Knitting A--Z --- A practical guide -----"))];
+
+        let res = parse_field("", &field, &Vec::new()).unwrap();
+        assert_eq!(res[0].v, N("- Knitting A–Z — A practical guide —–"));
     }
 }
