@@ -406,6 +406,7 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
         "k" => last_char_combine(arg, '\u{328}'),
         "b" => last_char_combine(arg, '\u{332}'),
         "o" => last_char_combine(arg, '\u{338}'),
+        "-" => arg.map(ToString::to_string).unwrap_or_default(),
         _ => {
             if let Some(arg) = arg {
                 format!("\\{}{{{}}}", command, arg)
@@ -465,7 +466,7 @@ pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
 /// Characters that are the name of a single-char command
 /// that automatically terminates.
 fn is_single_char_func(c: char) -> bool {
-    matches!(c, '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\')
+    matches!(c, '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\' | '-')
 }
 
 #[cfg(test)]
@@ -555,9 +556,10 @@ mod tests {
 
     #[test]
     fn test_commands() {
-        let field = vec![z(RawChunk::Normal("Bose\\textendash{}Einstein"))];
+        let field =
+            vec![z(RawChunk::Normal("Bose\\textendash{}Einstein uses Win\\-dows"))];
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
-        assert_eq!(res[0].v, N("Bose–Einstein"));
+        assert_eq!(res[0].v, N("Bose–Einstein uses Windows"));
     }
 }
