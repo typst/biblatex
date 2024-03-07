@@ -1242,4 +1242,32 @@ Martin}}"#;
             Err(TypeError::new(74..74, TypeErrorKind::MissingNumber).into())
         );
     }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn test_page_ranges() {
+        let raw = r#"@article{test,
+            pages = {1---2},
+          }
+          @article{test1,
+            pages = {2--3},
+          }
+          @article{test2,
+            pages = {1},
+          }"#;
+
+        let bibliography = Bibliography::parse(raw).unwrap();
+        assert_eq!(
+            bibliography.get("test").unwrap().pages(),
+            Ok(PermissiveType::Typed(vec![1..2]))
+        );
+        assert_eq!(
+            bibliography.get("test1").unwrap().pages(),
+            Ok(PermissiveType::Typed(vec![2..3]))
+        );
+        assert_eq!(
+            bibliography.get("test2").unwrap().pages(),
+            Ok(PermissiveType::Typed(vec![1..1]))
+        );
+    }
 }

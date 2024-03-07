@@ -232,7 +232,10 @@ impl Type for Vec<Range<u32>> {
             let mut s = Scanner::new(&range_candidate);
             let start = component(&mut s, span.start)?;
             s.eat_whitespace();
-            if !s.eat_if('-') {
+
+            // The double and triple hyphen is converted into en dashes and em
+            // dashes earlier.
+            if !s.eat_if(['-', '–', '—']) {
                 res.push(start..start);
                 continue;
             }
