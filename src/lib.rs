@@ -1270,4 +1270,62 @@ Martin}}"#;
             Ok(PermissiveType::Typed(vec![1..1]))
         );
     }
+
+    #[test]
+    fn test_editor_types() {
+        let contents = fs::read_to_string("tests/editortypes.bib").unwrap();
+        let bibliography = Bibliography::parse(&contents).unwrap();
+        let video = bibliography.get("acerolaThisDifferenceGaussians2022").unwrap();
+        assert_eq!(
+            video.editors(),
+            Ok(vec![(
+                vec![Person {
+                    name: "Acerola".into(),
+                    given_name: "".into(),
+                    prefix: "".into(),
+                    suffix: "".into()
+                }],
+                EditorType::Director
+            )])
+        );
+
+        let music = bibliography.get("mozart_KV183_1773").unwrap();
+        assert_eq!(
+            music.editors(),
+            Ok(vec![(
+                vec![Person {
+                    name: "Mozart".into(),
+                    given_name: "Wolfgang Amadeus".into(),
+                    prefix: "".into(),
+                    suffix: "".into()
+                }],
+                EditorType::Unknown("pianist".into()),
+            )])
+        );
+
+        let audio = bibliography.get("Smith2018").unwrap();
+        assert_eq!(
+            audio.editors(),
+            Ok(vec![
+                (
+                    vec![Person {
+                        name: "Smith".into(),
+                        given_name: "Stacey Vanek".into(),
+                        prefix: "".into(),
+                        suffix: "".into()
+                    }],
+                    EditorType::Unknown("host".into()),
+                ),
+                (
+                    vec![Person {
+                        name: "Plotkin".into(),
+                        given_name: "Stanley".into(),
+                        prefix: "".into(),
+                        suffix: "".into()
+                    }],
+                    EditorType::Unknown("participant".into()),
+                )
+            ])
+        );
+    }
 }

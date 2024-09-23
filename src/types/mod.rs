@@ -319,7 +319,7 @@ impl Type for Pagination {
 /// Which role the according editor had.
 ///
 /// The value of the `editor` through `editorc` fields.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
+#[derive(Debug, Clone, Eq, PartialEq, Display, EnumString, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum EditorType {
@@ -331,6 +331,10 @@ pub enum EditorType {
     Reviser,
     Collaborator,
     Organizer,
+    Director,
+
+    #[strum(default)]
+    Unknown(String),
 }
 
 impl Type for EditorType {
