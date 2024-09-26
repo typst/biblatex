@@ -293,11 +293,11 @@ pub(crate) fn split_token_lists(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
 ///
 /// For Normal Chunks,
 /// - The leading/trailing keyword is not considered as a valid split
-/// (regardless of whether the keyword is preceded/followed by some
-/// whitespace).
+///   (regardless of whether the keyword is preceded/followed by some
+///   whitespace).
 /// - If there are consecutive keywords, the characters between two consecutive
-/// keywords (whether only whitespace or not) will be considered as a valid
-/// split.
+///   keywords (whether only whitespace or not) will be considered as a valid
+///   split.
 pub(crate) fn split_token_lists_with_kw(vals: ChunksRef, keyword: &str) -> Vec<Chunks> {
     let mut out = vec![];
     let mut latest = vec![];
