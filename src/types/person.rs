@@ -57,7 +57,7 @@ impl Person {
         let prefix = person.remove("prefix").unwrap_or_default();
         let suffix = person.remove("suffix").unwrap_or_default();
 
-        return Self { name, given_name, prefix, suffix };
+        Self { name, given_name, prefix, suffix }
     }
 
     fn parse_bibtex(chunks: ChunksRef) -> Self {
