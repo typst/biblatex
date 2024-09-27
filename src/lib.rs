@@ -1173,7 +1173,12 @@ Martin}}"#;
         assert_eq!(
             e.to_biblatex_string(),
             "@online{finextraFedGovernorChallenges2019,\nauthor = {FinExtra},\ndate = {2019-12-18},\nfile = {C:\\\\Users\\\\mhaug\\\\Zotero\\\\storage\\\\VY9LAKFE\\\\fed-governor-challenges-facebooks-libra-project.html},\ntitle = {Fed {Governor} Challenges {Facebook}'s {Libra} Project},\nurl = {https://www.finextra.com/newsarticle/34986/fed-governor-challenges-facebooks-libra-project},\nurldate = {2020-08-22},\n}"
-        )
+        );
+
+        // Test URLs with math and backslashes
+        let e = bibliography.get("weirdUrl2023").unwrap();
+        assert_eq!(e.url().unwrap(), r#"example.com?A=$B\%\{}"#);
+        assert_eq!(e.doi().unwrap(), r#"example.com?A=$B\%\{}"#);
     }
 
     #[test]

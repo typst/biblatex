@@ -87,7 +87,7 @@ impl<'s> ContentParser<'s> {
                     let sequence = self.backslash()?;
                     self.current_chunk.get_mut().push_str(&sequence)
                 }
-                '$' => {
+                '$' if !self.verb_field => {
                     self.turnaround(depth);
                     let math = self.math()?;
                     self.result.push(math);
