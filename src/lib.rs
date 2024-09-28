@@ -233,6 +233,11 @@ impl Bibliography {
         self.entries.iter_mut()
     }
 
+    /// An iterator over the bibliography's entry keys.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|entry| &*entry.key)
+    }
+
     /// Consume this struct and return a vector of the bibliography's entries.
     pub fn into_vec(self) -> Vec<Entry> {
         self.entries
@@ -999,6 +1004,18 @@ mod tests {
                 panic!()
             }
         };
+    }
+
+    #[test]
+    fn test_keys() {
+        let contents = fs::read_to_string("tests/editortypes.bib").unwrap();
+
+        let bibliography = Bibliography::parse(&contents).unwrap();
+
+        assert_eq!(
+            bibliography.keys().collect::<Vec<_>>(),
+            &["acerolaThisDifferenceGaussians2022", "mozart_KV183_1773", "Smith2018"]
+        );
     }
 
     #[test]
