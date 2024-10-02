@@ -17,7 +17,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-biblatex = "0.9"
+biblatex = "0.10"
 ```
 
 Parsing a bibliography and getting the author of an item is as simple as:
