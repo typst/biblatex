@@ -88,6 +88,8 @@ impl Display for RetrievalError {
     }
 }
 
+impl std::error::Error for RetrievalError {}
+
 impl From<TypeError> for RetrievalError {
     fn from(err: TypeError) -> Self {
         Self::TypeError(err)

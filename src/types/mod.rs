@@ -43,6 +43,8 @@ impl fmt::Display for TypeError {
     }
 }
 
+impl std::error::Error for TypeError {}
+
 /// Error conditions that might occur while parsing the chunks in a field into a specific
 /// [`Type`].
 ///
