@@ -75,6 +75,14 @@ impl fmt::Display for ParseError {
     }
 }
 
+impl std::error::Error for ParseError {
+    /// This method is deprecated as of 1.42.0. Instead use the [Display](core::fmt::Display) impl
+    /// or the `.to_string()` method.
+    fn description(&self) -> &str {
+        "An error that might occur during initial parsing of the bibliography."
+    }
+}
+
 /// Error conditions that might occur during initial parsing of the
 /// bibliography.
 ///
