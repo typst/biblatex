@@ -182,7 +182,7 @@ impl<'s> ContentParser<'s> {
             ));
         }
 
-        if !is_single_char_func(self.s.eat().unwrap()) {
+        if !is_single_char_func(self.s.eat().unwrap(), false) {
             self.s.eat_while(is_id_continue);
         }
 
@@ -193,7 +193,7 @@ impl<'s> ContentParser<'s> {
         let arg = if self.s.peek() != Some('{')
             && command.chars().count() == 1
             && first_char != '-'
-            && is_single_char_func(first_char)
+            && is_single_char_func(first_char, ws)
         {
             let idx = self.s.cursor();
             self.s.eat();
@@ -487,8 +487,9 @@ pub fn is_escapable(c: char, verb: bool, read_char: bool) -> bool {
 
 /// Characters that are the name of a single-char command
 /// that automatically terminates.
-fn is_single_char_func(c: char) -> bool {
+fn is_single_char_func(c: char, ws: bool) -> bool {
     matches!(c, '"' | '´' | '`' | '\'' | '^' | '~' | '=' | '.' | '\\' | '-')
+        || (ws && matches!(c, 'b' | 'c' | 'd' | 'H' | 'k' | 'r' | 'u' | 'v'))
 }
 
 #[cfg(test)]
@@ -561,6 +562,11 @@ mod tests {
 
         let res = parse_field("", &field, &Vec::new()).unwrap();
         assert_eq!(res[0].v, N("Lê Dũng Tráng"));
+
+        let field = vec![z(RawChunk::Normal(r"\b b \c c \d a \H o \k a \r a \u a \v a"))];
+
+        let res = parse_field("", &field, &Vec::new()).unwrap();
+        assert_eq!(res[0].v, N("b̲ ç ạ ő ą å ă ǎ"));
     }
 
     #[test]
