@@ -323,9 +323,12 @@ fn execute_command(command: &str, arg: Option<&str>) -> String {
                     c => c,
                 };
 
-                let combined = char::compose(last, combine).unwrap_or(last);
+                let combined = char::compose(last, combine);
                 let mut res = chars.as_str().to_string();
-                res.push(combined);
+                res.push(combined.unwrap_or(last));
+                if combined.is_none() {
+                    res.push(combine);
+                }
 
                 res
             }
