@@ -88,6 +88,15 @@ impl Display for RetrievalError {
     }
 }
 
+impl std::error::Error for RetrievalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Missing(_) => None,
+            Self::TypeError(err) => Some(err),
+        }
+    }
+}
+
 impl From<TypeError> for RetrievalError {
     fn from(err: TypeError) -> Self {
         Self::TypeError(err)

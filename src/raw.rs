@@ -75,6 +75,8 @@ impl fmt::Display for ParseError {
     }
 }
 
+impl std::error::Error for ParseError {}
+
 /// Error conditions that might occur during initial parsing of the
 /// bibliography.
 ///
