@@ -849,6 +849,7 @@ impl Entry {
         keywords: "keywords",
         label: "label",
         language: "language" => String,
+        langid: "langid" => String,
         library: "library",
         main_subtitle: "mainsubtitle",
         main_title: "maintitle",
