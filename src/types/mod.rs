@@ -10,7 +10,7 @@ use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
 
-use numerals::roman::Roman;
+use roman_numerals_rs::RomanNumeral;
 use strum::{AsRefStr, Display, EnumString};
 
 use crate::{chunk::*, Span, Spanned};
@@ -115,8 +115,8 @@ impl Type for i64 {
 
         if let Ok(n) = s.parse::<i64>() {
             Ok(n)
-        } else if let Some(roman) = Roman::parse(s) {
-            Ok(roman.value() as i64)
+        } else if let Ok(roman) = s.parse::<RomanNumeral>() {
+            Ok(roman.as_u16() as i64)
         } else if span.is_empty() {
             Err(TypeError::new(span, TypeErrorKind::MissingNumber))
         } else {
