@@ -2,6 +2,9 @@ use std::str::FromStr;
 
 use strum::{Display, EnumString};
 
+#[cfg(feature = "unic-langid")]
+use unic_langid::{langid, LanguageIdentifier};
+
 use super::{Type, TypeError, TypeErrorKind};
 use crate::{Chunk, Chunks, ChunksExt, ChunksRef, Spanned};
 
@@ -76,6 +79,53 @@ languages! {
   Ukranian ("Ukranian") => "ukranian"
 }
 
+#[cfg(feature = "unic-langid")]
+impl From<Language> for LanguageIdentifier {
+    fn from(value: Language) -> Self {
+        match value {
+            Language::Basque => langid!("eu"),
+            Language::Bulgarian => langid!("bg"),
+            Language::Catalan => langid!("ca"),
+            Language::Croatian => langid!("hr"),
+            Language::Czech => langid!("cs"),
+            Language::Danish => langid!("da"),
+            Language::Dutch => langid!("nl"),
+            Language::EnglishUS => langid!("en-US"),
+            Language::EnglishUK => langid!("en-UK"),
+            Language::EnglishAUS => langid!("en-AU"),
+            Language::EnglishNZ => langid!("en-NZ"),
+            Language::Estonian => langid!("et"),
+            Language::Finnish => langid!("fi"),
+            Language::French => langid!("fr"),
+            Language::German | Language::GermanNew => langid!("de"),
+            Language::GermanAT | Language::GermanATNew => langid!("de-AT"),
+            Language::GermanCH | Language::GermanCHNew => langid!("de-CH"),
+            Language::Greek => langid!("el"),
+            Language::Hungarian => langid!("hu"),
+            Language::Icelandic => langid!("is"),
+            Language::Italian => langid!("it"),
+            Language::Latvian => langid!("lv"),
+            Language::Lithuanian => langid!("lt"),
+            Language::Marathi => langid!("mr"),
+            Language::NorwegianBokmal => langid!("nb"),
+            Language::NorwegainNynorsk => langid!("nn"),
+            Language::Polish => langid!("pl"),
+            Language::PortugueseBR => langid!("pt-BR"),
+            Language::Portuguese => langid!("pt-PT"),
+            Language::Romanian => langid!("ro"),
+            Language::Russian => langid!("ru"),
+            Language::SerbianLatin => langid!("sr-LATIN"),
+            Language::SerbianCyrillic => langid!("sr-CYRILLIC"),
+            Language::Slovak => langid!("sk"),
+            Language::Slovene => langid!("sl"),
+            Language::Spanish => langid!("es"),
+            Language::Swedish => langid!("sv"),
+            Language::Turkish => langid!("tr"),
+            Language::Ukranian => langid!("uk"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Language;
@@ -84,5 +134,15 @@ mod tests {
     fn aliases() {
         assert_eq!(Language::EnglishUS, "english".parse().unwrap());
         assert_eq!(Language::Portuguese, "portuges".parse().unwrap())
+    }
+
+    #[cfg(feature = "unic-langid")]
+    #[test]
+    fn langid() {
+        use unic_langid::LanguageIdentifier;
+
+        let lang: Language = "ngerman".parse().unwrap();
+        let id: LanguageIdentifier = lang.into();
+        assert_eq!("de", id.to_string());
     }
 }
