@@ -1,9 +1,11 @@
 //! A collection of strong field types parsable from chunks.
 
 mod date;
+mod lang;
 mod person;
 
 pub use date::*;
+pub use lang::*;
 pub use person::*;
 
 use std::fmt;
@@ -74,6 +76,8 @@ pub enum TypeErrorKind {
     UnknownPagination,
     /// There is no [`EditorType`] variant for this input.
     UnknownEditorType,
+    /// There is no [`Language`] variant for this input.
+    UnknownLangId,
     /// The year 0 CE or BCE does not exist.
     YearZeroCE,
 }
@@ -92,6 +96,7 @@ impl fmt::Display for TypeErrorKind {
             Self::InvalidIntegerRange => "invalid integer range",
             Self::UnknownPagination => "unknown pagination",
             Self::UnknownEditorType => "unknown editor type",
+            Self::UnknownLangId => "unknown language id",
             Self::YearZeroCE => "year 0 CE or BCE does not exist",
         })
     }
@@ -289,6 +294,33 @@ where
             PermissiveType::Typed(val) => val.to_chunks(),
             PermissiveType::Chunks(chunks) => chunks.clone(),
         }
+    }
+}
+
+impl Type for Vec<PermissiveType<Language>> {
+    /// Splits the chunks at `"and"`s.
+    fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
+        split_token_lists_with_kw(chunks, "and")
+            .iter()
+            .map(|c| PermissiveType::<Language>::from_chunks(c))
+            .collect()
+    }
+
+    fn to_chunks(&self) -> Chunks {
+        let mut merged = vec![];
+        let mut first = true;
+
+        for chunk in self {
+            if first {
+                first = false;
+            } else {
+                merged.push(Spanned::detached(Chunk::Verbatim(" and ".to_string())));
+            }
+
+            merged.extend(chunk.to_chunks());
+        }
+
+        merged
     }
 }
 
