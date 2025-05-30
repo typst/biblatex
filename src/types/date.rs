@@ -446,7 +446,7 @@ fn parse_era_marker(s: &mut Scanner) -> Result<Option<bool>, TypeError> {
     s.eat_whitespace();
     let era_idx = s.cursor();
     if s.eat_if("AD") || s.eat_if("CE") {
-        if s.peek().map_or(false, |c| c.is_alphanumeric()) {
+        if s.peek().is_some_and(|c| c.is_alphanumeric()) {
             return Err(TypeError::new(
                 era_idx..s.cursor(),
                 TypeErrorKind::InvalidFormat,
@@ -458,7 +458,7 @@ fn parse_era_marker(s: &mut Scanner) -> Result<Option<bool>, TypeError> {
 
     if s.eat_if("BC") {
         s.eat_if("E");
-        if s.peek().map_or(false, |c| c.is_alphanumeric()) {
+        if s.peek().is_some_and(|c| c.is_alphanumeric()) {
             return Err(TypeError::new(
                 era_idx..s.cursor(),
                 TypeErrorKind::InvalidFormat,
