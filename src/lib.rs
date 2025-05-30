@@ -857,7 +857,7 @@ impl Entry {
         journal_title_addon: "journaltitleaddon",
         keywords: "keywords",
         label: "label",
-        langid: "langid" => Language,
+        langid: "langid" => PermissiveType<Language>,
         language: "language" => Vec<PermissiveType<Language>>,
         library: "library",
         main_subtitle: "mainsubtitle",
