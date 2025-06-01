@@ -44,6 +44,7 @@ languages! {
   Dutch ("Dutch") => "dutch",
   EnglishUS ("American English") => "american" | "USenglish" | "english",
   EnglishUK ("British English") => "british" | "UKenglish",
+  EnglishCA ("Canadian English") => "canadian",
   EnglishAUS ("Australian English") => "australian",
   EnglishNZ ("New Zealand English") => "newzealand",
   Estonian ("Estonian") => "estonian",
