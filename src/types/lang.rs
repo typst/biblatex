@@ -5,7 +5,9 @@ use strum::{Display, EnumString};
 #[cfg(feature = "unic-langid")]
 use unic_langid::{langid, LanguageIdentifier};
 
-use crate::{Chunk, Chunks, ChunksExt, ChunksRef, Spanned, Type, TypeError, TypeErrorKind};
+use crate::{
+    Chunk, Chunks, ChunksExt, ChunksRef, Spanned, Type, TypeError, TypeErrorKind,
+};
 
 macro_rules! languages {
     ($($id:ident ($doc:literal) => $val:literal $(| $alias:literal)*),*) => {
