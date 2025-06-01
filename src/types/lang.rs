@@ -93,6 +93,7 @@ impl From<Language> for LanguageIdentifier {
             Language::Dutch => langid!("nl"),
             Language::EnglishUS => langid!("en-US"),
             Language::EnglishUK => langid!("en-UK"),
+            Language::EnglishCA => langid!("en-CA"),
             Language::EnglishAUS => langid!("en-AU"),
             Language::EnglishNZ => langid!("en-NZ"),
             Language::Estonian => langid!("et"),
