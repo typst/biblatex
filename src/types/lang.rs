@@ -73,7 +73,7 @@ languages! {
   SerbianLatin ("Serbian (Latin)") => "serbian",
   SerbianCyrillic ("Serbian (Cyrillic)") => "serbianc",
   Slovak ("Slovak") => "slovak",
-  Slovene ("Slovene") => "slovene" | "slovanian",
+  Slovene ("Slovene") => "slovene" | "slovenian",
   Spanish ("Spanish") => "spanish",
   Swedish ("Swedish") => "swedish",
   Turkish ("Turkish") => "turkish",
