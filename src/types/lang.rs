@@ -77,7 +77,7 @@ languages! {
   Spanish ("Spanish") => "spanish",
   Swedish ("Swedish") => "swedish",
   Turkish ("Turkish") => "turkish",
-  Ukranian ("Ukranian") => "ukranian"
+  Ukrainian ("Ukrainian") => "ukrainian"
 }
 
 #[cfg(feature = "unic-langid")]
