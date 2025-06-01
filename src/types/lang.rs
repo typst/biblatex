@@ -38,7 +38,7 @@ languages! {
   Basque ("Basque") => "basque",
   Bulgarian ("Bulgarian") => "bulgarian",
   Catalan ("Catalan") => "catalan",
-  Croatian ("Croatian") => "croation",
+  Croatian ("Croatian") => "croatian",
   Czech ("Czech") => "czech",
   Danish ("Danish") => "danish",
   Dutch ("Dutch") => "dutch",
