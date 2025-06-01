@@ -20,3 +20,7 @@ strum = { version = "0.27", features = ["derive"] }
 unicode-normalization = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
 unscanny = "0.1"
+unic-langid = { version = "0.9.6", features = ["macros"], optional = true }
+
+[features]
+unic-langid = ["dep:unic-langid"]
