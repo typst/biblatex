@@ -123,7 +123,7 @@ impl From<Language> for LanguageIdentifier {
             Language::Spanish => langid!("es"),
             Language::Swedish => langid!("sv"),
             Language::Turkish => langid!("tr"),
-            Language::Ukranian => langid!("uk"),
+            Language::Ukrainian => langid!("uk"),
         }
     }
 }
