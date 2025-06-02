@@ -1054,6 +1054,33 @@ mod tests {
     }
 
     #[test]
+    fn test_comments() {
+        let contents = fs::read_to_string("tests/comments.bib").unwrap();
+
+        let bibliography = Bibliography::parse(&contents).unwrap();
+
+        assert_eq!(
+            bibliography.keys().collect::<Vec<_>>(),
+            &[
+                "mcelreath2007mathematical",
+                "fischer2022equivalence",
+                "roes2003belief",
+                "wong2016null",
+            ]
+        );
+
+        assert_eq!(
+            bibliography
+                .get("wong2016null")
+                .unwrap()
+                .title()
+                .unwrap()
+                .format_verbatim(),
+            "Null hypothesis testing (I)-5% significance level"
+        );
+    }
+
+    #[test]
     fn test_extended_name_format() {
         dump_author_title("tests/extended_name_format.bib");
     }
