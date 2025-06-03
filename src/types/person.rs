@@ -24,16 +24,15 @@ pub struct Person {
 impl Person {
     /// Constructs a new person from a chunk vector:
     /// 1. according to the specs of
-    ///     [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
+    ///    [Nicolas Markey in "Tame the BeaST"][taming], pp. 23-24.
     /// 2. biblatex extended name format according to the
-    ///     [documentation of biblatex][biblatex], section 3.4 pp. 80-81,
-    ///     and section §4.2.3 pp. 164-165.
-    ///     Support is limited to default `nameparts`: prefix, family,
-    ///     suffix, given.
+    ///    [documentation of biblatex][biblatex], section 3.4 pp. 80-81,
+    ///    and section §4.2.3 pp. 164-165.
+    ///    Support is limited to default `nameparts`: prefix, family,
+    ///    suffix, given.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
     /// [biblatex]: https://ctan.gutenberg-asso.fr/macros/latex/contrib/biblatex/doc/biblatex.pdf
-    #[allow(clippy::doc_overindented_list_items)]
     pub fn parse(chunks: ChunksRef) -> Self {
         // Extended Name Format
         if chunks.iter().any(|val| val.v.get().contains("=")) {
