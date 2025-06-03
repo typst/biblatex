@@ -167,8 +167,11 @@ impl<'s> BiblatexParser<'s> {
     pub fn parse(mut self) -> Result<RawBibliography<'s>, ParseError> {
         while !self.s.done() {
             self.s.eat_whitespace();
+
             match self.s.peek() {
                 Some('@') => self.entry()?,
+                // Handle comments outside of entry
+                Some('%') => self.comment()?,
                 Some(_) => {
                     self.s.eat();
                 }
@@ -360,7 +363,13 @@ impl<'s> BiblatexParser<'s> {
 
         let value = self.abbr_field()?;
 
+        // Handle inline comments before closing brace at end of entry:
+        //     @article{foo,
+        //         title={bar},
+        //         year={2025}  % A comment
+        //     }
         self.s.eat_whitespace();
+        self.comment()?;
 
         Ok((key, value))
     }
@@ -393,7 +402,17 @@ impl<'s> BiblatexParser<'s> {
             fields.push(Pair::new(key, value));
 
             match self.s.peek() {
-                Some(',') => self.comma()?,
+                Some(',') => {
+                    self.comma()?;
+
+                    // Handle inline comments after comma at end of field
+                    //     @article{foo,
+                    //         title={bar},  % A comment
+                    //         year={2025}
+                    //     }
+                    self.s.eat_whitespace();
+                    self.comment()?;
+                }
                 Some('}') => {
                     return Ok(fields);
                 }
@@ -486,12 +505,28 @@ impl<'s> BiblatexParser<'s> {
         self.s.eat_whitespace();
         self.comma()?;
 
+        // Handle inline comments after entry key
+        //     @article{foo,  % A comment
+        //         title={bar},
+        //         year={2025}
+        //     }
+        self.s.eat_whitespace();
+        self.comment()?;
+
         self.s.eat_whitespace();
         let fields = self.fields()?;
 
         self.res
             .entries
             .push(Spanned::new(RawEntry { key, kind, fields }, start..self.s.cursor()));
+        Ok(())
+    }
+
+    /// Eat an inline comment.
+    fn comment(&mut self) -> Result<(), ParseError> {
+        if self.s.eat_if('%') {
+            self.s.eat_until('\n');
+        }
         Ok(())
     }
 
