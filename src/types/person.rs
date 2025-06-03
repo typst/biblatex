@@ -33,6 +33,7 @@ impl Person {
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
     /// [biblatex]: https://ctan.gutenberg-asso.fr/macros/latex/contrib/biblatex/doc/biblatex.pdf
+    #[allow(clippy::doc_overindented_list_items)]
     pub fn parse(chunks: ChunksRef) -> Self {
         // Extended Name Format
         if chunks.iter().any(|val| val.v.get().contains("=")) {
