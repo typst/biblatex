@@ -223,32 +223,32 @@ impl Type for Vec<Range<u32>> {
             })
         };
 
-        let component = |s: &mut Scanner, offset: usize| -> Result<u32, TypeError> {
-            loop {
-                let num = number(s, offset)?;
-                s.eat_whitespace();
-                if !s.eat_if(':') {
-                    return Ok(num);
-                }
-            }
-        };
-
         for (range_candidate, span) in
             range_vecs.iter().map(|f| (f.format_verbatim(), f.span()))
         {
             let mut s = Scanner::new(&range_candidate);
-            let start = component(&mut s, span.start)?;
+            let start = number(&mut s, span.start)?;
             s.eat_whitespace();
 
             // The double and triple hyphen is converted into en dashes and em
             // dashes earlier.
             if !s.eat_if(['-', '–', '—']) {
                 res.push(start..start);
+                if !s.done() {
+                    return Err(TypeError::new(span, TypeErrorKind::InvalidNumber));
+                }
                 continue;
             }
             s.eat_while('-');
             s.eat_whitespace();
-            let end = component(&mut s, span.start)?;
+            let offset = s.cursor();
+            let end = number(&mut s, span.start)?;
+            if !s.done() {
+                return Err(TypeError::new(
+                    offset..span.end,
+                    TypeErrorKind::InvalidNumber,
+                ));
+            }
             res.push(start..end);
         }
 
@@ -473,7 +473,7 @@ impl Type for Gender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::tests::*;
+    use crate::{chunk::tests::*, Bibliography};
 
     #[test]
     fn test_ranges() {
@@ -490,5 +490,23 @@ mod tests {
         let res = ranges.parse::<Vec<Range<u32>>>().unwrap();
         assert_eq!(res[0], 34..34);
         assert_eq!(res[1], 37..39);
+    }
+
+    #[test]
+    fn test_hayagriva_issue_340() {
+        let bib = Bibliography::parse(
+            r#"@inproceedings{test,
+          author = {John Doe},
+          title = {Interesting Findings},
+          journal = {Example Journal},
+          year = {2024},
+          pages = {1A1}
+        }"#,
+        )
+        .unwrap();
+        let t = bib.get("test").unwrap();
+        let pages = t.get("pages").unwrap();
+        let parsed: PermissiveType<std::ops::Range<u32>> = pages.parse().unwrap();`
+        assert!(matches!(parsed, PermissiveType::Chunks(_)))
     }
 }
