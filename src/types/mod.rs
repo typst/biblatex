@@ -506,7 +506,7 @@ mod tests {
         .unwrap();
         let t = bib.get("test").unwrap();
         let pages = t.get("pages").unwrap();
-        let parsed: PermissiveType<std::ops::Range<u32>> = pages.parse().unwrap();`
+        let parsed: PermissiveType<std::ops::Range<u32>> = pages.parse().unwrap();
         assert!(matches!(parsed, PermissiveType::Chunks(_)))
     }
 }
