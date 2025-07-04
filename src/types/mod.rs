@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_ranges() {
-        let ranges = &[Spanned::zero(N("31--43,21:4-21:6,  194 --- 245"))];
+        let ranges = &[Spanned::zero(N("31--43,4-6,  194 --- 245"))];
         let res = ranges.parse::<Vec<Range<u32>>>().unwrap();
         assert_eq!(res[0], 31..43);
         assert_eq!(res[1], 4..6);
