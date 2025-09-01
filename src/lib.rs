@@ -1243,6 +1243,10 @@ Martin}}"#;
             given_name: "Brian Albert".to_string(),
             prefix: "".to_string(),
             suffix: "".to_string(),
+            use_prefix: None,
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
         }];
 
         e.set_author(brian.clone());
@@ -1342,7 +1346,11 @@ Martin}}"#;
                     name: "Acerola".into(),
                     given_name: "".into(),
                     prefix: "".into(),
-                    suffix: "".into()
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
                 }],
                 EditorType::Director
             )])
@@ -1356,7 +1364,11 @@ Martin}}"#;
                     name: "Mozart".into(),
                     given_name: "Wolfgang Amadeus".into(),
                     prefix: "".into(),
-                    suffix: "".into()
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
                 }],
                 EditorType::Unknown("pianist".into()),
             )])
@@ -1371,7 +1383,11 @@ Martin}}"#;
                         name: "Smith".into(),
                         given_name: "Stacey Vanek".into(),
                         prefix: "".into(),
-                        suffix: "".into()
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
                     }],
                     EditorType::Unknown("host".into()),
                 ),
@@ -1380,7 +1396,11 @@ Martin}}"#;
                         name: "Plotkin".into(),
                         given_name: "Stanley".into(),
                         prefix: "".into(),
-                        suffix: "".into()
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
                     }],
                     EditorType::Unknown("participant".into()),
                 )

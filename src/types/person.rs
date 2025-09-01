@@ -19,6 +19,15 @@ pub struct Person {
     pub prefix: String,
     /// The suffix is placed after the name (e.g., "Jr.").
     pub suffix: String,
+    /// A special parameter which may be used to
+    /// override the hash used to detect identical names.
+    pub id: Option<String>,
+    /// Manual initials for the preifx.
+    pub prefix_initials: Option<String>,
+    /// Manual initials for the given name.
+    pub given_initials: Option<String>,
+    /// Whether the prefix of this name should be considered part of the family name.
+    pub use_prefix: Option<bool>,
 }
 
 impl Person {
@@ -56,8 +65,21 @@ impl Person {
         let given_name = person.remove("given").unwrap_or_default();
         let prefix = person.remove("prefix").unwrap_or_default();
         let suffix = person.remove("suffix").unwrap_or_default();
+        let id = person.remove("id");
+        let prefix_initials = person.remove("prefix-i");
+        let given_initials = person.remove("given-i");
+        let use_prefix = person.remove("useprefix").map(|p| p == "true");
 
-        Self { name, given_name, prefix, suffix }
+        Self {
+            name,
+            given_name,
+            prefix,
+            suffix,
+            id,
+            prefix_initials,
+            given_initials,
+            use_prefix,
+        }
     }
 
     fn parse_bibtex(chunks: ChunksRef) -> Self {
@@ -152,6 +174,10 @@ impl Person {
             given_name: given_name.trim_end().to_string(),
             prefix: prefix.trim().to_string(),
             suffix: String::new(),
+            use_prefix: None,
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
         }
     }
 
@@ -171,6 +197,10 @@ impl Person {
                 name: last.trim_start().to_string(),
                 prefix: prefix.trim_end().to_string(),
                 suffix: String::new(),
+                use_prefix: None,
+                id: None,
+                prefix_initials: None,
+                given_initials: None,
             };
         }
 
@@ -223,6 +253,10 @@ impl Person {
             given_name: given_name.trim_start().to_string(),
             prefix: prefix.trim_end().to_string(),
             suffix: String::new(),
+            use_prefix: None,
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
         }
     }
 
