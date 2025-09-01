@@ -13,7 +13,7 @@ macro_rules! fields {
         })*
     };
 
-    (@ret) => {ChunksRef};
+    (@ret) => {ChunksRef<'_>};
     (@ret $ret:ty) => {$ret};
 
     (@set $name:ident => $field:literal, ) => {
