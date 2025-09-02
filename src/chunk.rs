@@ -222,7 +222,9 @@ impl ChunksExt for [Spanned<Chunk>] {
 
 /// An iterator over the characters in each chunk, indicating whether they are
 /// verbatim or not. Chunk types other than `Normal` or `Verbatim` are omitted.
-pub(crate) fn chunk_chars(chunks: ChunksRef) -> impl Iterator<Item = (char, bool)> + '_ {
+pub(crate) fn chunk_chars(
+    chunks: ChunksRef<'_>,
+) -> impl Iterator<Item = (char, bool)> + '_ {
     chunks.iter().flat_map(|chunk| {
         let (s, verbatim) = chunk.v.get_and_verb();
 
