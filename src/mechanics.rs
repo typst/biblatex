@@ -398,7 +398,7 @@ impl EntryType {
                 reqs.forbidden.push("pagetotal");
 
                 reqs.page_chapter_field = PagesChapterMode::BothOptional;
-                reqs.author_eds_field = AuthorMode::BothRequired;
+                reqs.author_eds_field = AuthorMode::AuthorRequiredEditorOptional;
             }
             Self::Manual => {
                 reqs.optional.push("edition");
