@@ -1119,8 +1119,12 @@ mod tests {
 
     #[test]
     fn test_verify() {
-        let contents = fs::read_to_string("tests/cross.bib").unwrap();
+        let mut contents = fs::read_to_string("tests/gral.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
+        assert!(bibliography.get_mut("lin_sida:_2007").unwrap().verify().is_ok());
+
+        contents = fs::read_to_string("tests/cross.bib").unwrap();
+        bibliography = Bibliography::parse(&contents).unwrap();
 
         assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
         assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
