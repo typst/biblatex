@@ -492,8 +492,9 @@ mod tests {
         assert_eq!(res[1], 37..39);
     }
 
+    // Hayagriva issue #340
     #[test]
-    fn test_hayagriva_issue_340() {
+    fn test_non_numeric_page_ranges() {
         let bib = Bibliography::parse(
             r#"@inproceedings{test,
           author = {John Doe},
@@ -507,6 +508,32 @@ mod tests {
         let t = bib.get("test").unwrap();
         let pages = t.get("pages").unwrap();
         let parsed: PermissiveType<std::ops::Range<u32>> = pages.parse().unwrap();
-        assert!(matches!(parsed, PermissiveType::Chunks(_)))
+        let PermissiveType::Chunks(chunks) = parsed else {
+            panic!("Expected chunks");
+        };
+        let parsed_chunks: String = chunk_chars(&chunks).map(|(c, _)| c).collect();
+        assert_eq!(parsed_chunks, "1A1");
+    }
+
+    #[test]
+    fn test_non_numeric_page_ranges_2() {
+        let bib = Bibliography::parse(
+            r#"@inproceedings{test,
+            author = {John Doe},
+            title = {Interesting Findings},
+            journal = {Example Journal},
+            year = {2024},
+            pages = {hello world! this is a page!}
+        }"#,
+        )
+        .unwrap();
+        let t = bib.get("test").unwrap();
+        let pages = t.get("pages").unwrap();
+        let parsed: PermissiveType<std::ops::Range<u32>> = pages.parse().unwrap();
+        let PermissiveType::Chunks(chunks) = parsed else {
+            panic!("Expected chunks");
+        };
+        let parsed_chunks: String = chunk_chars(&chunks).map(|(c, _)| c).collect();
+        assert_eq!(parsed_chunks, "hello world! this is a page!");
     }
 }
