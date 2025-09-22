@@ -233,12 +233,12 @@ impl Bibliography {
     }
 
     /// An iterator over the bibliography's entries.
-    pub fn iter(&self) -> std::slice::Iter<Entry> {
+    pub fn iter(&'_ self) -> std::slice::Iter<'_, Entry> {
         self.entries.iter()
     }
 
     /// A mutable iterator over the bibliography's entries.
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<Entry> {
+    pub fn iter_mut(&'_ mut self) -> std::slice::IterMut<'_, Entry> {
         self.entries.iter_mut()
     }
 
@@ -311,7 +311,7 @@ impl Entry {
     /// Get the chunk slice of a field.
     ///
     /// The field key must be lowercase.
-    pub fn get(&self, key: &str) -> Option<ChunksRef> {
+    pub fn get(&'_ self, key: &str) -> Option<ChunksRef<'_>> {
         self.fields.get(key).map(AsRef::as_ref)
     }
 
@@ -588,7 +588,7 @@ impl Entry {
     }
 
     /// Get an entry but return None for empty chunk slices.
-    fn get_non_empty(&self, key: &str) -> Option<ChunksRef> {
+    fn get_non_empty(&'_ self, key: &str) -> Option<ChunksRef<'_>> {
         let entry = self.get(key)?;
         if !entry.is_empty() {
             Some(entry)
@@ -1119,8 +1119,12 @@ mod tests {
 
     #[test]
     fn test_verify() {
-        let contents = fs::read_to_string("tests/cross.bib").unwrap();
+        let mut contents = fs::read_to_string("tests/gral.bib").unwrap();
         let mut bibliography = Bibliography::parse(&contents).unwrap();
+        assert!(bibliography.get_mut("lin_sida:_2007").unwrap().verify().is_ok());
+
+        contents = fs::read_to_string("tests/cross.bib").unwrap();
+        bibliography = Bibliography::parse(&contents).unwrap();
 
         assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
         assert!(bibliography.get_mut("cannonfodder").unwrap().verify().is_ok());
