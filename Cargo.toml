@@ -14,7 +14,7 @@ edition = "2021"
 members = ["bench"]
 
 [dependencies]
-numerals = "0.1"
+roman-numerals-rs = "3.1.0"
 paste = "1"
 strum = { version = "0.27", features = ["derive"] }
 unicode-normalization = "0.1"
