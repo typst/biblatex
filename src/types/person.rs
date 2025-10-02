@@ -19,6 +19,15 @@ pub struct Person {
     pub prefix: String,
     /// The suffix is placed after the name (e.g., "Jr.").
     pub suffix: String,
+    /// A special parameter which may be used to
+    /// override the hash used to detect identical names.
+    pub id: Option<String>,
+    /// Manual initials for the preifx.
+    pub prefix_initials: Option<String>,
+    /// Manual initials for the given name.
+    pub given_initials: Option<String>,
+    /// Whether the prefix of this name should be considered part of the family name.
+    pub use_prefix: Option<bool>,
 }
 
 impl Person {
@@ -29,7 +38,7 @@ impl Person {
     ///    [documentation of biblatex][biblatex], section 3.4 pp. 80-81,
     ///    and section §4.2.3 pp. 164-165.
     ///    Support is limited to default `nameparts`: prefix, family,
-    ///    suffix, given.
+    ///    suffix, given, and `id`, `prefix-i`, `useprefix`.
     ///
     /// [taming]: https://ftp.rrze.uni-erlangen.de/ctan/info/bibtex/tamethebeast/ttb_en.pdf
     /// [biblatex]: https://ctan.gutenberg-asso.fr/macros/latex/contrib/biblatex/doc/biblatex.pdf
@@ -56,8 +65,21 @@ impl Person {
         let given_name = person.remove("given").unwrap_or_default();
         let prefix = person.remove("prefix").unwrap_or_default();
         let suffix = person.remove("suffix").unwrap_or_default();
+        let id = person.remove("id");
+        let prefix_initials = person.remove("prefix-i");
+        let given_initials = person.remove("given-i");
+        let use_prefix = person.remove("useprefix").map(|p| p == "true");
 
-        Self { name, given_name, prefix, suffix }
+        Self {
+            name,
+            given_name,
+            prefix,
+            suffix,
+            id,
+            prefix_initials,
+            given_initials,
+            use_prefix,
+        }
     }
 
     fn parse_bibtex(chunks: ChunksRef) -> Self {
@@ -152,6 +174,10 @@ impl Person {
             given_name: given_name.trim_end().to_string(),
             prefix: prefix.trim().to_string(),
             suffix: String::new(),
+            use_prefix: None,
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
         }
     }
 
@@ -171,6 +197,10 @@ impl Person {
                 name: last.trim_start().to_string(),
                 prefix: prefix.trim_end().to_string(),
                 suffix: String::new(),
+                use_prefix: None,
+                id: None,
+                prefix_initials: None,
+                given_initials: None,
             };
         }
 
@@ -223,6 +253,10 @@ impl Person {
             given_name: given_name.trim_start().to_string(),
             prefix: prefix.trim_end().to_string(),
             suffix: String::new(),
+            use_prefix: None,
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
         }
     }
 
@@ -238,6 +272,14 @@ impl Person {
         p.suffix = s2.format_verbatim();
         p
     }
+
+    /// Returns `true` iff this person can only be represented with the extended name format, because it includes extra information.
+    fn requires_extended(&self) -> bool {
+        self.id.is_some()
+            || self.use_prefix.is_some()
+            || self.prefix_initials.is_some()
+            || self.given_initials.is_some()
+    }
 }
 
 impl Type for Vec<Person> {
@@ -251,31 +293,50 @@ impl Type for Vec<Person> {
     fn to_chunks(&self) -> Chunks {
         self.iter()
             .map(|p| {
-                let prefix = if let Some(c) = p.prefix.chars().next() {
-                    if c.is_uppercase() {
-                        (
-                            Some(Spanned::detached(Chunk::Verbatim(p.prefix.clone()))),
-                            " ".to_string(),
-                        )
-                    } else {
-                        (None, format!("{} ", p.prefix))
+                if p.requires_extended() {
+                    let mut res = format!(
+                        "given={{{}}}, family={{{}}}, prefix={{{}}}, suffix={{{}}}",
+                        p.given_name, p.name, p.prefix, p.suffix
+                    );
+                    if let Some(i) = &p.prefix_initials {
+                        res.push_str(&format!(", prefix-i={{{}}}", i));
                     }
+                    if let Some(i) = &p.given_initials {
+                        res.push_str(&format!(", given-i={{{}}}", i));
+                    }
+                    if let Some(u) = &p.use_prefix {
+                        res.push_str(&format!(", useprefix={{{}}}", u));
+                    }
+                    vec![Spanned::detached(Chunk::Normal(res))]
                 } else {
-                    (None, String::new())
-                };
+                    let prefix = if let Some(c) = p.prefix.chars().next() {
+                        if c.is_uppercase() {
+                            (
+                                Some(Spanned::detached(Chunk::Verbatim(
+                                    p.prefix.clone(),
+                                ))),
+                                " ".to_string(),
+                            )
+                        } else {
+                            (None, format!("{} ", p.prefix))
+                        }
+                    } else {
+                        (None, String::new())
+                    };
 
-                let name_str = if !p.suffix.is_empty() {
-                    format!("{}{}, {}, {}", prefix.1, p.name, p.suffix, p.given_name)
-                } else {
-                    format!("{}{}, {}", prefix.1, p.name, p.given_name)
-                };
+                    let name_str = if !p.suffix.is_empty() {
+                        format!("{}{}, {}, {}", prefix.1, p.name, p.suffix, p.given_name)
+                    } else {
+                        format!("{}{}, {}", prefix.1, p.name, p.given_name)
+                    };
 
-                let mut res = vec![Spanned::detached(Chunk::Normal(name_str))];
-                if let Some(pre_chunk) = prefix.0 {
-                    res.insert(0, pre_chunk);
+                    let mut res = vec![Spanned::detached(Chunk::Normal(name_str))];
+                    if let Some(pre_chunk) = prefix.0 {
+                        res.insert(0, pre_chunk);
+                    }
+
+                    res
                 }
-
-                res
             })
             .collect::<Vec<Chunks>>()
             .to_chunks()
@@ -707,5 +768,21 @@ Claude Garamond",
         assert_eq!(people[0].prefix, "");
         assert_eq!(people[0].suffix, "");
         assert_eq!(people[0].given_name, "");
+    }
+
+    #[test]
+    fn extended_name_format_to_chucks() {
+        let people = &[Spanned::zero(N(
+            "given=Hans, family=Harman and given=Simon, prefix=de, family=Beumont, useprefix=true and given=Jean Pierre Simon, given-i=JPS, prefix=de la, prefix-i=d, family=Rousse",
+        ))];
+        let people: Vec<Person> = Type::from_chunks(people).unwrap();
+        assert_eq!(3, people.len());
+        assert_eq!(Some(true), people[1].use_prefix);
+        assert_eq!("JPS", people[2].given_initials.as_ref().unwrap());
+        assert_eq!("d", people[2].prefix_initials.as_ref().unwrap());
+
+        let chunks = people.to_chunks();
+        assert_eq!(5, chunks.len());
+        assert_eq!("{Harman, Hans and given=\\{Simon\\}, family=\\{Beumont\\}, prefix=\\{de\\}, suffix=\\{\\}, useprefix=\\{true\\} and given=\\{Jean Pierre Simon\\}, family=\\{Rousse\\}, prefix=\\{de la\\}, suffix=\\{\\}, prefix-i=\\{d\\}, given-i=\\{JPS\\}}", chunks.to_biblatex_string(false))
     }
 }
