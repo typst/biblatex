@@ -42,7 +42,7 @@ use std::fmt::{Debug, Display, Formatter, Write};
 use macros::*;
 use mechanics::{is_verbatim_field, AuthorMode, PagesChapterMode};
 
-use paste::paste;
+use pastey::paste;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

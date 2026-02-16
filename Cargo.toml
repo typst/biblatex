@@ -15,7 +15,7 @@ members = ["bench"]
 
 [dependencies]
 roman-numerals-rs = "3.1.0"
-paste = "1"
+pastey = "0.2.1"
 strum = { version = "0.27", features = ["derive"] }
 unicode-normalization = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
