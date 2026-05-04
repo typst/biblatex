@@ -7,14 +7,14 @@ use biblatex::{
 
 #[test]
 fn test_correct_bib() {
-    let contents = fs::read_to_string("tests/gral.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
     assert_eq!(bibliography.len(), 83)
 }
 
 #[test]
 fn test_keys() {
-    let contents = fs::read_to_string("tests/editortypes.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/editortypes.bib").unwrap();
 
     let bibliography = Bibliography::parse(&contents).unwrap();
 
@@ -26,7 +26,7 @@ fn test_keys() {
 
 #[test]
 fn test_comments() {
-    let contents = fs::read_to_string("tests/comments.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/comments.bib").unwrap();
 
     let bibliography = Bibliography::parse(&contents).unwrap();
 
@@ -53,7 +53,7 @@ fn test_comments() {
 
 #[test]
 fn test_alias() {
-    let contents = fs::read_to_string("tests/cross.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/cross.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
 
     assert_eq!(bibliography.get("issue201"), bibliography.get("github"));
@@ -68,7 +68,7 @@ fn test_alias() {
 
 #[test]
 fn test_bibtex_conversion() {
-    let contents = fs::read_to_string("tests/cross.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/cross.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
 
     let biblatex = bibliography.get_mut("haug2019").unwrap().to_biblatex_string();
@@ -84,11 +84,11 @@ fn test_bibtex_conversion() {
 
 #[test]
 fn test_verify() {
-    let mut contents = fs::read_to_string("tests/gral.bib").unwrap();
+    let mut contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
     assert!(bibliography.get_mut("lin_sida:_2007").unwrap().verify().is_ok());
 
-    contents = fs::read_to_string("tests/cross.bib").unwrap();
+    contents = fs::read_to_string("tests/fixtures/valid/cross.bib").unwrap();
     bibliography = Bibliography::parse(&contents).unwrap();
 
     assert!(bibliography.get_mut("haug2019").unwrap().verify().is_ok());
@@ -110,7 +110,7 @@ fn test_verify() {
 
 #[test]
 fn test_crossref() {
-    let contents = fs::read_to_string("tests/cross.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/cross.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
 
     let e = bibliography.get("macmillan").unwrap();
@@ -155,7 +155,7 @@ Martin}}"#;
 
 #[test]
 fn test_verbatim_fields() {
-    let contents = fs::read_to_string("tests/libra.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/libra.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
 
     // Import an entry/field with escaped colons
@@ -200,7 +200,7 @@ fn test_synthesized_entry() {
 
 #[test]
 fn test_case_sensitivity() {
-    let contents = fs::read_to_string("tests/case.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/case.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
 
     let entry = bibliography.get("biblatex2023").unwrap();
@@ -280,7 +280,7 @@ fn test_page_ranges() {
 
 #[test]
 fn test_editor_types() {
-    let contents = fs::read_to_string("tests/editortypes.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/valid/editortypes.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
     let video = bibliography.get("acerolaThisDifferenceGaussians2022").unwrap();
     assert_eq!(

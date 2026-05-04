@@ -2,8 +2,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use biblatex::Bibliography;
 
-const GRAL: &str = include_str!("../../tests/gral.bib");
-const CROSS: &str = include_str!("../../tests/cross.bib");
+const GRAL: &str = include_str!("../../tests/fixtures/valid/gral.bib");
+const CROSS: &str = include_str!("../../tests/fixtures/valid/cross.bib");
 
 fn benchmarks(c: &mut Criterion) {
     macro_rules! bench {

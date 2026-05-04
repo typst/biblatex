@@ -4,27 +4,27 @@ use biblatex::{Bibliography, ChunksExt};
 
 #[test]
 fn test_gral_paper() {
-    dump_debug("tests/gral.bib");
+    dump_debug("tests/fixtures/valid/gral.bib");
 }
 
 #[test]
 fn test_ds_report() {
-    dump_debug("tests/ds.bib");
+    dump_debug("tests/fixtures/valid/ds.bib");
 }
 
 #[test]
 fn test_libra_paper() {
-    dump_author_title("tests/libra.bib");
+    dump_author_title("tests/fixtures/valid/libra.bib");
 }
 
 #[test]
 fn test_rass_report() {
-    dump_author_title("tests/rass.bib");
+    dump_author_title("tests/fixtures/valid/rass.bib");
 }
 
 #[test]
 fn test_polar_report() {
-    dump_author_title("tests/polaritons.bib");
+    dump_author_title("tests/fixtures/valid/polaritons.bib");
 }
 
 fn dump_debug(file: &str) {
@@ -50,5 +50,5 @@ fn dump_author_title(file: &str) {
 
 #[test]
 fn test_extended_name_format() {
-    dump_author_title("tests/extended_name_format.bib");
+    dump_author_title("tests/fixtures/valid/extended_name_format.bib");
 }
