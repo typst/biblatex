@@ -235,21 +235,20 @@ fn test_whitespace_collapse() {
     );
 }
 
-// FIXME: new is private in type error
-// #[test]
-// fn test_empty_date_fields() {
-//     let raw = r#"@article{test,
-//             year        = 2000,
-//             day         = {},
-//             month    = {},
-//           }"#;
+#[test]
+fn test_empty_date_fields() {
+    let raw = r#"@article{test,
+            year        = 2000,
+            day         = {},
+            month    = {},
+          }"#;
 
-//     let bibliography = Bibliography::parse(raw).unwrap();
-//     assert_eq!(
-//         bibliography.get("test").unwrap().date(),
-//         Err(TypeError::new(74..74, TypeErrorKind::MissingNumber).into())
-//     );
-// }
+    let bibliography = Bibliography::parse(raw).unwrap();
+    assert_eq!(
+        bibliography.get("test").unwrap().date(),
+        Err(TypeError { span: 74..74, kind: TypeErrorKind::MissingNumber }.into())
+    );
+}
 
 #[test]
 #[allow(clippy::single_range_in_vec_init)]

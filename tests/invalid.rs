@@ -16,40 +16,50 @@ fn test_repeated_key() {
         }
     };
 }
-// FIXME: new is private is parse error
-// #[test]
-// fn test_parse_incorrect_result() {
-//     let contents = fs::read_to_string("tests/incorrect_syntax.bib").unwrap();
 
-//     let bibliography = Bibliography::parse(&contents);
-//     match bibliography {
-//         Ok(_) => {
-//             panic!("Should return Err")
-//         }
-//         Err(s) => {
-//             assert_eq!(
-//                 s,
-//
-//                 ParseError::new(369..369, ParseErrorKind::Expected(Token::Equals))
-//             );
-//         }
-//     };
-// }
+#[test]
+fn test_parse_incorrect_result() {
+    let contents = fs::read_to_string("tests/incorrect_syntax.bib")
+        .unwrap()
+        .replace("\r\n", "\n");
 
-// FIXME: new is private in type error
-// #[test]
-// fn test_parse_incorrect_types() {
-//     let contents = fs::read_to_string("tests/incorrect_data.bib").unwrap();
+    let bibliography = Bibliography::parse(&contents);
+    match bibliography {
+        Ok(_) => {
+            panic!("Should return Err")
+        }
+        Err(s) => {
+            assert_eq!(
+                s,
+                ParseError {
+                    span: 369..369,
+                    kind: ParseErrorKind::Expected(Token::Equals)
+                }
+            );
+        }
+    };
+}
 
-//     let bibliography = Bibliography::parse(&contents).unwrap();
-//     let rashid = bibliography.get("rashid2016").unwrap();
-//     match rashid.pagination() {
-//         Err(RetrievalError::TypeError(s)) => {
-//
-//             assert_eq!(s, TypeError::new(352..359, TypeErrorKind::UnknownPagination));
-//         }
-//         _ => {
-//             panic!()
-//         }
-//     };
-// }
+#[test]
+fn test_parse_incorrect_types() {
+    let contents = fs::read_to_string("tests/incorrect_data.bib")
+        .unwrap()
+        .replace("\r\n", "\n");
+
+    let bibliography = Bibliography::parse(&contents).unwrap();
+    let rashid = bibliography.get("rashid2016").unwrap();
+    match rashid.pagination() {
+        Err(RetrievalError::TypeError(s)) => {
+            assert_eq!(
+                s,
+                TypeError {
+                    span: 352..359,
+                    kind: TypeErrorKind::UnknownPagination
+                }
+            )
+        }
+        _ => {
+            panic!()
+        }
+    };
+}
