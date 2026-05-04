@@ -7,7 +7,7 @@ use biblatex::{
 
 #[test]
 fn test_repeated_key() {
-    let contents = fs::read_to_string("tests/gral_rep_key.bib").unwrap();
+    let contents = fs::read_to_string("tests/fixtures/invalid/gral_rep_key.bib").unwrap();
     let bibliography = Bibliography::parse(&contents);
     match bibliography {
         Ok(_) => panic!("Should return Err"),
@@ -19,7 +19,7 @@ fn test_repeated_key() {
 
 #[test]
 fn test_parse_incorrect_result() {
-    let contents = fs::read_to_string("tests/incorrect_syntax.bib")
+    let contents = fs::read_to_string("tests/fixtures/invalid/incorrect_syntax.bib")
         .unwrap()
         .replace("\r\n", "\n");
 
@@ -42,7 +42,7 @@ fn test_parse_incorrect_result() {
 
 #[test]
 fn test_parse_incorrect_types() {
-    let contents = fs::read_to_string("tests/incorrect_data.bib")
+    let contents = fs::read_to_string("tests/fixtures/invalid/incorrect_data.bib")
         .unwrap()
         .replace("\r\n", "\n");
 
