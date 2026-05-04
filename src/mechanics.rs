@@ -58,7 +58,7 @@ pub enum EntryType {
 }
 
 /// Describes the optionality mode of the `author` and `editor` fields.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum AuthorMode {
     /// Neither of the fields are required to be set.
     NoneRequired,
@@ -67,17 +67,12 @@ pub enum AuthorMode {
     /// Both fields must be set.
     BothRequired,
     /// The `author` field must be present.
+    #[default]
     AuthorRequired,
     /// The `author` field must be present, the `editor` field is optional.
     AuthorRequiredEditorOptional,
     /// The `editor` field must be set while the `author` field must not be set.
     EditorRequiredAuthorForbidden,
-}
-
-impl Default for AuthorMode {
-    fn default() -> Self {
-        Self::AuthorRequired
-    }
 }
 
 impl AuthorMode {
@@ -94,9 +89,10 @@ impl AuthorMode {
 }
 
 /// Describes the optionality mode of the `pages` and `chapter` field
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum PagesChapterMode {
     /// No specification for the `page` and `chapter` field is given.
+    #[default]
     None,
     /// At least one of the fields must be present.
     OneRequired,
@@ -110,12 +106,6 @@ pub enum PagesChapterMode {
     /// The `pages` field must be present.
     #[allow(dead_code)]
     PagesRequired,
-}
-
-impl Default for PagesChapterMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl PagesChapterMode {

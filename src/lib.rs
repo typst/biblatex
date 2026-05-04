@@ -413,11 +413,11 @@ impl Entry {
         }
 
         match reqs.author_eds_field {
-            AuthorMode::OneRequired => {
-                if self.author().is_err() && self.editors().unwrap_or_default().is_empty()
-                {
-                    missing.push("author");
-                }
+            AuthorMode::OneRequired
+                if self.author().is_err()
+                    && self.editors().unwrap_or_default().is_empty() =>
+            {
+                missing.push("author");
             }
             AuthorMode::BothRequired => {
                 if self.editors().unwrap_or_default().is_empty() {
@@ -427,10 +427,10 @@ impl Entry {
                     missing.push("author");
                 }
             }
-            AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional => {
-                if self.author().is_err() {
-                    missing.push("author");
-                }
+            AuthorMode::AuthorRequired | AuthorMode::AuthorRequiredEditorOptional
+                if self.author().is_err() =>
+            {
+                missing.push("author");
             }
             AuthorMode::EditorRequiredAuthorForbidden => {
                 if self.editors().unwrap_or_default().is_empty() {
@@ -444,10 +444,10 @@ impl Entry {
         }
 
         match reqs.page_chapter_field {
-            PagesChapterMode::OneRequired => {
-                if self.pages().is_err() && self.chapter().is_err() {
-                    missing.push("pages");
-                }
+            PagesChapterMode::OneRequired
+                if self.pages().is_err() && self.chapter().is_err() =>
+            {
+                missing.push("pages");
             }
             PagesChapterMode::BothForbidden => {
                 if self.pages().is_ok() {
@@ -457,10 +457,8 @@ impl Entry {
                     superfluous.push("chapter");
                 }
             }
-            PagesChapterMode::PagesRequired => {
-                if self.pages().is_err() {
-                    missing.push("pages");
-                }
+            PagesChapterMode::PagesRequired if self.pages().is_err() => {
+                missing.push("pages");
             }
             _ => {}
         }
