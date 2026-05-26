@@ -1,10 +1,10 @@
+use std::collections::HashMap;
+
 use unicode_normalization::char;
 
 use crate::chunk::{Chunk, Chunks};
 use crate::mechanics::is_verbatim_field;
-use crate::raw::{
-    is_id_continue, Field, Pair, ParseError, ParseErrorKind, RawChunk, Token,
-};
+use crate::raw::{is_id_continue, Field, ParseError, ParseErrorKind, RawChunk, Token};
 use crate::types::get_month_for_abbr;
 use crate::{ChunksExt, Span, Spanned};
 use unscanny::Scanner;
@@ -13,7 +13,7 @@ use unscanny::Scanner;
 pub fn parse_field(
     key: &str,
     field: &Field,
-    abbreviations: &Vec<Pair<'_>>,
+    abbreviations: &HashMap<&str, &Field<'_>>,
 ) -> Result<Chunks, ParseError> {
     let mut chunks = vec![];
     for e in field {
@@ -280,16 +280,11 @@ fn resolve_abbreviation(
     key: &str,
     abbr: &str,
     span: Span,
-    map: &Vec<Pair<'_>>,
+    map: &HashMap<&str, &Field<'_>>,
 ) -> Result<Chunks, ParseError> {
-    let fields =
-        map.iter()
-            .find(|e| e.key.v == abbr)
-            .map(|e| &e.value.v)
-            .ok_or(ParseError::new(
-                span.clone(),
-                ParseErrorKind::UnknownAbbreviation(abbr.into()),
-            ));
+    let fields = map.get(abbr).copied().ok_or_else(|| {
+        ParseError::new(span.clone(), ParseErrorKind::UnknownAbbreviation(abbr.into()))
+    });
 
     if fields.is_err() {
         if let Some(month) = get_month_for_abbr(abbr) {
@@ -495,9 +490,11 @@ fn is_single_char_func(c: char, ws: bool) -> bool {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::raw::Pair;
 
-    use super::{parse_field, Chunk, RawChunk, Spanned};
+    use super::{parse_field, Chunk, Field, RawChunk, Spanned};
 
     fn N(s: &str) -> Chunk {
         Chunk::Normal(s.to_string())
@@ -513,9 +510,13 @@ mod tests {
         Spanned::new(c, 0..0)
     }
 
+    fn pairs_to_map<'a>(pairs: &'a [Pair<'a>]) -> HashMap<&'a str, &'a Field<'a>> {
+        pairs.iter().map(|p| (p.key.v, &p.value.v)).collect()
+    }
+
     #[test]
     fn test_process() {
-        let map: Vec<_> = [("abc", "ABC"), ("hi", "hello"), ("you", "person")]
+        let pairs: Vec<_> = [("abc", "ABC"), ("hi", "hello"), ("you", "person")]
             .into_iter()
             .map(|(k, v)| {
                 Pair::new(
@@ -524,6 +525,7 @@ mod tests {
                 )
             })
             .collect();
+        let map = pairs_to_map(&pairs);
 
         let field = vec![
             z(RawChunk::Abbreviation("abc")),
@@ -546,7 +548,7 @@ mod tests {
             "\\\"{A}ther und {\"\\LaTeX \"} {\\relax for you\\}}",
         ))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("Äther und "));
         assert_eq!(res[1].v, V("\"LaTeX\""));
         assert_eq!(res[2].v, N(" "));
@@ -555,17 +557,17 @@ mod tests {
 
         let field = vec![z(RawChunk::Normal("M\\\"etal S\\= ound"))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("Mëtal Sōund"));
 
         let field = vec![z(RawChunk::Normal(r"L\^{e} D\~{u}ng Tr\'{a}ng"))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("Lê Dũng Tráng"));
 
         let field = vec![z(RawChunk::Normal(r"\b b \c c \d a \H o \k a \r a \u a \v a"))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("b̲ ç ạ ő ą å ă ǎ"));
     }
 
@@ -575,7 +577,7 @@ mod tests {
             "The $11^{th}$ International Conference on How To Make \\$\\$",
         ))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("The "));
         assert_eq!(res[1].v, M("11^{th}"));
         assert_eq!(res[2].v, N(" International Conference on How To Make $$"));
@@ -587,7 +589,7 @@ mod tests {
         let field =
             vec![z(RawChunk::Normal("Bose\\textendash{}Einstein uses Win\\-dows"))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("Bose–Einstein uses Windows"));
     }
 
@@ -596,7 +598,7 @@ mod tests {
         let field =
             vec![z(RawChunk::Normal("- Knitting A--Z --- A practical guide -----"))];
 
-        let res = parse_field("", &field, &Vec::new()).unwrap();
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("- Knitting A–Z — A practical guide —–"));
     }
 }

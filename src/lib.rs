@@ -35,7 +35,7 @@ pub use raw::{
 };
 pub use types::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
@@ -126,7 +126,8 @@ impl Bibliography {
     /// `crossref` links resolved.
     pub fn from_raw(raw: RawBibliography) -> Result<Self, ParseError> {
         let mut res = Self::new();
-        let abbr = &raw.abbreviations;
+        let abbr: HashMap<&str, &_> =
+            raw.abbreviations.iter().map(|p| (p.key.v, &p.value.v)).collect();
 
         for entry in raw.entries {
             // Check that the key is not repeated
@@ -141,7 +142,7 @@ impl Bibliography {
             for spanned_field in entry.v.fields.into_iter() {
                 let field_key = spanned_field.key.v.to_string().to_ascii_lowercase();
                 let parsed =
-                    resolve::parse_field(&field_key, &spanned_field.value.v, abbr)?;
+                    resolve::parse_field(&field_key, &spanned_field.value.v, &abbr)?;
                 fields.insert(field_key, parsed);
             }
             res.insert(Entry {
