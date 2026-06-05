@@ -242,10 +242,17 @@ impl Date {
             let month = month.format_verbatim();
             let mut s = Scanner::new(&month);
             s.eat_whitespace();
-            let month = s.eat_while(char::is_ascii_alphabetic);
 
-            date_atom.month = get_month_for_name(month)
-                .or_else(|| get_month_for_abbr(month).map(|x| x.1));
+            // There are two conventions for the `month` field.
+            // (a) BibLaTeX prefers `1`. (§3.2 Fields of btxdoc.pdf)
+            date_atom.month = parse_unsigned_int(&mut s, 1..=2)
+                .map(|m: u8| m - 1) // BibLaTeX starts at one, not zero
+                .or_else(|| {
+                    // (b) BibTeX prefers `January` or `jan`. (§2.2.2 Data Fields of biblatex.pdf)
+                    let month = s.eat_while(char::is_ascii_alphabetic);
+                    get_month_for_name(month)
+                        .or_else(|| get_month_for_abbr(month).map(|x| x.1))
+                });
 
             if let Some(day) = day {
                 let span = day.span();
@@ -1001,6 +1008,14 @@ mod tests {
                 day: Some(11),
                 time: None,
             })
+        );
+
+        let year = &[s(N("2009"), 0..4)];
+        let month = &[s(N("2"), 20..21)];
+        let date = Date::parse_three_fields(year, Some(month), None).unwrap();
+        assert_eq!(
+            date.value,
+            DateValue::At(Datetime { year: 2009, month: Some(1), day: None, time: None })
         );
 
         let year = &[s(N("-0004"), 0..5)];
