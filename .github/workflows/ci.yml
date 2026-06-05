@@ -16,6 +16,7 @@ jobs:
       - run: cargo test
 
   checks:
+    name: Check clippy, formatting, and documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
