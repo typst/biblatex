@@ -7,35 +7,22 @@ env:
 
 jobs:
   test:
-    name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - name: Check out
-        uses: actions/checkout@v6
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.89.0
-      - name: Cache Cargo registry
-        uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build
-      - name: Test
-        run: cargo test
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - run: cargo test
 
   checks:
-    name: Check clippy, formatting, and documentation
     runs-on: ubuntu-latest
     steps:
-      - name: Check out
-        uses: actions/checkout@v6
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: clippy, rustfmt
-      - name: Cache Cargo registry
-        uses: Swatinem/rust-cache@v2
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features
-      - name: Check formatting
-        run: cargo fmt --check --all
-      - name: Build documentation
-        run: cargo doc --workspace --no-deps
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: cargo fmt --check --all
+      - run: cargo doc --workspace --no-deps
