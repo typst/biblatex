@@ -12,48 +12,129 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each type comes with a different set of required and allowable fields that
 /// are taken into consideration in [`Entry::verify`](crate::Entry::verify).
+///
+/// References:
+/// - BibTeX: [3.1 Entry Types — BibTeXing (`btxdoc.pdf`, 1988-02-08) | CTAN](https://mirrors.ctan.org/biblio/bibtex/base/btxdoc.pdf)
+/// - BibLaTeX: [2.1 Entry Types — The `biblatex` Package (`biblatex.pdf`, v3.21, 2025-07-10) | CTAN](https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsection.2.1)
 #[derive(Debug, Clone, Eq, PartialEq, Display, EnumString)]
 #[allow(missing_docs)]
 #[strum(serialize_all = "lowercase")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EntryType {
-    // BibTeX
+    /// BibTeX: An article from a journal or magazine.
+    ///
+    /// BibLaTeX regular type: An article in a journal, magazine, newspaper, or other periodical which forms a self-contained unit with its own title.
     Article,
+    /// BibTeX: A book with an explicit publisher.
+    ///
+    /// BibLaTeX regular type: A single-volume book with one or more authors where the authors share credit for the work as a whole. This entry type also covers the function of the [`@inbook`][Self::InBook] type of traditional BibTeX, see [§2.3.1 of `biblatex.pdf`][biblatex-2.3.1] for details.
+    ///
+    /// [biblatex-2.3.1]: https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.2.3.1
     Book,
+    /// BibTeX: A work that is printed and bound, but without a named publisher or sponsoring institution.
+    ///
+    /// BibLaTeX regular type: A book-like work without a formal publisher or sponsoring institution.
     Booklet,
+    /// BibTeX: A part of a book, which may be a chapter (or section or whatever) and/or a range of pages.
+    ///
+    /// BibLaTeX regular type: A part of a book which forms a self-contained unit with its own title. Note that the profile of this entry type is different from standard BibTeX, see [§2.3.1 of `biblatex.pdf`][biblatex-2.3.1].
+    ///
+    /// [biblatex-2.3.1]: https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.2.3.1
     InBook,
+    /// BibTeX: A part of a book having its own title.
+    ///
+    /// BibLaTeX regular type: A contribution to a collection which forms a self-contained unit with a distinct author and title.
     InCollection,
+    /// BibTeX: An article in a conference proceedings. `@conference` is the same as this type, included for _Scribe_ compatibility.
+    ///
+    /// BibLaTeX regular type: An article in a conference proceedings. This type is similar to [`@incollection`][Self::InCollection]. `@conference` is a legacy alias for this type.
     InProceedings,
+    /// BibTeX: Technical documentation.
+    ///
+    /// BibLaTeX regular type: Technical or other documentation, not necessarily in printed form.
     Manual,
+    /// BibTeX: A Master’s thesis.
+    ///
+    /// BibLaTeX type alias: Similar to [`@thesis`][Self::Thesis] except that the `type` field is optional and defaults to the localised term ‘Master’s thesis’.
     MastersThesis,
+    /// BibTeX: A PhD thesis.
+    ///
+    /// BibLaTeX type alias: Similar to [`@thesis`][Self::Thesis] except that the `type` field is optional and defaults to the localised term ‘PhD thesis’.
     PhdThesis,
+    /// BibTeX: Use this type when nothing else fits.
+    ///
+    /// BibLaTeX regular type: A fallback type for entries which do not fit into any other category.
     Misc,
+    /// BibTeX: The proceedings of a conference.
+    ///
+    /// BibLaTeX regular type: A single-volume conference proceedings. This type is very similar to [`@collection`][Self::Collection].
     Proceedings,
+    /// BibTeX: A report published by a school or other institution, usually numbered within a series.
+    ///
+    /// BibLaTeX type alias: Similar to [`@report`][Self::Report] except that the `type` field is optional and defaults to the localised term ‘technical report’.
     TechReport,
+    /// BibTeX: A document having an author and title, but not formally published.
+    ///
+    /// BibLaTeX regular type: A work with an author and a title which has not been formally published, such as a manuscript or the script of a talk.
     Unpublished,
 
-    // BibLaTeX
+    /// BibLaTeX regular type: A multi-volume [`@book`][Self::Book]. For backwards compatibility, multi-volume books are also supported by the entry type [`@book`][Self::Book]. However, it is advisable to make use of the dedicated entry type `@mvbook`.
     MvBook,
+    /// BibLaTeX regular type: This type is similar to [`@inbook`][Self::InBook] but intended for works originally published as a stand-alone book. A typical example are books reprinted in the collected works of an author.
     BookInBook,
+    /// BibLaTeX regular type: Supplemental material in a [`@book`][Self::Book]. This type is closely related to the [`@inbook`][Self::InBook] entry type. While [`@inbook`][Self::InBook] is primarily intended for a part of a book with its own title (e. g., a single essay in a collection of essays by the same author), this type is provided for elements such as prefaces, introductions, forewords, afterwords, etc. which often have a generic title only. Style guides may require such items to be formatted differently from other [`@inbook`][Self::InBook] items. The standard styles will treat this entry type as an alias for [`@inbook`][Self::InBook].
     SuppBook,
+    /// BibLaTeX regular type: An complete issue of a periodical, such as a special issue of a journal.
     Periodical,
+    /// BibLaTeX regular type: Supplemental material in a [`@periodical`][Self::Periodical]. This type is similar to [`@suppbook`][Self::SuppBook] but related to the [`@periodical`][Self::Periodical] entry type. The role of this entry type may be more obvious if you bear in mind that the [`@article`][Self::Article] type could also be called `@inperiodical`. This type may be useful when referring to items such as regular columns, obituaries, letters to the editor, etc. which only have a generic title. Style guides may require such items to be formatted differently from articles in the strict sense of the word. The standard styles will treat this entry type as an alias for [`@article`][Self::Article].
     SuppPeriodical,
+    /// BibLaTeX regular type: A single-volume collection with multiple, self-contained contributions by distinct authors which have their own title. The work as a whole has no overall author but it will usually have an editor.
     Collection,
+    /// BibLaTeX regular type: A multi-volume [`@collection`][Self::Collection]. For backwards compatibility, multi-volume collections are also supported by the entry type [`@collection`][Self::Collection]. However, it is advisable to make use of the dedicated entry type `@mvcollection`.
     MvCollection,
+    /// BibLaTeX regular type: Supplemental material in a [`@collection`][Self::Collection]. This type is similar to [`@suppbook`][Self::SuppBook] but related to the [`@collection`][Self::Collection] entry type. The standard styles will treat this entry type as an alias for [`@incollection`][Self::InCollection].
     SuppCollection,
+    /// BibLaTeX regular type: A single-volume work of reference such as an encyclopedia or a dictionary. This is a more specific variant of the generic [`@collection`][Self::Collection] entry type. The standard styles will treat this entry type as an alias for [`@collection`][Self::Collection].
     Reference,
+    /// BibLaTeX regular type: A multi-volume [`@reference`][Self::Reference] entry. The standard styles will treat this entry type as an alias for [`@mvcollection`][Self::MvCollection]. For backwards compatibility, multi-volume references are also supported by the entry type [`@reference`][Self::Reference]. However, it is advisable to make use of the dedicated entry type `@mvreference`.
     MvReference,
+    /// BibLaTeX regular type: An article in a work of reference. This is a more specific variant of the generic [`@incollection`][Self::InCollection] entry type. The standard styles will treat this entry type as an alias for [`@incollection`][Self::InCollection].
     InReference,
+    /// BibLaTeX regular type: A multi-volume [`@proceedings`][Self::Proceedings] entry. For backwards compatibility, multi-volume proceedings are also supported by the entry type [`@proceedings`][Self::Proceedings]. However, it is advisable to make use of the dedicated entry type `@mvproceedings`.
     MvProceedings,
+    /// BibLaTeX regular type: A technical report, research report, or white paper published by a university or some other institution.
     Report,
+    /// BibLaTeX regular type: A patent or patent request.
     Patent,
+    /// BibLaTeX regular type: A thesis written for an educational institution to satisfy the requirements for a degree.
     Thesis,
+    /// BibLaTeX regular type: An online resource. This entry type is intended for sources such as web sites which are intrinsically online resources. Note that all entry types support the `url` field. For example, when adding an article from an online journal, it may be preferable to use the [`@article`][Self::Article] type and its `url` field. `@electronic` is an alias for this type; `@www` is also an alias for this type, provided for `jurabib` compatibility.
     Online,
+    /// BibLaTeX regular type: Computer software. The standard styles will treat this entry type as an alias for [`@misc`][Self::Misc].
     Software,
+    /// BibLaTeX regular type: A data set or a similar collection of (mostly) raw data.
     Dataset,
+    /// BibLaTeX regular type: An entry set. This entry type is special, see [§3.14.5 of `biblatex.pdf`][biblatex-3.14.5] for details.
+    ///
+    /// [biblatex-3.14.5]: https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.3.14.5
     Set,
+    /// BibLaTeX regular type: This entry type is special. `@xdata` entries hold data which may be inherited by other entries using the `xdata` field. Entries of this type only serve as data containers; they may not be cited or added to the bibliography. See [§3.14.6 of `biblatex.pdf`][biblatex-3.14.6] for details.
+    ///
+    /// [biblatex-3.14.6]: https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.3.14.6
     XData,
 
+    /// Unrecognized types.
+    ///
+    /// Examples:
+    ///
+    /// - [BibLaTeX non-standard types](https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.2.1.3): `@artwork`, `@audio`, `@bibnote`, `@commentary`, `@image`, `@jurisdiction`, `@legislation`, `@legal`, `@letter`, `@movie`, `@music`, `@performance`, `@review`, `@standard`, `@video`.
+    /// - Other custom types added by well-known implementations:
+    ///   - [biblatex-apa](https://github.com/plk/biblatex-apa/blob/efb4437b2a58e47f3eb0729699e94b2b983a2291/tex/latex/biblatex-apa/dbx/apa.dbx#L18-L23): `@constitution`, `@legadminmaterial`, `@legmaterial`, `@nameonly`, `@presentation`
+    ///   - [gbt7714-bibtex-style](https://mirrors.ctan.org/biblio/bibtex/contrib/gbt7714/gbt7714-doc.pdf#section.0.6): `@archive`, `@map`, `@preprint`
+    ///   - [biblatex-gb7714-2025](https://mirrors.ctan.org/macros/latex/contrib/biblatex-contrib/biblatex-gb7714-2015/biblatex-gb7714-2015.pdf#subsubsection.4.3.6): `@newspaper`
+    ///   - [Better BibTeX for Zotero](https://github.com/retorquere/zotero-better-bibtex/blob/7b7237e60aad44c47656484cd5eaa40201882449/translators/bibtex/bibtex.ts#L632-L683): `@book_section`, `@film`, `@generic`, `@magazine_article`, `@newspaper_article`, `@web_page` from Mendeley; `@webpage` from papers3; `@codefragment`, `@hardware`, `@softwaremodule`, `@softwareversion`, `@talk` from unknown sources
+    ///
+    /// This type should not be confused with [`@misc`][Self::Misc].
     Unknown(String),
 }
 
@@ -151,6 +232,7 @@ impl EntryType {
         }
 
         match name.as_str() {
+            // These aliases are documented on [`EntryType`].
             "conference" => EntryType::InProceedings,
             "electronic" => EntryType::Online,
             "www" => EntryType::Online,
