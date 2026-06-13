@@ -601,4 +601,17 @@ mod tests {
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("- Knitting A–Z — A practical guide —–"));
     }
+
+    #[test]
+    fn issue_106() {
+        let field =
+            vec![z(RawChunk::Normal("{C\\textbackslash D} {a\\textasciitilde b}"))];
+
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        assert_eq!(4, res.len());
+        assert_eq!(N(""), res[0].v);
+        assert_eq!(V("C\\D"), res[1].v);
+        assert_eq!(N(" "), res[2].v);
+        assert_eq!(V("a~b"), res[3].v);
+    }
 }
