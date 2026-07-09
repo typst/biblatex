@@ -412,6 +412,9 @@ impl Date {
     }
 }
 
+/// Parse the `year` field.
+///
+/// The field is not allowed to have trailing month, day, or other contents.
 fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
     s.eat_whitespace();
     let year_idx = s.cursor();
@@ -419,7 +422,10 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
     s.eat_whitespace();
     let digits = s.eat_while(char::is_ascii_digit);
 
-    if digits.is_empty() || digits.len() > 4 {
+    if digits.is_empty() {
+        return Err(TypeError::new(year_idx..s.cursor(), TypeErrorKind::InvalidFormat));
+    }
+    if digits.len() > 4 {
         return Err(TypeError::new(
             year_idx..s.cursor(),
             TypeErrorKind::WrongNumberOfDigits,
@@ -444,6 +450,10 @@ fn get_year(s: &mut Scanner) -> Result<i32, TypeError> {
         if !positive_era {
             return Ok(-year + 1);
         }
+    }
+
+    if !s.done() {
+        return Err(TypeError::new(year_idx..s.cursor(), TypeErrorKind::InvalidFormat));
     }
 
     Ok(year)
@@ -1031,6 +1041,30 @@ mod tests {
                 time: None,
             })
         );
+
+        let year = &[s(N("29979"), 0..5)];
+        let date = Date::parse_three_fields(year, None, None);
+        assert_eq!(date.err().map(|e| e.kind), Some(TypeErrorKind::WrongNumberOfDigits));
+
+        let invalid_years = vec![
+            // These are special formats in China national standard GB/T 7714—2025.
+            // They should be rejected rather than partially parsed.
+
+            // Ancient years in the original calendar are annotated within parentheses. (§7.5.4.1)
+            s(N("1705（康熙四十四年）"), 0..28),
+            // If the publication year cannot be determined, other years may be used. (§7.5.4.3)
+            s(N("c1988"), 0..5),     // copyright year
+            s(N("1995印刷"), 0..10), // printing year
+            s(N("[1936]"), 0..6),    // estimated publication year
+            // For works published serially in the same journal, the subsequent parts may not be cited separately.
+            // Instead, the year, volume, issue, page, etc. of them can be appended after the first part. (§8.5.1.3)
+            // This is not an ideal solution, but biblatex-gb7714-2025 uses this convention.
+            s(N("2011, 33(2): 20-25; 2011, 33(3): 26-30"), 0..38),
+        ];
+        for year in invalid_years {
+            let date = Date::parse_three_fields(&[year], None, None);
+            assert_eq!(date.err().map(|e| e.kind), Some(TypeErrorKind::InvalidFormat));
+        }
     }
 
     #[test]
