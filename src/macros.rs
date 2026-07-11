@@ -67,11 +67,28 @@ macro_rules! date_fields {
                         .map(|d| PermissiveType::Typed(d))
                         .or_else(|_| Ok::<_, RetrievalError>(PermissiveType::Chunks(chunks.to_vec())))
                 } else {
-                    Ok(PermissiveType::Typed(Date::parse_three_fields(
-                        self.get(concat!($prefix, "year")).ok_or_else(|| RetrievalError::Missing("year".to_string()))?,
-                        self.get(concat!($prefix, "month")),
-                        self.get(concat!($prefix, "day")),
-                    )?))
+                    let year = self.get(concat!($prefix, "year")).ok_or_else(|| RetrievalError::Missing("year".to_string()))?;
+                    let month = self.get(concat!($prefix, "month"));
+                    let day = self.get(concat!($prefix, "day"));
+
+                    let parsed = Date::parse_three_fields(year, month, day);
+                    match (parsed, year, month, day) {
+                        (Ok(date), ..) => Ok(PermissiveType::Typed(date)),
+                        // Some conventions put literal dates in the `year` field
+                        // due to biblatex intricacies. See https://github.com/typst/biblatex/issues/105
+                        // for the detail.
+                        // Therefore, if the format is invalid and only `year`
+                        // is provided, then it should be treated as literal.
+                        (
+                            Err(TypeError { kind: TypeErrorKind::InvalidFormat, .. }),
+                            year,
+                            None,
+                            None,
+                        ) => Ok(PermissiveType::Chunks(year.to_vec())),
+                        // Dates in regular formats should still be rejected if
+                        // they have errors like `MonthOutOfRange`.
+                        (Err(err), ..) => Err(err.into()),
+                    }
                 }.map_err(Into::into)
             }
 
