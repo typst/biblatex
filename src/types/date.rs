@@ -272,19 +272,29 @@ impl Date {
                 date_atom.day = Some(day - 1);
             } else {
                 // Try to read the day from the month field.
-                if s.eat_while(|c: char| {
-                    c.is_whitespace() || matches!(c, '-' | '\u{00a0}')
-                })
-                .is_empty()
-                {
-                    return Ok(Date::from_datetime(date_atom));
-                };
+                //
+                // Putting the day in the month field was the best practice in 1988.
+                // See Helpful Hint 9, §4 in https://mirrors.ctan.org/biblio/bibtex/base/btxdoc.pdf:
+                //
+                // > …if you want to include information for the day of the month,
+                // > the month field is usually the best place. For example
+                // >     month = jul # "~4,"
+                // > will probably produce just what you want.
+
+                // Hyphens and non-breaking spaces are taken as month-day separators.
+                // Regular spaces are ignored, because some formatters prefer `month = { nov }`.
+                s.eat_while(|c: char| c.is_whitespace() && c != '\u{A0}');
+                let expecting_day = !s.eat_while(['-', '\u{A0}']).is_empty();
 
                 let day_start = s.cursor();
                 let day = s.eat_while(char::is_ascii_digit);
                 let day_span = day_start..s.cursor();
                 if day.is_empty() {
-                    return Err(TypeError::new(day_span, TypeErrorKind::MissingNumber));
+                    return if expecting_day {
+                        Err(TypeError::new(day_span, TypeErrorKind::MissingNumber))
+                    } else {
+                        Ok(Date::from_datetime(date_atom))
+                    };
                 }
 
                 let day: u8 = day.parse().unwrap();
@@ -1065,6 +1075,44 @@ mod tests {
             let date = Date::parse_three_fields(&[year], None, None);
             assert_eq!(date.err().map(|e| e.kind), Some(TypeErrorKind::InvalidFormat));
         }
+    }
+
+    #[test]
+    fn test_read_day_from_month_field() {
+        let year = &[s(N("2020"), 0..4)];
+
+        let month_with_day =
+            vec![s(N("January\u{A0}12th"), 20..32), s(N("January 12th"), 20..32)];
+        for month in month_with_day {
+            let date = Date::parse_three_fields(year, Some(&[month]), None).unwrap();
+            assert_eq!(
+                date.value,
+                DateValue::At(Datetime {
+                    year: 2020,
+                    month: Some(0),
+                    day: Some(11),
+                    time: None,
+                })
+            );
+        }
+
+        let month_without_day = vec![s(N("January"), 20..27), s(N(" January "), 20..29)];
+        for month in month_without_day {
+            let date = Date::parse_three_fields(year, Some(&[month]), None).unwrap();
+            assert_eq!(
+                date.value,
+                DateValue::At(Datetime {
+                    year: 2020,
+                    month: Some(0),
+                    day: None,
+                    time: None,
+                })
+            );
+        }
+
+        let month = &[s(N("January\u{A0}"), 20..28)];
+        let date = Date::parse_three_fields(year, Some(month), None);
+        assert_eq!(date.err().map(|e| e.kind), Some(TypeErrorKind::MissingNumber));
     }
 
     #[test]
