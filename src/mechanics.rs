@@ -719,6 +719,8 @@ impl EntryType {
 
 /// Whether a field with this key should be parsed with commands and most
 /// escapes turned off.
+///
+/// Reference: Verbatim fields and URI fields, [2.2.1 Data Types — The `biblatex` Package (`biblatex.pdf`, v3.21, 2025-07-10) | CTAN](https://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf#subsubsection.2.2.1)
 pub fn is_verbatim_field(key: &str) -> bool {
     matches!(
         key,

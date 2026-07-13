@@ -12,6 +12,9 @@ pub type Chunks = Vec<Spanned<Chunk>>;
 pub type ChunksRef<'a> = &'a [Spanned<Chunk>];
 
 /// Represents one part of a field value.
+///
+/// Note that the `Verbatim` variant here is unrelated to the high-level concept
+/// of verbatim fields (e.g., `file`, `url`). Such fields are usually `Normal`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Chunk {
