@@ -114,7 +114,7 @@ impl<'s> ContentParser<'s> {
 
                     self.s.eat();
                 }
-                '-' => {
+                '-' if !self.verb_field => {
                     let mut count = 0;
                     let hyphens = self.s.eat_while(|c| {
                         let res = c == '-' && count < 3;
@@ -600,6 +600,11 @@ mod tests {
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("- Knitting A–Z — A practical guide —–"));
+
+        let url = "https://deploy-preview-601--site.netlify.app/x--y.html";
+        let field = vec![z(RawChunk::Normal(url))];
+        let res = parse_field("url", &field, &HashMap::new()).unwrap();
+        assert_eq!(res[0].v, N(url));
     }
 
     #[test]
