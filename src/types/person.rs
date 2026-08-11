@@ -30,6 +30,37 @@ pub struct Person {
     pub use_prefix: Option<bool>,
 }
 
+/// A list of people named in a BibLaTeX name field.
+///
+/// BibLaTeX permits a name list to end in the special "and others" marker. That marker is represented separately from the people in the list, rather than as a person whose family name is `others`.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum PersonList {
+    /// A complete list of people.
+    Normal(Vec<Person>),
+    /// A truncated list of people, followed by BibLaTeX's "and others" marker.
+    AndOthers(Vec<Person>),
+}
+
+impl PersonList {
+    /// Returns the people explicitly named in this list.
+    pub fn people(&self) -> &[Person] {
+        match self {
+            Self::Normal(people) | Self::AndOthers(people) => people,
+        }
+    }
+
+    /// Returns whether this list ends in BibLaTeX's "and others" marker.
+    pub fn has_and_others(&self) -> bool {
+        matches!(self, Self::AndOthers(_))
+    }
+}
+
+impl Default for PersonList {
+    fn default() -> Self {
+        Self::Normal(Vec::new())
+    }
+}
+
 impl Person {
     /// Constructs a new person from a chunk vector:
     /// 1. according to the specs of
@@ -343,6 +374,35 @@ impl Type for Vec<Person> {
     }
 }
 
+impl Type for PersonList {
+    fn from_chunks(chunks: ChunksRef) -> Result<Self, TypeError> {
+        let mut names = split_token_lists_with_kw(chunks, "and");
+        let has_and_others = names.len() > 1
+            && names
+                .last()
+                .is_some_and(|name| name.format_verbatim().trim() == "others");
+
+        if has_and_others {
+            names.pop();
+        }
+
+        let people =
+            names.into_iter().map(|subchunks| Person::parse(&subchunks)).collect();
+
+        Ok(if has_and_others { Self::AndOthers(people) } else { Self::Normal(people) })
+    }
+
+    fn to_chunks(&self) -> Chunks {
+        let mut chunks = self.people().to_vec().to_chunks();
+
+        if self.has_and_others() {
+            chunks.push(Spanned::detached(Chunk::Normal(" and others".to_string())));
+        }
+
+        chunks
+    }
+}
+
 impl Display for Person {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if !self.given_name.is_empty() {
@@ -387,6 +447,33 @@ mod tests {
         assert_eq!(people[2].name, "Garamond");
         assert_eq!(people[2].prefix, "");
         assert_eq!(people[2].given_name, "Claude");
+    }
+
+    #[test]
+    fn test_list_of_names_and_others() {
+        let names = &[Spanned::detached(Chunk::Normal(
+            "Johannes Gutenberg and Aldus Manutius and others".to_string(),
+        ))];
+        let people: PersonList = Type::from_chunks(names).unwrap();
+
+        assert!(people.has_and_others());
+        assert_eq!(people.people().len(), 2);
+        assert_eq!(people.people()[0].name, "Gutenberg");
+        assert_eq!(people.people()[1].name, "Manutius");
+        assert_eq!(
+            people.to_chunks().to_biblatex_string(false),
+            "{Gutenberg, Johannes and Manutius, Aldus and others}"
+        );
+    }
+
+    #[test]
+    fn test_others_without_and_is_a_person() {
+        let names = &[Spanned::detached(Chunk::Normal("others".to_string()))];
+        let people: PersonList = Type::from_chunks(names).unwrap();
+
+        assert!(!people.has_and_others());
+        assert_eq!(people.people().len(), 1);
+        assert_eq!(people.people()[0].name, "others");
     }
 
     #[test]

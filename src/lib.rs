@@ -12,8 +12,8 @@ Finding out the author of a work.
 let src = "@book{tolkien1937, author = {J. R. R. Tolkien}}";
 let bibliography = Bibliography::parse(src).unwrap();
 let entry = bibliography.get("tolkien1937").unwrap();
-let author = entry.author().unwrap();
-assert_eq!(author[0].name, "Tolkien");
+let authors = entry.author().unwrap();
+assert_eq!(authors.people()[0].name, "Tolkien");
 # Ok(())
 # }
 ```
@@ -753,7 +753,7 @@ impl Entry {
     // BibTeX fields.
     fields! {
         // Fields without a specified return type simply return `ChunksRef`.
-        author: "author" => Vec<Person>,
+        author: "author" => PersonList,
         book_title: "booktitle",
         chapter: "chapter",
         edition: "edition" => PermissiveType<i64>,
@@ -795,11 +795,11 @@ impl Entry {
     /// to four entries, one for each editorial role.
     ///
     /// The default `EditorType::Editor` is assumed if the type field is empty.
-    pub fn editors(&self) -> Result<Vec<(Vec<Person>, EditorType)>, TypeError> {
+    pub fn editors(&self) -> Result<Vec<(PersonList, EditorType)>, TypeError> {
         let mut editors = vec![];
 
         let mut parse = |name_field: &str, editor_field: &str| -> Result<(), TypeError> {
-            if let Some(persons) = convert_result(self.get_as::<Vec<Person>>(name_field))?
+            if let Some(persons) = convert_result(self.get_as::<PersonList>(name_field))?
             {
                 let editor_type = self
                     .get(editor_field)
@@ -824,24 +824,24 @@ impl Entry {
     fields! {
         abstract_: "abstract",
         addendum: "addendum",
-        afterword: "afterword" => Vec<Person>,
-        annotator: "annotator" => Vec<Person>,
+        afterword: "afterword" => PersonList,
+        annotator: "annotator" => PersonList,
         author_type: "authortype" => String,
-        book_author: "bookauthor" => Vec<Person>,
+        book_author: "bookauthor" => PersonList,
         book_pagination: "bookpagination" => Pagination,
         book_subtitle: "booksubtitle",
         book_title_addon: "booktitleaddon",
-        commentator: "commentator" => Vec<Person>,
+        commentator: "commentator" => PersonList,
         doi: "doi" => String,
         eid: "eid",
         entry_subtype: "entrysubtype",
         eprint: "eprint" => String,
         eventtitle: "eventtitle",
         eventtitle_addon: "eventtitleaddon",
-        foreword: "foreword" => Vec<Person>,
-        holder: "holder" => Vec<Person>,
+        foreword: "foreword" => PersonList,
+        holder: "holder" => PersonList,
         index_title: "indextitle",
-        introduction: "introduction" => Vec<Person>,
+        introduction: "introduction" => PersonList,
         isan: "isan",
         isbn: "isbn",
         ismn: "ismn",
@@ -871,8 +871,8 @@ impl Entry {
         part: "part",
         pubstate: "pubstate",
         reprint_title: "reprinttitle",
-        short_author: "shortauthor" => Vec<Person>,
-        short_editor: "shorteditor" => Vec<Person>,
+        short_author: "shortauthor" => PersonList,
+        short_editor: "shorteditor" => PersonList,
         shorthand: "shorthand",
         shorthand_intro: "shorthandintro",
         short_journal: "shortjournal",
@@ -880,7 +880,7 @@ impl Entry {
         short_title: "shorttitle",
         subtitle: "subtitle",
         title_addon: "titleaddon",
-        translator: "translator" => Vec<Person>,
+        translator: "translator" => PersonList,
         url: "url" => String,
         venue: "venue",
         version: "version",

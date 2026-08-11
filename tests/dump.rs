@@ -41,8 +41,11 @@ fn dump_author_title(file: &str) {
 
     for x in bibliography {
         let authors = x.author().unwrap_or_default();
-        for a in authors {
+        for a in authors.people() {
             print!("{}, ", a);
+        }
+        if authors.has_and_others() {
+            print!("et al., ");
         }
         println!("\"{}\".", x.title().unwrap().format_sentence());
     }
