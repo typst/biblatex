@@ -600,6 +600,10 @@ impl Entry {
         bib: &Bibliography,
         ancestors: &mut HashSet<String>,
     ) -> Result<(), ParseError> {
+        if self.get("crossref").is_none() && self.get("xdata").is_none() {
+            return Ok(());
+        }
+
         ancestors.insert(self.key.clone());
 
         let result = self.resolve_crossrefs_inner(bib, ancestors);
