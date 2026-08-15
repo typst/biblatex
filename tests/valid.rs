@@ -100,6 +100,23 @@ fn test_biblatex_serialization_math_not_escaped() {
 }
 
 #[test]
+fn test_biblatex_serialization_accent_decoded_to_unicode() {
+    let contents = r#"
+        @article{key,
+          subtitle = {Hyper-K\"ahler Fourfolds Fibered by Elliptic Products},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\nsubtitle = {Hyper-Kähler Fourfolds Fibered by Elliptic Products},\n}"
+    );
+}
+
+#[test]
 fn test_verify() {
     let mut contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
