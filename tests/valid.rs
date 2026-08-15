@@ -83,6 +83,23 @@ fn test_bibtex_conversion() {
 }
 
 #[test]
+fn test_biblatex_serialization_math_not_escaped() {
+    let contents = r#"
+        @article{key,
+          title = {Explicit homotopy limits of $\mathrm{dg}$-categories and twisted complexes},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\ntitle = {Explicit homotopy limits of $\\mathrm{dg}$-categories and twisted complexes},\n}"
+    );
+}
+
+#[test]
 fn test_verify() {
     let mut contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
