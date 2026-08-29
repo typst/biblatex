@@ -1,8 +1,8 @@
 use std::fs;
 
 use biblatex::{
-    Bibliography, Chunk, ChunksExt, EditorType, Entry, EntryType, PermissiveType, Person,
-    PersonList, RetrievalError, TypeError, TypeErrorKind,
+    Bibliography, Chunk, ChunksExt, Date, DateValue, Datetime, EditorType, Entry,
+    EntryType, PermissiveType, Person, PersonList, RetrievalError, TypeError, TypeErrorKind,
 };
 
 #[test]
@@ -364,5 +364,45 @@ fn test_editor_types() {
                 EditorType::Unknown("participant".into()),
             )
         ])
+    );
+}
+
+#[test]
+fn test_legacy_bibtex_month() {
+    let raw = r#"@article{foo,
+            year = 2002,
+            month = June,
+          }
+          @article{bar,
+            year = 2020,
+            month = Sept,
+          }"#;
+
+    let bibliography = Bibliography::parse(raw).unwrap();
+    assert_eq!(
+        bibliography.get("foo").unwrap().date(),
+        Ok(PermissiveType::Typed(Date {
+            value: DateValue::At(Datetime {
+                year: 2002,
+                month: Some(5),
+                day: None,
+                time: None
+            }),
+            uncertain: false,
+            approximate: false,
+        }))
+    );
+    assert_eq!(
+        bibliography.get("bar").unwrap().date(),
+        Ok(PermissiveType::Typed(Date {
+            value: DateValue::At(Datetime {
+                year: 2020,
+                month: Some(8),
+                day: None,
+                time: None
+            }),
+            uncertain: false,
+            approximate: false,
+        }))
     );
 }

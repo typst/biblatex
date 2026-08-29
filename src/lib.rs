@@ -35,7 +35,7 @@ pub use raw::{
 };
 pub use types::*;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
@@ -154,9 +154,7 @@ impl Bibliography {
 
         let mut entries = res.entries.clone();
         for entry in &mut entries {
-            entry.resolve_crossrefs(&res).map_err(|e| {
-                ParseError::new(e.span, ParseErrorKind::ResolutionError(e.kind))
-            })?;
+            entry.resolve_crossrefs(&res, &mut HashSet::new())?;
         }
         res.entries = entries;
 
@@ -597,22 +595,65 @@ impl Entry {
     }
 
     /// Resolves all data dependencies defined by `crossref` and `xdata` fields.
-    fn resolve_crossrefs(&mut self, bib: &Bibliography) -> Result<(), TypeError> {
-        let mut refs = vec![];
-
-        if let Some(crossref) = convert_result(self.get_as::<String>("crossref"))? {
-            refs.extend(bib.get(&crossref).cloned());
+    fn resolve_crossrefs(
+        &mut self,
+        bib: &Bibliography,
+        ancestors: &mut HashSet<String>,
+    ) -> Result<(), ParseError> {
+        if self.get("crossref").is_none() && self.get("xdata").is_none() {
+            return Ok(());
         }
 
-        if let Some(keys) = convert_result(self.get_as::<Vec<String>>("xdata"))? {
-            for key in keys {
-                refs.extend(bib.get(&key).cloned());
+        ancestors.insert(self.key.clone());
+
+        let result = self.resolve_crossrefs_inner(bib, ancestors);
+
+        ancestors.remove(&self.key);
+        result
+    }
+
+    fn resolve_crossrefs_inner(
+        &mut self,
+        bib: &Bibliography,
+        ancestors: &mut HashSet<String>,
+    ) -> Result<(), ParseError> {
+        let mut refs = vec![];
+
+        if let Some(crossref) = convert_result(self.get_as::<String>("crossref"))
+            .map_err(|e| {
+                ParseError::new(e.span, ParseErrorKind::ResolutionError(e.kind))
+            })?
+        {
+            if let Some(entry) = bib.get(&crossref).cloned() {
+                refs.push((entry, self.get("crossref").unwrap().span()));
             }
         }
 
-        for mut crossref in refs {
-            crossref.resolve_crossrefs(bib)?;
-            self.resolve_single_crossref(crossref)?;
+        if let Some(keys) =
+            convert_result(self.get_as::<Vec<String>>("xdata")).map_err(|e| {
+                ParseError::new(e.span, ParseErrorKind::ResolutionError(e.kind))
+            })?
+        {
+            let span = self.get("xdata").unwrap().span();
+            for key in keys {
+                if let Some(entry) = bib.get(&key).cloned() {
+                    refs.push((entry, span.clone()));
+                }
+            }
+        }
+
+        for (mut crossref, span) in refs {
+            if ancestors.contains(&crossref.key) {
+                return Err(ParseError::new(
+                    span,
+                    ParseErrorKind::CircularReference(crossref.key),
+                ));
+            }
+
+            crossref.resolve_crossrefs(bib, ancestors)?;
+            self.resolve_single_crossref(crossref).map_err(|e| {
+                ParseError::new(e.span, ParseErrorKind::ResolutionError(e.kind))
+            })?;
         }
 
         self.remove("xdata");

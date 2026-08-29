@@ -96,6 +96,8 @@ pub enum ParseErrorKind {
     MalformedCommand,
     /// A duplicate citation key was found.
     DuplicateKey(String),
+    /// A `crossref` or `xdata` field refers back to an entry already being resolved.
+    CircularReference(String),
     /// A type error occurred while trying to resolve cross-references.
     ResolutionError(TypeErrorKind),
 }
@@ -129,6 +131,7 @@ impl fmt::Display for ParseErrorKind {
             Self::UnknownAbbreviation(s) => write!(f, "unknown abbreviation {:?}", s),
             Self::MalformedCommand => write!(f, "malformed command"),
             Self::DuplicateKey(s) => write!(f, "duplicate key {:?}", s),
+            Self::CircularReference(s) => write!(f, "circular reference to {:?}", s),
             Self::ResolutionError(e) => {
                 write!(f, "type error occurred during crossref resolution: {}", e)
             }

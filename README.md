@@ -36,14 +36,20 @@ in curly braces). The entries may hold multiple fields. Entries have getter
 methods for each of the possible fields in a Bib(La)TeX file which handle
 possible field aliases, composition and type conversion automatically.
 
-Refer to the [WikiBook section on LaTeX bibliography management](https://en.wikibooks.org/wiki/LaTeX/Bibliography_Management)
-and the [BibLaTeX package manual](http://ctan.ebinger.cc/tex-archive/macros/latex/contrib/biblatex/doc/biblatex.pdf)
-to learn more about the intended meaning of each of the fields.
-
 The generated documentation more specifically describes the selection and
 behavior of the getters but generally, they follow the convention of being the
 snake-case name of the corresponding field
 (such that the getter for `booktitleaddon` is named `book_title_addon`).
+
+## References
+
+The crate follows the following specifications and implementations references:
+
+- _BibLaTeX_ as the specification: <https://ctan.org/pkg/biblatex>
+  - _Biber_ as its implementation: <https://ctan.org/pkg/biber>
+- _BibTeX_ as the original format: <https://ctan.org/pkg/bibtex>
+
+Additionally, Wiki Books provides an excellent overview of the Bibliography Management system in LaTeX: <https://en.wikibooks.org/wiki/LaTeX/Bibliography_Management>.
 
 ## Limitations
 
