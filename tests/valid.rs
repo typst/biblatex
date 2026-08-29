@@ -2,7 +2,8 @@ use std::fs;
 
 use biblatex::{
     Bibliography, Chunk, ChunksExt, Date, DateValue, Datetime, EditorType, Entry,
-    EntryType, PermissiveType, Person, PersonList, RetrievalError, TypeError, TypeErrorKind,
+    EntryType, PermissiveType, Person, PersonList, RetrievalError, TypeError,
+    TypeErrorKind,
 };
 
 #[test]
