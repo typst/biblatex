@@ -84,6 +84,7 @@ fn test_bibtex_conversion() {
 
 #[test]
 #[ignore = "control-space commands (e.g. `\\ `) are re-escaped on serialization"]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
 fn test_biblatex_serialization_preserves_tex_input() {
     let contents = r#"
         @article{key,
@@ -103,6 +104,7 @@ fn test_biblatex_serialization_preserves_tex_input() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
 fn test_biblatex_serialization_math_not_escaped() {
     let contents = r#"
         @article{key,
@@ -120,6 +122,7 @@ fn test_biblatex_serialization_math_not_escaped() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
 fn test_biblatex_serialization_accent_decoded_to_unicode() {
     let contents = r#"
         @article{key,
@@ -138,6 +141,7 @@ fn test_biblatex_serialization_accent_decoded_to_unicode() {
 
 #[test]
 #[ignore = "control-space commands (e.g. `\\ `) are re-escaped on serialization"]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
 fn test_biblatex_serialization_control_space_preserved() {
     let contents = r#"
         @article{key,
