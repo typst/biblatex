@@ -9,9 +9,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
       - run: cargo build
       - run: cargo test
 
@@ -19,11 +19,11 @@ jobs:
     name: Check clippy, formatting, and documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo fmt --check --all
       - run: cargo doc --workspace --no-deps
