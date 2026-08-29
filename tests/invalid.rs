@@ -18,6 +18,29 @@ fn test_repeated_key() {
 }
 
 #[test]
+fn test_self_referential_crossref() {
+    let contents = "@incollection{Hartman2022, crossref = {Hartman2022}}";
+
+    assert_eq!(
+        Bibliography::parse(contents).unwrap_err().kind,
+        ParseErrorKind::CircularReference("Hartman2022".into()),
+    );
+}
+
+#[test]
+fn test_indirect_crossref_cycle() {
+    let contents = r#"
+        @incollection{a, crossref = {b}}
+        @collection{b, crossref = {a}}
+    "#;
+
+    assert_eq!(
+        Bibliography::parse(contents).unwrap_err().kind,
+        ParseErrorKind::CircularReference("a".into()),
+    );
+}
+
+#[test]
 fn test_parse_incorrect_result() {
     let contents = fs::read_to_string("tests/fixtures/invalid/incorrect_syntax.bib")
         .unwrap()
