@@ -25,6 +25,26 @@ fn test_and_others_name_marker() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/32.
+fn test_wide_string_syntax() {
+    let contents = r#"
+        @string{
+          jomch = {J.~Organomet. Chem.},
+          pup   = {Princeton University Press}
+        }
+        @article{aksin, journaltitle = jomch, publisher = pup, date = 2006}
+    "#;
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("aksin").unwrap();
+
+    assert_eq!(entry.journal_title().unwrap().format_verbatim(), "J.~Organomet. Chem.");
+    assert_eq!(
+        entry.publisher().unwrap()[0].format_verbatim(),
+        "Princeton University Press"
+    );
+}
+
+#[test]
 fn test_keys() {
     let contents = fs::read_to_string("tests/fixtures/valid/editortypes.bib").unwrap();
 
