@@ -2,7 +2,8 @@ use std::fs;
 
 use biblatex::{
     Bibliography, Chunk, ChunksExt, Date, DateValue, Datetime, EditorType, Entry,
-    EntryType, PermissiveType, Person, RetrievalError, TypeError, TypeErrorKind,
+    EntryType, PermissiveType, Person, PersonList, RetrievalError, TypeError,
+    TypeErrorKind,
 };
 
 #[test]
@@ -10,6 +11,17 @@ fn test_correct_bib() {
     let contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();
     assert_eq!(bibliography.len(), 83)
+}
+
+#[test]
+fn test_and_others_name_marker() {
+    let contents = fs::read_to_string("tests/fixtures/valid/rass.bib").unwrap();
+    let bibliography = Bibliography::parse(&contents).unwrap();
+    let authors = bibliography.get("snap").unwrap().author().unwrap();
+
+    assert!(authors.has_and_others());
+    assert_eq!(authors.people().len(), 10);
+    assert_eq!(authors.people().last().unwrap().name, "Gribble");
 }
 
 #[test]
@@ -132,7 +144,7 @@ fn test_crossref() {
     let arrgh = bibliography.get("arrgh").unwrap();
     assert_eq!(arrgh.entry_type, EntryType::Article);
     assert_eq!(arrgh.volume().unwrap(), PermissiveType::Typed(115));
-    assert_eq!(arrgh.editors().unwrap()[0].0[0].name, "Uhlig");
+    assert_eq!(arrgh.editors().unwrap()[0].0.people()[0].name, "Uhlig");
     assert_eq!(arrgh.number().unwrap().format_verbatim(), "6");
     assert_eq!(
         arrgh.journal().unwrap().format_verbatim(),
@@ -197,9 +209,9 @@ fn test_synthesized_entry() {
         given_initials: None,
     }];
 
-    e.set_author(brian.clone());
+    e.set_author(PersonList::new(brian.clone(), false));
 
-    assert_eq!(Ok(brian), e.author());
+    assert_eq!(Ok(PersonList::new(brian, false)), e.author());
 }
 
 #[test]
@@ -211,7 +223,7 @@ fn test_case_sensitivity() {
     let author = entry.author();
 
     match author {
-        Ok(a) => assert_eq!(a[0].name, "Kime"),
+        Ok(a) => assert_eq!(a.people()[0].name, "Kime"),
         Err(RetrievalError::Missing(_)) => {
             panic!("Tags should be case insensitive.");
         }
@@ -290,16 +302,19 @@ fn test_editor_types() {
     assert_eq!(
         video.editors(),
         Ok(vec![(
-            vec![Person {
-                name: "Acerola".into(),
-                given_name: "".into(),
-                prefix: "".into(),
-                suffix: "".into(),
-                use_prefix: None,
-                id: None,
-                prefix_initials: None,
-                given_initials: None,
-            }],
+            PersonList::new(
+                vec![Person {
+                    name: "Acerola".into(),
+                    given_name: "".into(),
+                    prefix: "".into(),
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
+                }],
+                false
+            ),
             EditorType::Director
         )])
     );
@@ -308,16 +323,19 @@ fn test_editor_types() {
     assert_eq!(
         music.editors(),
         Ok(vec![(
-            vec![Person {
-                name: "Mozart".into(),
-                given_name: "Wolfgang Amadeus".into(),
-                prefix: "".into(),
-                suffix: "".into(),
-                use_prefix: None,
-                id: None,
-                prefix_initials: None,
-                given_initials: None,
-            }],
+            PersonList::new(
+                vec![Person {
+                    name: "Mozart".into(),
+                    given_name: "Wolfgang Amadeus".into(),
+                    prefix: "".into(),
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
+                }],
+                false
+            ),
             EditorType::Unknown("pianist".into()),
         )])
     );
@@ -327,29 +345,35 @@ fn test_editor_types() {
         audio.editors(),
         Ok(vec![
             (
-                vec![Person {
-                    name: "Smith".into(),
-                    given_name: "Stacey Vanek".into(),
-                    prefix: "".into(),
-                    suffix: "".into(),
-                    use_prefix: None,
-                    id: None,
-                    prefix_initials: None,
-                    given_initials: None,
-                }],
+                PersonList::new(
+                    vec![Person {
+                        name: "Smith".into(),
+                        given_name: "Stacey Vanek".into(),
+                        prefix: "".into(),
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
+                    }],
+                    false
+                ),
                 EditorType::Unknown("host".into()),
             ),
             (
-                vec![Person {
-                    name: "Plotkin".into(),
-                    given_name: "Stanley".into(),
-                    prefix: "".into(),
-                    suffix: "".into(),
-                    use_prefix: None,
-                    id: None,
-                    prefix_initials: None,
-                    given_initials: None,
-                }],
+                PersonList::new(
+                    vec![Person {
+                        name: "Plotkin".into(),
+                        given_name: "Stanley".into(),
+                        prefix: "".into(),
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
+                    }],
+                    false
+                ),
                 EditorType::Unknown("participant".into()),
             )
         ])
