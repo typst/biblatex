@@ -65,6 +65,11 @@ impl Chunk {
     /// The `is_verbatim` argument indicates whether this string is intended for
     /// a verbatim field like `file` with limited escapes.
     pub fn to_biblatex_string(&self, is_verbatim: bool) -> String {
+        // Ref.: https://github.com/typst/biblatex/issues/76.
+        if let Chunk::Math(s) = self {
+            return s.clone();
+        }
+
         let mut s = String::new();
         for c in self.get().chars() {
             if is_escapable(c, is_verbatim, false) {

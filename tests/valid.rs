@@ -95,6 +95,82 @@ fn test_bibtex_conversion() {
 }
 
 #[test]
+#[ignore = "control-space commands (e.g. `\\ `) are re-escaped on serialization"]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
+fn test_biblatex_serialization_preserves_tex_input() {
+    let contents = r#"
+        @article{key,
+          title = {Explicit homotopy limits of $\mathrm{dg}$-categories and twisted complexes},
+          subtitle = {Hyper-K\"ahler Fourfolds Fibered by Elliptic Products},
+          institution = {Dept.\ of Computer Science, Stanford Univ.},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+    entry.to_bibtex_string().unwrap();
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\ninstitution = {Dept.\\ of Computer Science, Stanford Univ.},\nsubtitle = {Hyper-Kähler Fourfolds Fibered by Elliptic Products},\ntitle = {Explicit homotopy limits of $\\mathrm{dg}$-categories and twisted complexes},\n}"
+    );
+}
+
+#[test]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
+fn test_biblatex_serialization_math_not_escaped() {
+    let contents = r#"
+        @article{key,
+          title = {Explicit homotopy limits of $\mathrm{dg}$-categories and twisted complexes},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\ntitle = {Explicit homotopy limits of $\\mathrm{dg}$-categories and twisted complexes},\n}"
+    );
+}
+
+#[test]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
+fn test_biblatex_serialization_accent_decoded_to_unicode() {
+    let contents = r#"
+        @article{key,
+          subtitle = {Hyper-K\"ahler Fourfolds Fibered by Elliptic Products},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\nsubtitle = {Hyper-Kähler Fourfolds Fibered by Elliptic Products},\n}"
+    );
+}
+
+#[test]
+#[ignore = "control-space commands (e.g. `\\ `) are re-escaped on serialization"]
+/// Ref.: https://github.com/typst/biblatex/issues/76.
+fn test_biblatex_serialization_control_space_preserved() {
+    let contents = r#"
+        @article{key,
+          institution = {Dept.\ of Computer Science, Stanford Univ.},
+        }
+    "#;
+
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("key").unwrap();
+
+    assert_eq!(
+        entry.to_biblatex_string(),
+        "@article{key,\ninstitution = {Dept.\\ of Computer Science, Stanford Univ.},\n}"
+    );
+}
+
+#[test]
 fn test_verify() {
     let mut contents = fs::read_to_string("tests/fixtures/valid/gral.bib").unwrap();
     let mut bibliography = Bibliography::parse(&contents).unwrap();
