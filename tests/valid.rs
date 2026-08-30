@@ -291,6 +291,32 @@ fn test_synthesized_entry() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/65.
+fn test_set_editor() {
+    let mut e = Entry::new("Test456".to_owned(), EntryType::Book);
+    let plotkin = vec![Person {
+        name: "Plotkin".to_string(),
+        given_name: "Stanley".to_string(),
+        prefix: "".to_string(),
+        suffix: "".to_string(),
+        use_prefix: None,
+        id: None,
+        prefix_initials: None,
+        given_initials: None,
+    }];
+
+    let plotkin = PersonList::new(plotkin, false);
+    e.set_editor(plotkin.clone(), Some(EditorType::Redactor));
+    e.set_editorb(plotkin.clone(), None);
+
+    let editors = e.editors().unwrap();
+    assert_eq!(
+        editors,
+        vec![(plotkin.clone(), EditorType::Redactor), (plotkin, EditorType::Editor),]
+    );
+}
+
+#[test]
 fn test_case_sensitivity() {
     let contents = fs::read_to_string("tests/fixtures/valid/case.bib").unwrap();
     let bibliography = Bibliography::parse(&contents).unwrap();

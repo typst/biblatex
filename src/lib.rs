@@ -861,6 +861,49 @@ impl Entry {
         Ok(editors)
     }
 
+    /// Set the `editor` field and its `editortype` annotation field.
+    ///
+    /// Passing `None` for `editor_type` removes the `editortype` field, in
+    /// which case [`Entry::editors`] will assume `EditorType::Editor` when
+    /// reading it back.
+    pub fn set_editor(&mut self, persons: PersonList, editor_type: Option<EditorType>) {
+        self.set_editor_role("editor", "editortype", persons, editor_type);
+    }
+
+    /// Set the `editora` field and its `editoratype` annotation field.
+    /// See [`Entry::set_editor`].
+    pub fn set_editora(&mut self, persons: PersonList, editor_type: Option<EditorType>) {
+        self.set_editor_role("editora", "editoratype", persons, editor_type);
+    }
+
+    /// Set the `editorb` field and its `editorbtype` annotation field.
+    /// See [`Entry::set_editor`].
+    pub fn set_editorb(&mut self, persons: PersonList, editor_type: Option<EditorType>) {
+        self.set_editor_role("editorb", "editorbtype", persons, editor_type);
+    }
+
+    /// Set the `editorc` field and its `editorctype` annotation field.
+    /// See [`Entry::set_editor`].
+    pub fn set_editorc(&mut self, persons: PersonList, editor_type: Option<EditorType>) {
+        self.set_editor_role("editorc", "editorctype", persons, editor_type);
+    }
+
+    fn set_editor_role(
+        &mut self,
+        name_field: &str,
+        type_field: &str,
+        persons: PersonList,
+        editor_type: Option<EditorType>,
+    ) {
+        self.set(name_field, persons.to_chunks());
+        match editor_type {
+            Some(editor_type) => self.set(type_field, editor_type.to_chunks()),
+            None => {
+                self.remove(type_field);
+            }
+        }
+    }
+
     // BibLaTeX supplemental fields.
     fields! {
         abstract_: "abstract",
