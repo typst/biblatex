@@ -761,7 +761,7 @@ impl Entry {
             return Ok(());
         }
 
-        if req.needs_date {
+        if req.needs_date && self.date().is_err() {
             if let Some(date) = convert_result(crossref.date())? {
                 self.set_date(date);
             }

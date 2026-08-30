@@ -233,6 +233,100 @@ fn test_crossref() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/51.
+fn test_crossref_does_not_override_own_date() {
+    let bib = r#"
+        @inproceedings{foo,
+            author = {Max Müller},
+            title = {Lorem Ipsum et Dolor},
+            month = sep,
+            year = 2005,
+            crossref = {ref},
+        }
+        @proceedings{ref,
+            month = jan,
+            year = 2001,
+            title = {Book Title},
+            category = {baz},
+        }
+    "#;
+    let bibliography = Bibliography::parse(bib).unwrap();
+    let foo = bibliography.get("foo").unwrap();
+
+    assert_eq!(
+        foo.date().unwrap(),
+        PermissiveType::Typed(Date {
+            value: DateValue::At(Datetime {
+                year: 2005,
+                month: Some(8),
+                day: None,
+                time: None
+            }),
+            uncertain: false,
+            approximate: false,
+        })
+    );
+}
+
+#[test]
+/// Ref.: https://github.com/typst/biblatex/issues/51.
+fn test_crossref_fills_in_missing_date() {
+    let bib = r#"
+        @inproceedings{foo,
+            author = {Max Müller},
+            title = {Lorem Ipsum et Dolor},
+            crossref = {ref},
+        }
+        @proceedings{ref,
+            month = jan,
+            year = 2001,
+            title = {Book Title},
+            organization = {ACM},
+        }
+    "#;
+    let bibliography = Bibliography::parse(bib).unwrap();
+    let foo = bibliography.get("foo").unwrap();
+
+    assert_eq!(
+        foo.date().unwrap(),
+        PermissiveType::Typed(Date {
+            value: DateValue::At(Datetime {
+                year: 2001,
+                month: Some(0),
+                day: None,
+                time: None
+            }),
+            uncertain: false,
+            approximate: false,
+        })
+    );
+
+    assert_eq!(foo.organization().unwrap()[0].format_verbatim(), "ACM");
+}
+
+#[test]
+/// Ref.: https://github.com/typst/biblatex/issues/51.
+fn test_crossref_does_not_inherit_irrelevant_fields() {
+    let bib = r#"
+        @inproceedings{foo,
+            author = {Max Müller},
+            title = {Lorem Ipsum et Dolor},
+            crossref = {ref},
+        }
+        @proceedings{ref,
+            month = jan,
+            year = 2001,
+            title = {Book Title},
+            category = {baz},
+        }
+    "#;
+    let bibliography = Bibliography::parse(bib).unwrap();
+    let foo = bibliography.get("foo").unwrap();
+
+    assert!(foo.get("category").is_none());
+}
+
+#[test]
 fn linebreak_field() {
     let contents = r#"@book{key, title = {Hello
 Martin}}"#;
