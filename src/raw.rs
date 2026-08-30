@@ -398,6 +398,28 @@ impl<'s> BiblatexParser<'s> {
                 return Ok(fields);
             }
 
+            if self.field_name_contains_at() {
+                self.skip_commented_field();
+                self.s.eat_whitespace();
+
+                match self.s.peek() {
+                    Some(',') => {
+                        self.comma()?;
+                        self.s.eat_whitespace();
+                        self.comment()?;
+                    }
+                    Some('}') => return Ok(fields),
+                    _ => {
+                        return Err(ParseError::new(
+                            self.here(),
+                            ParseErrorKind::Expected(Token::Comma),
+                        ));
+                    }
+                }
+
+                continue;
+            }
+
             let (key, value) = self.field()?;
 
             self.s.eat_whitespace();
@@ -429,6 +451,56 @@ impl<'s> BiblatexParser<'s> {
         }
 
         Err(ParseError::new(self.here(), ParseErrorKind::UnexpectedEof))
+    }
+
+    /// Checks whether the upcoming field name contains an `@` anywhere
+    /// before its terminating `=`, without consuming any input.
+    fn field_name_contains_at(&mut self) -> bool {
+        let start = self.s.cursor();
+        self.s.eat_while(|c| is_id_continue(c) || c == '@');
+        let contains_at = self.s.from(start).contains('@');
+        self.s.jump(start);
+        contains_at
+    }
+
+    /// Eat a field that has been "commented out" by an `@` in its name, as
+    /// BibTeX/Biber do. Skips until the next field boundary: a comma or
+    /// closing brace at the top nesting level, leaving that delimiter
+    /// unconsumed.
+    fn skip_commented_field(&mut self) {
+        let mut depth = 0;
+
+        while let Some(c) = self.s.peek() {
+            match c {
+                '{' => {
+                    depth += 1;
+                    self.s.eat();
+                }
+                '}' if depth > 0 => {
+                    depth -= 1;
+                    self.s.eat();
+                }
+                '}' | ',' if depth == 0 => break,
+                '"' => {
+                    self.s.eat();
+                    while let Some(c) = self.s.peek() {
+                        self.s.eat();
+                        if c == '\\' {
+                            self.s.eat();
+                        } else if c == '"' {
+                            break;
+                        }
+                    }
+                }
+                '\\' => {
+                    self.s.eat();
+                    self.s.eat();
+                }
+                _ => {
+                    self.s.eat();
+                }
+            }
+        }
     }
 
     /// Eat an entry key.
@@ -670,5 +742,83 @@ mod tests {
     #[test]
     fn test_abbr() {
         assert_eq!(test_prop("author", "dec # {~12}"), "dec # \"~12\"");
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_commented_field() {
+        let file = "@article{foo,
+            title={bar},
+            @location={Mom's Basement},
+            year={2025}
+        }";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.fields.len(), 2);
+        assert_eq!(article.v.fields[0].key.v, "title");
+        assert_eq!(article.v.fields[1].key.v, "year");
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_commented_field_at_end() {
+        let file = "@article{foo,
+            title={bar},
+            year={2025},
+            @location={Mom's Basement}
+        }";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.fields.len(), 2);
+        assert_eq!(article.v.fields[0].key.v, "title");
+        assert_eq!(article.v.fields[1].key.v, "year");
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_commented_field_with_nested_braces() {
+        let file = "@article{foo, @location={Mom's, Basement}, year={2025}}";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.fields.len(), 1);
+        assert_eq!(article.v.fields[0].key.v, "year");
+    }
+
+    #[test]
+        /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_commented_field_mid_identifier() {
+        let file = "@article{foo, title={bar}, loc@ation={somewhere}, year={2025}}";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.fields.len(), 2);
+        assert_eq!(article.v.fields[0].key.v, "title");
+        assert_eq!(article.v.fields[1].key.v, "year");
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_in_value_is_not_commented() {
+        assert_eq!(
+            test_prop("title", "{someone@example.com}"),
+            "{someone@example.com}"
+        );
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_at_field_name_alone_is_commented() {
+        let file = "@article{foo, @={x}, title={bar}, year={2025}}";
+        let bt = RawBibliography::parse(file).unwrap();
+        let article = &bt.entries[0];
+        assert_eq!(article.v.fields.len(), 2);
+        assert_eq!(article.v.fields[0].key.v, "title");
+        assert_eq!(article.v.fields[1].key.v, "year");
+    }
+
+    #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/83.
+    fn test_other_illegal_char_in_field_name_is_still_an_error() {
+        let file = "@article{foo, weird#field={x}, year={2025}}";
+        assert!(RawBibliography::parse(file).is_err());
     }
 }

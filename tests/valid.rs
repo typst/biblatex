@@ -233,6 +233,34 @@ fn test_crossref() {
 }
 
 #[test]
+/// Ref.: https://github.com/typst/biblatex/issues/83.
+fn test_at_commented_field() {
+    let contents = r#"@article{foo,
+   title={bar},
+  year={2025},
+  @location={Mom's Basement}
+}"#;
+    let bibliography = Bibliography::parse(contents).unwrap();
+    let entry = bibliography.get("foo").unwrap();
+
+    assert_eq!(entry.title().unwrap().format_verbatim(), "bar");
+    assert_eq!(
+        entry.date().unwrap(),
+        PermissiveType::Typed(Date {
+            value: DateValue::At(Datetime {
+                year: 2025,
+                month: None,
+                day: None,
+                time: None
+            }),
+            uncertain: false,
+            approximate: false,
+        })
+    );
+    assert!(entry.get("location").is_none());
+}
+
+#[test]
 fn linebreak_field() {
     let contents = r#"@book{key, title = {Hello
 Martin}}"#;
