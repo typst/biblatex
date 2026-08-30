@@ -663,6 +663,27 @@ mod tests {
     }
 
     #[test]
+    /// Ref.: https://github.com/typst/biblatex/issues/32.
+    /// A single `@string{...}` block may define several abbreviations at
+    /// once, comma-separated, just like a regular entry's field list.
+    fn test_wide_string_syntax() {
+        let bt = RawBibliography::parse(
+            "@string{
+                anch-ie = {Angew.~Chem. Int.~Ed.},
+                cup     = {Cambridge University Press},
+                dtv     = {Deutscher Taschenbuch-Verlag}
+            }",
+        )
+        .unwrap();
+
+        assert_eq!(
+            bt.abbreviations.iter().map(|p| p.key.v).collect::<Vec<_>>(),
+            vec!["anch-ie", "cup", "dtv"]
+        );
+        assert_eq!(format(&bt.abbreviations[1].value.v), "{Cambridge University Press}");
+    }
+
+    #[test]
     fn test_escape() {
         assert_eq!(test_prop("author", "{Mister A\\}\"B\"}"), "{Mister A\\}\"B\"}");
     }
