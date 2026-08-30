@@ -209,9 +209,9 @@ fn test_synthesized_entry() {
         given_initials: None,
     }];
 
-    e.set_author(PersonList::Normal(brian.clone()));
+    e.set_author(PersonList::new(brian.clone(), false));
 
-    assert_eq!(Ok(PersonList::Normal(brian)), e.author());
+    assert_eq!(Ok(PersonList::new(brian, false)), e.author());
 }
 
 #[test]
@@ -302,16 +302,19 @@ fn test_editor_types() {
     assert_eq!(
         video.editors(),
         Ok(vec![(
-            PersonList::Normal(vec![Person {
-                name: "Acerola".into(),
-                given_name: "".into(),
-                prefix: "".into(),
-                suffix: "".into(),
-                use_prefix: None,
-                id: None,
-                prefix_initials: None,
-                given_initials: None,
-            }]),
+            PersonList::new(
+                vec![Person {
+                    name: "Acerola".into(),
+                    given_name: "".into(),
+                    prefix: "".into(),
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
+                }],
+                false
+            ),
             EditorType::Director
         )])
     );
@@ -320,16 +323,19 @@ fn test_editor_types() {
     assert_eq!(
         music.editors(),
         Ok(vec![(
-            PersonList::Normal(vec![Person {
-                name: "Mozart".into(),
-                given_name: "Wolfgang Amadeus".into(),
-                prefix: "".into(),
-                suffix: "".into(),
-                use_prefix: None,
-                id: None,
-                prefix_initials: None,
-                given_initials: None,
-            }]),
+            PersonList::new(
+                vec![Person {
+                    name: "Mozart".into(),
+                    given_name: "Wolfgang Amadeus".into(),
+                    prefix: "".into(),
+                    suffix: "".into(),
+                    use_prefix: None,
+                    id: None,
+                    prefix_initials: None,
+                    given_initials: None,
+                }],
+                false
+            ),
             EditorType::Unknown("pianist".into()),
         )])
     );
@@ -339,29 +345,35 @@ fn test_editor_types() {
         audio.editors(),
         Ok(vec![
             (
-                PersonList::Normal(vec![Person {
-                    name: "Smith".into(),
-                    given_name: "Stacey Vanek".into(),
-                    prefix: "".into(),
-                    suffix: "".into(),
-                    use_prefix: None,
-                    id: None,
-                    prefix_initials: None,
-                    given_initials: None,
-                }]),
+                PersonList::new(
+                    vec![Person {
+                        name: "Smith".into(),
+                        given_name: "Stacey Vanek".into(),
+                        prefix: "".into(),
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
+                    }],
+                    false
+                ),
                 EditorType::Unknown("host".into()),
             ),
             (
-                PersonList::Normal(vec![Person {
-                    name: "Plotkin".into(),
-                    given_name: "Stanley".into(),
-                    prefix: "".into(),
-                    suffix: "".into(),
-                    use_prefix: None,
-                    id: None,
-                    prefix_initials: None,
-                    given_initials: None,
-                }]),
+                PersonList::new(
+                    vec![Person {
+                        name: "Plotkin".into(),
+                        given_name: "Stanley".into(),
+                        prefix: "".into(),
+                        suffix: "".into(),
+                        use_prefix: None,
+                        id: None,
+                        prefix_initials: None,
+                        given_initials: None,
+                    }],
+                    false
+                ),
                 EditorType::Unknown("participant".into()),
             )
         ])

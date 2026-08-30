@@ -33,31 +33,27 @@ pub struct Person {
 /// A list of people named in a BibLaTeX name field.
 ///
 /// BibLaTeX permits a name list to end in the special "and others" marker. That marker is represented separately from the people in the list, rather than as a person whose family name is `others`.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum PersonList {
-    /// A complete list of people.
-    Normal(Vec<Person>),
-    /// A truncated list of people, followed by BibLaTeX's "and others" marker.
-    AndOthers(Vec<Person>),
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
+pub struct PersonList {
+    persons: Vec<Person>,
+    and_others: bool,
 }
 
 impl PersonList {
+    /// Creates a new list of people, optionally ending in BibLaTeX's "and
+    /// others" marker.
+    pub fn new(persons: Vec<Person>, and_others: bool) -> Self {
+        Self { persons, and_others }
+    }
+
     /// Returns the people explicitly named in this list.
     pub fn people(&self) -> &[Person] {
-        match self {
-            Self::Normal(people) | Self::AndOthers(people) => people,
-        }
+        &self.persons
     }
 
     /// Returns whether this list ends in BibLaTeX's "and others" marker.
     pub fn has_and_others(&self) -> bool {
-        matches!(self, Self::AndOthers(_))
-    }
-}
-
-impl Default for PersonList {
-    fn default() -> Self {
-        Self::Normal(Vec::new())
+        self.and_others
     }
 }
 
@@ -389,7 +385,7 @@ impl Type for PersonList {
         let people =
             names.into_iter().map(|subchunks| Person::parse(&subchunks)).collect();
 
-        Ok(if has_and_others { Self::AndOthers(people) } else { Self::Normal(people) })
+        Ok(Self::new(people, has_and_others))
     }
 
     fn to_chunks(&self) -> Chunks {
