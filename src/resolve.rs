@@ -195,9 +195,14 @@ impl<'s> ContentParser<'s> {
             && first_char != '-'
             && is_single_char_func(first_char, ws)
         {
-            let idx = self.s.cursor();
-            self.s.eat();
-            Some(self.s.from(idx).into())
+            if first_char != '\\' && self.s.peek() == Some('\\') {
+                // The accent applies to the next command's output, as in `\'\i`.
+                Some(self.backslash()?)
+            } else {
+                let idx = self.s.cursor();
+                self.s.eat();
+                Some(self.s.from(idx).into())
+            }
         } else if !ws && self.s.eat_if('{') {
             let mut depth = 1;
             let idx = self.s.cursor();
@@ -569,6 +574,12 @@ mod tests {
 
         let res = parse_field("", &field, &HashMap::new()).unwrap();
         assert_eq!(res[0].v, N("b̲ ç ạ ő ą å ă ǎ"));
+
+        let field =
+            vec![z(RawChunk::Normal(r#"Garc\'\i a, Mart\'\i{}nez and na\"\i ve"#))];
+
+        let res = parse_field("", &field, &HashMap::new()).unwrap();
+        assert_eq!(res[0].v, N("García, Martínez and naïve"));
     }
 
     #[test]
